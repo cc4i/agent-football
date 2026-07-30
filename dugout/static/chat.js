@@ -13,6 +13,8 @@ const VERB = {
 };
 
 let lastActor = null;
+let eventCount = 0;
+let tokenCount = null;
 
 const label = (actor) =>
   actor.startsWith('subagent:') ? actor.slice(9).replace('-tuner', '') : (ACTOR_LABEL[actor] || actor);
@@ -21,6 +23,8 @@ const actorClass = (actor) =>
   actor.startsWith('subagent:') ? 'a-agy' : (ACTOR_CLASS[actor] || 'a-agy');
 
 function addEvent(actor, minute, node) {
+  document.querySelector('.empty-state')?.remove();
+
   const ev = document.createElement('div');
   ev.className = `ev ${actorClass(actor)}`;
   const same = actor === lastActor;
@@ -37,6 +41,9 @@ function addEvent(actor, minute, node) {
   ev.append(minDiv, bodyDiv);
   log.append(ev);
   log.scrollTop = log.scrollHeight;
+
+  eventCount++;
+  document.querySelector('#event-count').textContent = `${eventCount} event${eventCount === 1 ? '' : 's'}`;
 }
 
 const el = (tag, cls, text) => {
@@ -59,20 +66,25 @@ function toolCallNode(payload) {
 async function renderStages() {
   const data = await (await fetch('/stages')).json();
   stagesEl.replaceChildren(...data.map((s, i) => {
-    const li = el('li', `stage ${s.done ? 'done' : (data.slice(0, i).every(p => p.done) ? 'live' : 'locked')}`);
+    const isLive = !s.done && data.slice(0, i).every(p => p.done);
+    const li = el('li', `stage ${s.done ? 'done' : (isLive ? 'live' : 'locked')}`);
 
     const tile = el('div', 'tile', String(i + 1));
     const content = el('div');
     const h3 = el('h3', null, s.title);
     const p = el('p', null, s.blurb);
 
-    const suggest = el('div', 'suggest');
-    const suggestSpan = el('span', null, 'Suggested');
-    const suggestQ = el('q', null, s.suggested);
-    suggest.append(suggestSpan, suggestQ);
-    suggest.onclick = () => { input.value = s.suggested; input.focus(); };
+    content.append(h3, p);
 
-    content.append(h3, p, suggest);
+    if (isLive) {
+      const suggest = el('div', 'suggest');
+      const suggestSpan = el('span', null, 'Suggested');
+      const suggestQ = el('q', null, s.suggested);
+      suggest.append(suggestSpan, suggestQ);
+      suggest.onclick = () => { input.value = s.suggested; input.focus(); };
+      content.append(suggest);
+    }
+
     li.append(tile, content);
     return li;
   }));
@@ -82,6 +94,7 @@ async function checkHealth() {
   const { agent, game } = await (await fetch('/health')).json();
   document.body.classList.toggle('is-blocked', !agent.ok);
   if (!agent.ok) document.querySelector('.blocked p').textContent = agent.detail;
+  document.querySelector('#agy-status').textContent = agent.ok ? '0.1.9 · ready' : '0.1.9 · offline';
   for (const [name, up] of Object.entries(game)) {
     document.querySelector(`.svc[data-service="${name}"]`)
       ?.classList.toggle('down', !up);
@@ -130,6 +143,12 @@ async function send() {
         textNode.textContent += payload;
       }
       else if (kind === 'error') { addEvent(actor, minute, el('pre', 'out bad', payload)); }
+      else if (kind === 'usage') {
+        if (payload !== null) {
+          tokenCount = payload;
+          document.querySelector('#token-count').textContent = `${(tokenCount / 1000).toFixed(1)}k tokens`;
+        }
+      }
       else if (kind === 'stage_done') { renderStages(); }
     }
   }

@@ -14,7 +14,7 @@
 
   <header class="touchline">
     <div class="mark"><b>Dugout</b><span>Technical area</span></div>
-    <div class="agy-chip"><i></i><b>Antigravity</b><span>0.1.9 · working</span></div>
+    <div class="agy-chip"><i></i><b>Antigravity</b><span id="agy-status">0.1.9 · ready</span></div>
     <div class="vr"></div>
     <div class="rig">
       <span class="lbl">Game</span>
@@ -40,7 +40,7 @@
 
       <ol class="stages"></ol>
 
-      <div class="sheet-ft"><span>58 events</span><span>24.1k tokens</span></div>
+      <div class="sheet-ft"><span id="event-count">0 events</span><span id="token-count">-</span></div>
     </aside>
 
     <div class="log-wrap">
@@ -49,7 +49,12 @@
         <em>who acted · when · stamped to the match clock</em>
       </div>
 
-      <div class="log"></div>
+      <div class="log">
+        <div class="empty-state">
+          <h3>Nothing has happened yet</h3>
+          <p>Send the suggested line from the team sheet or type your own.</p>
+        </div>
+      </div>
 
       <div class="composer">
         <div class="acting">

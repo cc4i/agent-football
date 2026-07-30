@@ -101,6 +101,10 @@ body::before{
 .log-hd h2{margin:0;font-family:var(--sheet);font-weight:600;font-size:11px;letter-spacing:.26em;text-transform:uppercase;color:var(--chalk-3)}
 .log-hd em{font-family:var(--data);font-size:10.5px;color:var(--chalk-3);font-style:normal;margin-left:auto}
 
+.empty-state{padding:0 30px 18px var(--gutter)}
+.empty-state h3{margin:0;font-family:var(--sheet);font-weight:600;font-size:14px;letter-spacing:.08em;text-transform:uppercase;color:var(--chalk-3)}
+.empty-state p{margin:6px 0 0;font-size:14px;line-height:1.5;color:var(--chalk-3);font-weight:300}
+
 /* signature: the gutter says WHEN and WHO, and its rule is tinted by actor */
 .ev{display:grid;grid-template-columns:var(--gutter) 1fr;align-items:start}
 .min{

@@ -124,3 +124,6 @@ def test_index_has_no_mocked_trajectory_left(monkeypatch):
     assert "generate_team_avatars" not in body
     assert "handoff" not in body
     assert "—" not in body
+    assert "58 events" not in body
+    assert "24.1k tokens" not in body
+    assert "· working" not in body
