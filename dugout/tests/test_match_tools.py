@@ -1,4 +1,5 @@
 import json
+import os
 import time
 
 import pytest
@@ -52,7 +53,6 @@ def test_read_player_stats_rejects_an_unknown_role():
 
 
 def test_status_reports_game_not_running_when_the_file_is_stale(tmp_path, monkeypatch):
-    import os
     f = tmp_path / "status.json"
     f.write_text(json.dumps({"score1": 1, "score2": 0, "gameActive": True}))
     old = time.time() - (match.STATUS_MAX_AGE_SEC + 30)

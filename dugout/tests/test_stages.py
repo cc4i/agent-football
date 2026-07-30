@@ -19,7 +19,7 @@ def fake_fs(tmp_path, monkeypatch):
         (state / f"{name}_baseline.json").write_text(payload)
     monkeypatch.setattr(stages, "SPRITE_DIR", sprites)
     monkeypatch.setattr(stages, "PLAYER_STATE_DIR", state)
-    monkeypatch.setattr(stages, "STATUS_FILE", tmp_path / "status.json")
+    monkeypatch.setattr(stages.match, "STATUS_FILE", tmp_path / "status.json")
     return tmp_path
 
 
