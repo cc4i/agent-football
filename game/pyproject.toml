@@ -1,0 +1,20 @@
+[project]
+name = "agent-football-game"
+version = "0.1.0"
+description = "Multi-agent 2D soccer simulation: ADK coach/captain agents and MCP condition tools."
+requires-python = ">=3.10"
+dependencies = [
+    # A2A protocol (coach <-> captain) and MCP tools (player injury/substitution)
+    "google-adk[a2a]==2.1.0",
+    # mcp 2.x drops mcp.shared.session, which google-adk 2.1.0's McpToolset imports.
+    # ADK swallows the resulting ImportError, so the breakage shows up as a silently
+    # missing McpToolset rather than a stack trace.
+    "mcp<2",
+    "python-dotenv",
+    "uvicorn",
+]
+
+# The `agents` package is imported from the working directory (`adk web .` scans
+# game/ for the agent app), so there is nothing to build or install.
+[tool.uv]
+package = false
