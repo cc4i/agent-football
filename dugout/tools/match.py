@@ -22,13 +22,12 @@ def status_is_fresh() -> bool:
         return False
 
 
-def get_match_status() -> dict:
-    """Return the live score and clock, or an error the agent can act on.
+def read_status() -> dict:
+    """The live score and clock, with no side effects.
 
-    The status file is written by the agent's own Playwright script, which polls
-    window.__futsal.status(). No file means no match is being played.
+    The header polls this several times a minute, so it must stay out of
+    CALLED: the quest tracks what the agent did, not what the page asked for.
     """
-    CALLED.add("get_match_status")
     if not status_is_fresh():
         return {"error": "game_not_running"}
     try:
@@ -38,6 +37,16 @@ def get_match_status() -> dict:
     if not isinstance(payload, dict):
         return {"error": "game_not_running"}
     return payload
+
+
+def get_match_status() -> dict:
+    """Return the live score and clock, or an error the agent can act on.
+
+    The status file is written by the agent's own Playwright script, which polls
+    window.__futsal.status(). No file means no match is being played.
+    """
+    CALLED.add("get_match_status")
+    return read_status()
 
 
 def read_player_stats(role: str | None = None) -> dict:

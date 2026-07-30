@@ -2,6 +2,7 @@ const log = document.querySelector('.log');
 const stagesEl = document.querySelector('.stages');
 const input = document.querySelector('#say');
 const sendBtn = document.querySelector('.send');
+const haltBtn = document.querySelector('.halt');
 const acting = document.querySelector('.acting');
 
 const ACTOR_CLASS = { user: 'a-you', antigravity: 'a-agy' };
@@ -15,6 +16,8 @@ const VERB = {
 let lastActor = null;
 let eventCount = 0;
 let tokenCount = null;
+let matchClock = null;
+let inFlight = null;
 
 const label = (actor) =>
   actor.startsWith('subagent:') ? actor.slice(9).replace('-tuner', '') : (ACTOR_LABEL[actor] || actor);
@@ -52,6 +55,17 @@ const el = (tag, cls, text) => {
   if (text !== undefined) n.textContent = text;
   return n;
 };
+
+function richText(cls, source) {
+  // Thoughts arrive as markdown. Built as DOM nodes, never innerHTML: this is
+  // model output and may contain anything.
+  const p = el('p', cls);
+  for (const [i, part] of String(source).split('**').entries()) {
+    if (!part) continue;
+    p.append(i % 2 ? el('b', null, part) : document.createTextNode(part));
+  }
+  return p;
+}
 
 function toolCallNode(payload) {
   const wrap = el('div', 'act');
@@ -91,7 +105,7 @@ async function renderStages() {
 }
 
 async function checkHealth() {
-  const { agent, game } = await (await fetch('/health')).json();
+  const { agent, game, match } = await (await fetch('/health')).json();
   document.body.classList.toggle('is-blocked', !agent.ok);
   if (!agent.ok) document.querySelector('.blocked p').textContent = agent.detail;
   document.querySelector('#agy-status').textContent = agent.ok ? '0.1.9 · ready' : '0.1.9 · offline';
@@ -99,65 +113,107 @@ async function checkHealth() {
     document.querySelector(`.svc[data-service="${name}"]`)
       ?.classList.toggle('down', !up);
   }
+  showScoreline(match);
 }
+
+function showScoreline(match) {
+  const box = document.querySelector('.scoreline');
+  const live = match && !match.error;
+  box.hidden = !live;
+  if (!live) { matchClock = null; return; }
+  matchClock = match.matchTime ?? null;
+  box.replaceChildren(
+    el('b', null, `${match.score1 ?? 0}`),
+    el('span', 'vs', 'v'),
+    el('b', null, `${match.score2 ?? 0}`),
+    el('em', null, minuteLabel()));
+}
+
+const minuteLabel = () =>
+  matchClock === null ? "--′" : `${Math.floor(matchClock / 60)}′`;
 
 function setWorking(on, detail) {
   acting.style.display = on ? 'flex' : 'none';
   if (on) acting.querySelector('code').textContent = detail || '';
+  haltBtn.disabled = !on;
+  sendBtn.disabled = on;
 }
 
 async function send() {
   const message = input.value.trim();
-  if (!message) return;
+  if (!message || inFlight) return;
   input.value = '';
+  inFlight = new AbortController();
   setWorking(true, 'thinking');
 
-  const res = await fetch('/chat', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message }),
-  });
+  let res;
+  try {
+    res = await fetch('/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message }),
+      signal: inFlight.signal,
+    });
+  } catch {
+    inFlight = null;
+    setWorking(false);
+    return;
+  }
 
   const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
   let buffer = '';
   let textNode = null;
 
-  for (;;) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buffer += value;
-    const frames = buffer.split('\n\n');
-    buffer = frames.pop();
-    for (const frame of frames) {
-      const kind = frame.match(/^event: (.+)$/m)?.[1];
-      const data = frame.match(/^data: (.+)$/m)?.[1];
-      if (!kind || !data) continue;
-      const { actor, payload } = JSON.parse(data);
-      const minute = '--′';
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += value;
+      const frames = buffer.split('\n\n');
+      buffer = frames.pop();
+      for (const frame of frames) {
+        const kind = frame.match(/^event: (.+)$/m)?.[1];
+        const data = frame.match(/^data: (.+)$/m)?.[1];
+        if (!kind || !data) continue;
+        const { actor, payload } = JSON.parse(data);
+        const minute = minuteLabel();
 
-      if (kind === 'user') { addEvent(actor, minute, el('p', 'say you', payload)); }
-      else if (kind === 'thought') { addEvent(actor, minute, el('p', 'thought', payload)); textNode = null; }
-      else if (kind === 'tool_call') { addEvent(actor, minute, toolCallNode(payload)); textNode = null; }
-      else if (kind === 'text') {
-        if (!textNode) { textNode = el('p', 'say', ''); addEvent(actor, minute, textNode); }
-        textNode.textContent += payload;
-      }
-      else if (kind === 'error') { addEvent(actor, minute, el('pre', 'out bad', payload)); }
-      else if (kind === 'usage') {
-        const total = payload?.total;
-        if (typeof total === 'number' && isFinite(total)) {
-          tokenCount = total;
-          document.querySelector('#token-count').textContent = `${(tokenCount / 1000).toFixed(1)}k tokens`;
+        if (kind === 'user') { addEvent(actor, minute, el('p', 'say you', payload)); }
+        else if (kind === 'thought') { addEvent(actor, minute, richText('thought', payload)); textNode = null; }
+        else if (kind === 'tool_call') { addEvent(actor, minute, toolCallNode(payload)); textNode = null; }
+        else if (kind === 'text') {
+          if (!textNode) { textNode = el('p', 'say', ''); addEvent(actor, minute, textNode); }
+          textNode.textContent += payload;
         }
+        else if (kind === 'error') { addEvent(actor, minute, el('pre', 'out bad', payload)); }
+        else if (kind === 'usage') {
+          const total = payload?.total;
+          if (typeof total === 'number' && isFinite(total)) {
+            tokenCount = total;
+            document.querySelector('#token-count').textContent = `${(tokenCount / 1000).toFixed(1)}k tokens`;
+          }
+        }
+        else if (kind === 'stage_done') { renderStages(); }
       }
-      else if (kind === 'stage_done') { renderStages(); }
     }
+  } catch {
+    addEvent('antigravity', minuteLabel(), el('p', 'say', 'Halted.'));
   }
+
+  inFlight = null;
   setWorking(false);
 }
 
+function halt() {
+  // Aborting closes the stream, which closes the server generator, which
+  // cancels the SDK turn. Nothing to do server side.
+  inFlight?.abort();
+}
+
 sendBtn.onclick = send;
+haltBtn.onclick = halt;
 input.onkeydown = (e) => { if (e.key === 'Enter') send(); };
 renderStages();
 checkHealth();
+setInterval(checkHealth, 4000);
 setWorking(false);

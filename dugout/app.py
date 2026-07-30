@@ -21,6 +21,7 @@ from session import (
     stop_agent,
 )
 from stages import stage_status
+from tools.match import read_status
 
 load_dotenv()
 
@@ -82,7 +83,8 @@ def index():
 
 @app.get("/health")
 def health():
-    return {"agent": agent_health(), "game": game_services()}
+    return {"agent": agent_health(), "game": game_services(),
+            "match": read_status()}
 
 
 @app.get("/stages")
@@ -112,6 +114,11 @@ async def _turn(message: str):
             yield _frame(event["kind"], event["actor"], payload)
     except Exception as exc:
         yield _frame("error", "antigravity", str(exc))
+    finally:
+        # Halt closes the connection, which closes this generator. Without the
+        # cancel the SDK keeps working on a turn nobody is reading. A no-op
+        # once the turn has finished on its own.
+        await response.cancel()
 
 
 @app.post("/chat")

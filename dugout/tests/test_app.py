@@ -6,6 +6,13 @@ from fastapi.testclient import TestClient
 import app as app_module
 
 
+class StubResponse:
+    """ChatResponse exposes cancel(); _turn calls it when the client leaves."""
+
+    async def cancel(self):
+        pass
+
+
 def client(monkeypatch, **overrides):
     for name, value in overrides.items():
         monkeypatch.setattr(app_module, name, value)
@@ -77,7 +84,7 @@ def test_chat_streams_every_event_kind_with_actor_and_payload(monkeypatch):
 
     class FakeAgent:
         async def chat(self, message):
-            return object()
+            return StubResponse()
 
     async def fake_multiplex(response):
         yield {"kind": "thought", "actor": "antigravity", "data": "checking the score"}
@@ -110,7 +117,7 @@ def test_chat_streams_every_event_kind_with_actor_and_payload(monkeypatch):
 async def test_the_stream_closes_cleanly_when_the_client_disconnects(monkeypatch):
     class FakeAgent:
         async def chat(self, message):
-            return object()
+            return StubResponse()
 
     async def fake_multiplex(response):
         yield {"kind": "thought", "actor": "antigravity", "data": "one"}
@@ -130,7 +137,7 @@ def test_turn_awaits_chat_before_streaming(monkeypatch):
     # Agent.chat is `async def` and resolves to the ChatResponse holding the
     # streams. Handing the bare coroutine to the multiplexer produces three
     # "'coroutine' object has no attribute ..." frames and no trajectory.
-    resolved = object()
+    resolved = StubResponse()
     seen = {}
 
     class FakeAgent:
@@ -173,7 +180,7 @@ def test_usage_payload_is_converted_to_a_plain_total(monkeypatch):
 
     class FakeAgent:
         async def chat(self, message):
-            return object()
+            return StubResponse()
 
     async def fake_multiplex(response):
         yield {"kind": "usage", "actor": "antigravity", "data": FakeUsage()}
@@ -191,7 +198,7 @@ def test_usage_payload_is_converted_to_a_plain_total(monkeypatch):
 def test_usage_payload_of_none_serialises_without_error(monkeypatch):
     class FakeAgent:
         async def chat(self, message):
-            return object()
+            return StubResponse()
 
     async def fake_multiplex(response):
         yield {"kind": "usage", "actor": "antigravity", "data": None}
@@ -205,3 +212,39 @@ def test_usage_payload_of_none_serialises_without_error(monkeypatch):
     frame = next(b for b in body.split("\n\n") if "event: usage" in b)
     data = json.loads(next(l[6:] for l in frame.splitlines() if l.startswith("data: ")))
     assert data["payload"] is None
+
+
+def test_health_includes_the_live_match(monkeypatch):
+    c = client(monkeypatch,
+               agent_health=lambda: {"ok": True, "detail": "ready"},
+               game_services=lambda: {"pitch": True, "coach": True, "captain": True},
+               read_status=lambda: {"score1": 2, "score2": 1, "matchTime": 176})
+    assert c.get("/health").json()["match"] == {
+        "score1": 2, "score2": 1, "matchTime": 176}
+
+
+async def test_a_client_disconnect_cancels_the_agent_turn(monkeypatch):
+    # Halt aborts the fetch. Without this the SDK keeps burning tokens on a
+    # turn nobody is listening to.
+    cancelled = []
+
+    class FakeResponse:
+        async def cancel(self):
+            cancelled.append(True)
+
+    class FakeAgent:
+        async def chat(self, message):
+            return FakeResponse()
+
+    async def fake_multiplex(response):
+        yield {"kind": "thought", "actor": "antigravity", "data": "one"}
+        yield {"kind": "thought", "actor": "antigravity", "data": "two"}
+
+    monkeypatch.setattr(app_module, "get_agent", lambda: FakeAgent())
+    monkeypatch.setattr(app_module, "multiplex", fake_multiplex)
+    monkeypatch.setattr(app_module, "stage_status", lambda: [])
+
+    gen = app_module._turn("hello")
+    await gen.__anext__()
+    await gen.aclose()
+    assert cancelled == [True]
