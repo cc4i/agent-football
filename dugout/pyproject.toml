@@ -1,5 +1,5 @@
 [project]
-name = "futsal-worldcup-branding"
+name = "futsal-worldcup-dugout"
 version = "0.1.0"
 description = "Onboarding portal: generates team spritesheets and player profiles for the simulator."
 requires-python = ">=3.10"

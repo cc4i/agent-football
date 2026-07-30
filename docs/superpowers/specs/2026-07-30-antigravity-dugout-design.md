@@ -1,13 +1,21 @@
-# Rebuild `branding/` as an Antigravity CLI 2.0 showcase
+# Rebuild `dugout/` as an Antigravity CLI 2.0 showcase
 
 Date: 2026-07-30
 Status: Approved, ready for implementation planning
 
 ## Purpose
 
-Replace the current `branding/` form-based avatar generator with a chat-driven
+Replace the current form-based avatar generator with a chat-driven
 application that showcases the Antigravity CLI 2.0 agent. The agent, not the
-Python backend, does the work:
+Python backend, does the work.
+
+The directory is renamed `branding/` -> `dugout/` as part of this work, because
+it no longer only handles branding: the dugout is where you kit out the team,
+send them onto the pitch, watch the match and shout instructions, which is
+exactly the five stages below. `coach`, `captain` and `manager` were all
+unavailable as names, being taken by ADK agents in `game/agents/`.
+
+What the agent does:
 
 1. Generates player avatars with Gemini image generation and rebrands the team.
 2. Writes and runs its own Playwright script to play the Futsal WorldCup game.
@@ -81,7 +89,7 @@ Three processes.
 +-------------------------------------------------------------------+
         ^ Playwright drives              ^ edits json
         |                                |
-+-- branding/ :8002 (rebuilt) --------------------------------------+
++-- dugout/ :8002 (rebuilt) --------------------------------------+
 |  FastAPI  --serves-->  chat UI (SSE)                              |
 |     |                                                             |
 |     +-- embeds Antigravity Agent (in-process SDK)                 |
@@ -121,7 +129,7 @@ LocalAgentConfig(
     tools=[generate_team_avatars, get_match_status, read_player_stats],
     subagents=[...four role tuners...],
     workspaces=[REPO_ROOT],
-    vertex=True, project=..., location=...,   # from branding/.env
+    vertex=True, project=..., location=...,   # from dugout/.env
 )
 ```
 
@@ -264,18 +272,18 @@ restores on refresh or rematch, so a wrecked squad is one page reload from clean
 
 ## Setup
 
-`branding/pyproject.toml` gains two dependencies:
+`dugout/pyproject.toml` gains two dependencies:
 
 - `google-antigravity==0.1.9`, **pinned exactly**. This is a 0.x SDK with ten
   releases, and the surface we depend on (`.thoughts`, `.tool_calls`,
   `SubagentConfig`) is young. An unpinned range means the demo breaks silently
   on a fresh install.
-- `playwright`, because the agent's authored scripts run inside branding's venv.
+- `playwright`, because the agent's authored scripts run inside the dugout venv.
 
-`branding/run.sh` gains a preflight that checks for `agy` login and runs
+`dugout/run.sh` gains a preflight that checks for `agy` login and runs
 `playwright install chromium`.
 
-Credentials reuse the existing `branding/.env` (`GOOGLE_CLOUD_PROJECT`,
+Credentials reuse the existing `dugout/.env` (`GOOGLE_CLOUD_PROJECT`,
 `GOOGLE_CLOUD_LOCATION`).
 
 ## Testing

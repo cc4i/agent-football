@@ -360,7 +360,7 @@ wheels = [
 ]
 
 [[package]]
-name = "futsal-worldcup-branding"
+name = "futsal-worldcup-dugout"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
