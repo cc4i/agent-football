@@ -42,3 +42,11 @@ def test_no_em_dash_in_any_skill():
     for s in load_skills():
         assert "—" not in s["body"]
         assert "—" not in s["description"]
+
+
+def test_the_skill_carries_the_measured_plan():
+    # The plan is not a guess: it was measured at 4-1-3 against 0-1-7 for the
+    # shipped squad. If someone edits the numbers, they need to re-measure.
+    body = next(s for s in load_skills() if s["name"] == "winning-the-match")["body"]
+    for value in ("defensiveWorkRate", "tackleCooldown", "0.95", "4 wins"):
+        assert value in body

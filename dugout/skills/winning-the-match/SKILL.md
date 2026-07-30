@@ -77,29 +77,41 @@ Work backwards from the net. A shot only exists if every one of these holds:
 The lesson from step 4: do not send the whole team forward. Raise the
 forward's `attackPositioning` and leave the defender's low.
 
-## Where to start
+## The plan that actually wins
 
 The midfielder is the shipped squad's weakest link at `speed: 0.5`, or 118
 px/s against an opponent midfielder doing 180. The middle is lost before
 anything else goes wrong, which is why the game feels like constant pressure.
 
-Each tuner changes at most three attributes per call, so spend them well.
+Each tuner changes at most three attributes per call. These twelve were
+measured over eight matches each and take the team from **0 wins, 1 draw, 7
+losses** to **4 wins, 1 draw, 3 losses**, with goals conceded falling from 12
+to 8. Start here, then adjust.
 
-**Forward** - the one that puts the ball in the net.
-`speed` 0.95, `shotRange` 0.9 or 1.0, `shotPower` 0.95. If it still will not
-shoot, drop `passProbability` to 0.3.
+| role | change to | and to | and to |
+|---|---|---|---|
+| forward | `speed` 0.95 | `shotRange` 1.0 | `shotPower` 0.95 |
+| midfielder | `speed` 0.85 | `decisionDelay` 60 | `defensiveWorkRate` 0.9 |
+| defender | `defensePositioning` 0.95 | `interceptionRadius` 0.95 | `tackleCooldown` 200 |
+| goalkeeper | `trackingSpeed` 0.9 | `attackPositioning` 0.0 | |
 
-**Midfielder** - fix this before anything else.
-`speed` 0.85, `decisionDelay` 60, then either `passProbability` 0.8 to feed
-the forward or `defensiveWorkRate` 0.9 to smother the middle.
+Why each one:
 
-**Defender** - only when actually being overrun.
-`defensePositioning` 0.9, `interceptionRadius` 0.9, `tackleCooldown` 300.
-Leave `attackPositioning` low so the forward keeps a clear lane.
+- The forward is the only player who reliably shoots, so it gets the reach
+  and the power. `shotRange` 1.0 is 700px, matching the opponent's forward.
+- The midfielder's `defensiveWorkRate` is what wins the middle back. Raising
+  `passProbability` here instead was tried and is worse: it scores more, 13
+  goals against 9, but concedes 18 against 8 and loses the match. An open
+  game is not a won game.
+- `tackleCooldown` is milliseconds between tackles, so 200 means the defender
+  can challenge again almost immediately.
+- The keeper's `trackingSpeed` is a per-frame lerp toward the ball, so higher
+  genuinely is better. Keep its `attackPositioning` at 0: every 0.1 pulls it
+  18px off its line and opens the net behind it.
 
-**Goalkeeper** - `trackingSpeed` is a per-frame lerp toward the ball, so
-higher genuinely is better; 0.9 keeps it square. Keep `attackPositioning`
-near 0: every 0.1 pulls it 18px off its line and opens the net behind it.
+Leave the defender's `attackPositioning` low whatever else you do. Pushing
+everyone forward gives the forward's shots more teammates to be intercepted
+by, per step 4 above.
 
 ## Read the game before you touch it
 
