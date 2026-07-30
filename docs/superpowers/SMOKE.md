@@ -4,7 +4,14 @@ Deliberately manual. Agent output is nondeterministic and a flaky test in a
 workshop repo is worse than no test.
 
 Prerequisites: `agy login` completed, `dugout/.env` has GOOGLE_CLOUD_PROJECT
-and GOOGLE_CLOUD_LOCATION.
+and GOOGLE_CLOUD_LOCATION, and `game/.env` exists too (`cp game/.env.example
+game/.env`). The game's own ADK coach needs its own credentials. Without them
+the pitch still renders and steps 1 to 8 all pass, but every call into the
+coach fails with "No API key was provided", which silently breaks the baseline
+backup and restore in step 9.
+
+The agent runs shell commands unrestricted, by design, so that it can launch
+the Playwright script it writes in stage 2. Run this on your own machine.
 
 1. `cd game && ./run.sh`, wait for Vite on :5173.
 2. `cd dugout && ./run.sh`, open http://localhost:8002.
@@ -31,10 +38,25 @@ and GOOGLE_CLOUD_LOCATION.
    - /tmp/futsal_status.json appears and updates.
 7. Send "How are we doing?" and confirm it reports a real score.
 8. Send "They keep breaking through the middle. Tighten it up."
-   - Four subagents run. Each tool call is attributed to its own role.
-   - Attribute changes land in the match within about two seconds.
+   - Four subagents run. Each tool call is attributed to its own role, so the
+     gutter reads DEFENDER, MIDFIELDER, FORWARD, GOALKEEPER rather than
+     Antigravity four times.
+   - All four role files are rewritten within a few seconds of each other.
    - Any out-of-range attempt comes back as a violation list, not a crash.
-9. Refresh http://localhost:5173: baselines restore and the squad is clean again.
+   - A match lasts three minutes and a tuning turn takes longer than that, so
+     expect the match to have ended by the time the changes land. To watch
+     them take effect live, ask for another kick-off first and keep the turn
+     short.
+9. Refresh http://localhost:5173 in the tab you already had open: baselines
+   restore and the squad is clean again. Two things to know. It must be the
+   same tab, because the restore is keyed on sessionStorage and a new tab or
+   window counts as a first load, which backs the current attributes up as the
+   new baseline instead. And it goes through the game's ADK coach, so it needs
+   game/.env; check the browser console if the files do not change.
 
-Failure to check on purpose: stop the game stack and send a message. The agent
-should report game_not_running and tell you to run game/run.sh.
+Failure to check on purpose: stop the game stack and send a message. The three
+game dots go red within about four seconds, since the header polls rather than
+reading once at load. The agent has shell access, so it does not just report
+game_not_running: it reads the logs, restarts the Vite server and the match,
+and carries on. That self-repair is worth watching. It brings back the pitch
+only, so the coach and captain dots stay red until you run game/run.sh.

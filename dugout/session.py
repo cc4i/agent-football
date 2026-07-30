@@ -112,6 +112,15 @@ def _policies():
     and stage 2 is the agent running its own Playwright script, so it would
     fail every time. Path-scoped denials outrank the wildcard allow, so file
     writes outside the workspace are still refused.
+
+    Understand what this grants before running the dugout: shell commands are
+    not restricted, so the agent can run anything you can, including outside
+    the repository. That is deliberate. Stage 2 exists to show the agent
+    writing and launching its own Playwright script, and in practice it also
+    self-heals - when the game stack is down it will restart it. A command
+    allowlist tight enough to be meaningful rejects the compound invocations
+    it actually needs. Run this on your own machine against a repo you trust,
+    not on a shared host or against untrusted input.
     """
     return [*policy.workspace_only([str(REPO_ROOT)]), policy.allow_all()]
 
