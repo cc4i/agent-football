@@ -270,6 +270,25 @@ attribute's valid range, and a post-write validator reports violations into the
 trajectory. Recovery is already free: the game backs up `*_baseline.json` and
 restores on refresh or rematch, so a wrecked squad is one page reload from clean.
 
+### Prerequisite hardening in `game/`
+
+Stage 4b routes agent-authored text into the game's own agent chain, which ends
+at `update_profile(role, changes)` in
+`game/agents/specialist_agents/tools.py`. That function builds a path with
+`os.path.join(PLAYER_STATE_DIR, f"{role}.json")` and never validates `role`, so
+a hallucinated or injected role escapes `player_state/`. Today the only caller
+is the game's own specialists; stage 4b adds a second, agent-driven path into
+it, so this must be fixed before 4b ships:
+
+- reject any `role` outside `{defender, midfielder, forward, goalkeeper}`
+  before building the path;
+- validate `changes` keys against the known attribute schema for that role.
+
+This also bounds the blast radius of prompt injection through the shout bar,
+which is otherwise inherent to the feature: shout text is user-controlled and
+reaches an LLM holding file-writing tools. The server-side allowlist is the real
+defence there, not prompt wording.
+
 ## Setup
 
 `dugout/pyproject.toml` gains two dependencies:
