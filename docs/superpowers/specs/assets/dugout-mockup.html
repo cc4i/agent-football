@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dugout - technical area</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Saira+Condensed:wght@500;600;700&family=Newsreader:ital,opsz,wght@0,6..72,300;0,6..72,400;1,6..72,300;1,6..72,400&family=IBM+Plex+Mono:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet">
+<style>
+:root{
+  --turf-900:#0A1210; --turf-800:#0E1A16; --turf-700:#132420;
+  --rule:#1E332C;
+  --chalk:#E9E5DA; --chalk-2:#A8B3AC; --chalk-3:#6B7A73;
+
+  /* amber belongs to Antigravity and nothing else */
+  --amber:#FFB020; --amber-2:#C9862A; --amber-3:#5E4517;
+  /* cyan belongs to the game's own agent system */
+  --sys:#4FC2D8; --sys-2:#2E8496; --sys-3:#1C4650;
+
+  --def:#6FA8E8; --mid:#5FC79A; --fwd:#F08A7A; --gk:#B497E8;
+  --fail:#E06C5A; --ok:#4FBF88;
+
+  --sheet:'Saira Condensed',system-ui,sans-serif;
+  --prose:'Newsreader',Georgia,serif;
+  --data:'IBM Plex Mono',ui-monospace,monospace;
+
+  --gutter:104px;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--turf-900);color:var(--chalk);font-family:var(--prose);-webkit-font-smoothing:antialiased}
+body::before{
+  content:"";position:fixed;inset:0;pointer-events:none;z-index:0;
+  background:repeating-linear-gradient(90deg,rgba(255,255,255,.011) 0 88px,transparent 88px 176px);
+}
+.app{position:relative;z-index:1;display:flex;flex-direction:column;height:100vh}
+
+/* ── touchline strip ─────────────────────────────────────── */
+.touchline{
+  display:flex;align-items:center;gap:20px;padding:0 22px;height:60px;flex:0 0 60px;
+  background:var(--turf-800);border-bottom:1px solid var(--rule);
+}
+.mark{display:flex;align-items:baseline;gap:10px;flex:0 0 auto}
+.mark b{font-family:var(--sheet);font-weight:700;font-size:22px;letter-spacing:.16em;text-transform:uppercase}
+.mark span{font-family:var(--sheet);font-weight:500;font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:var(--chalk-3)}
+.vr{width:1px;height:28px;background:var(--rule);flex:0 0 auto}
+
+/* the agent is a first-class citizen of the header */
+.agy-chip{
+  display:flex;align-items:center;gap:10px;padding:6px 13px;
+  border:1px solid var(--amber-3);border-radius:2px;background:rgba(255,176,32,.06);flex:0 0 auto;
+}
+.agy-chip i{width:6px;height:6px;border-radius:50%;background:var(--amber);box-shadow:0 0 8px rgba(255,176,32,.8);font-style:normal;animation:tick 2.4s steps(2,end) infinite}
+.agy-chip b{font-family:var(--sheet);font-weight:700;font-size:13px;letter-spacing:.17em;text-transform:uppercase;color:var(--amber)}
+.agy-chip span{font-family:var(--data);font-size:10px;color:var(--amber-2)}
+
+.rig{display:flex;align-items:center;gap:16px;flex:0 0 auto}
+.rig>.lbl{font-family:var(--sheet);font-weight:600;font-size:9.5px;letter-spacing:.2em;text-transform:uppercase;color:var(--chalk-3)}
+.svc{display:flex;align-items:center;gap:7px;font-family:var(--data);font-size:10.5px;color:var(--chalk-3)}
+.svc i{width:6px;height:6px;border-radius:50%;background:var(--ok);box-shadow:0 0 7px rgba(79,191,136,.7);font-style:normal}
+.svc.down i{background:var(--fail);box-shadow:0 0 7px rgba(224,108,90,.7)}
+.svc em{font-style:normal;color:var(--chalk-2);letter-spacing:.06em}
+
+.scoreline{margin-left:auto;display:flex;align-items:center;gap:20px;flex:0 0 auto}
+.clock{font-family:var(--data);font-size:12px;color:var(--chalk-2);letter-spacing:.1em;display:flex;align-items:center;gap:8px}
+.clock i{width:5px;height:5px;border-radius:50%;background:var(--ok);font-style:normal;animation:tick 1s steps(2,end) infinite}
+@keyframes tick{50%{opacity:.15}}
+.score{font-family:var(--sheet);font-weight:700;font-size:24px;letter-spacing:.06em;display:flex;align-items:center;gap:11px}
+.score .t{font-size:11px;letter-spacing:.2em;color:var(--chalk-3);font-weight:600}
+.score .n{color:var(--chalk)}
+.score .n.lead{color:var(--ok)}
+
+/* ── body split ──────────────────────────────────────────── */
+.split{display:flex;flex:1;min-height:0}
+
+/* ── team sheet rail ─────────────────────────────────────── */
+.sheet{flex:0 0 296px;background:var(--turf-800);border-right:1px solid var(--rule);display:flex;flex-direction:column;min-height:0}
+.sheet-hd{padding:18px 20px 12px;border-bottom:1px solid var(--rule)}
+.eyebrow{font-family:var(--sheet);font-weight:600;font-size:10.5px;letter-spacing:.26em;text-transform:uppercase;color:var(--chalk-3)}
+.sheet-hd p{margin:7px 0 0;font-size:14px;line-height:1.45;color:var(--chalk-2);font-weight:300}
+.sheet-hd p b{color:var(--amber);font-weight:400}
+.stages{list-style:none;margin:0;padding:8px 0;overflow-y:auto;flex:1}
+.stage{display:grid;grid-template-columns:34px 1fr;gap:13px;padding:13px 20px;align-items:start;border-left:2px solid transparent}
+.tile{
+  width:34px;height:34px;display:grid;place-items:center;
+  font-family:var(--sheet);font-weight:700;font-size:15px;
+  border:1.5px solid var(--amber-3);color:var(--chalk-3);border-radius:2px;
+}
+.stage.done .tile{background:var(--amber);border-color:var(--amber);color:#14100A}
+.stage.live .tile{border-color:var(--amber);color:var(--amber);animation:board 1.9s ease-in-out infinite}
+@keyframes board{0%,100%{box-shadow:0 0 0 0 rgba(255,176,32,.34)}50%{box-shadow:0 0 0 5px rgba(255,176,32,0)}}
+.stage.live{border-left-color:var(--amber);background:linear-gradient(90deg,rgba(255,176,32,.055),transparent 70%)}
+.stage h3{margin:0;font-family:var(--sheet);font-weight:600;font-size:15.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--chalk-2)}
+.stage.done h3{color:var(--chalk-3)}
+.stage.live h3{color:var(--chalk)}
+.stage p{margin:4px 0 0;font-size:13px;line-height:1.5;color:var(--chalk-3);font-weight:300}
+.stage.locked{opacity:.5}
+.done-note{display:block;margin-top:5px;font-family:var(--data);font-size:10.5px;color:var(--amber-2)}
+.by{display:inline-block;font-family:var(--sheet);font-weight:600;font-size:9px;letter-spacing:.16em;text-transform:uppercase;color:var(--amber-2);border:1px solid var(--amber-3);border-radius:2px;padding:1px 5px;margin-top:6px}
+.by.sys{color:var(--sys-2);border-color:var(--sys-3)}
+.suggest{margin-top:10px;padding:9px 11px;border:1px dashed var(--amber-3);border-radius:3px;background:rgba(255,176,32,.045)}
+.suggest span{display:block;font-family:var(--sheet);font-weight:600;font-size:9.5px;letter-spacing:.2em;text-transform:uppercase;color:var(--amber-2);margin-bottom:5px}
+.suggest q{font-size:13.5px;line-height:1.5;color:var(--chalk-2);font-style:italic;quotes:none}
+.sheet-ft{padding:12px 20px;border-top:1px solid var(--rule);font-family:var(--data);font-size:10.5px;color:var(--chalk-3);display:flex;justify-content:space-between}
+
+/* ── match log ───────────────────────────────────────────── */
+.log-wrap{flex:1;display:flex;flex-direction:column;min-width:0}
+.log{flex:1;overflow-y:auto;padding:20px 30px 30px 0}
+.log-hd{display:flex;align-items:baseline;gap:14px;padding:0 30px 14px var(--gutter)}
+.log-hd h2{margin:0;font-family:var(--sheet);font-weight:600;font-size:11px;letter-spacing:.26em;text-transform:uppercase;color:var(--chalk-3)}
+.log-hd em{font-family:var(--data);font-size:10.5px;color:var(--chalk-3);font-style:normal;margin-left:auto}
+
+/* signature: the gutter says WHEN and WHO, and its rule is tinted by actor */
+.ev{display:grid;grid-template-columns:var(--gutter) 1fr;align-items:start}
+.min{
+  display:flex;flex-direction:column;align-items:flex-end;gap:4px;
+  padding:2px 15px 0 0;align-self:stretch;
+  border-right:2px solid var(--rule);
+}
+.min b{font-family:var(--data);font-weight:400;font-size:11px;color:var(--chalk-3);letter-spacing:.03em}
+.min .who{font-family:var(--sheet);font-weight:700;font-size:10px;letter-spacing:.15em;text-transform:uppercase;white-space:nowrap}
+.min.same b{visibility:hidden}
+
+.ev.a-you .min{border-right-color:#2C3E38}
+.ev.a-you .who{color:var(--chalk-2)}
+.ev.a-agy .min{border-right-color:var(--amber-3)}
+.ev.a-agy .who{color:var(--amber)}
+.ev.a-sys .min{border-right-color:#2A6B78}
+.ev.a-sys .who{color:var(--sys)}
+.min .who.cont{font-size:15px;letter-spacing:0;opacity:.55}
+
+.body{padding:0 0 18px 20px;min-width:0}
+.say{font-size:16.5px;line-height:1.62;font-weight:300;color:var(--chalk);margin:0;max-width:66ch}
+.say.you{font-family:var(--sheet);font-weight:500;font-size:17px;letter-spacing:.04em}
+.thought{font-style:italic;font-weight:300;font-size:15.5px;line-height:1.6;color:var(--chalk-2);margin:0;max-width:64ch;opacity:.92}
+.thought::before{content:"";display:inline-block;width:14px;height:1px;background:var(--chalk-3);vertical-align:middle;margin-right:9px;opacity:.6}
+
+/* an action is always attributed: a verb, then the call */
+.act{display:flex;align-items:baseline;gap:9px;flex-wrap:wrap}
+.act .verb{font-family:var(--sheet);font-weight:600;font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--amber-2);flex:0 0 auto}
+.ev.a-sys .act .verb{color:var(--sys-2)}
+.call{font-family:var(--data);font-size:12.5px;line-height:1.55}
+.call .fn{color:var(--amber)}
+.ev.a-sys .call .fn{color:var(--sys)}
+.call .arg{color:var(--chalk-2)}
+.call .path{color:var(--chalk-2);text-decoration:underline;text-decoration-color:var(--rule);text-underline-offset:3px}
+.out{font-family:var(--data);font-size:11.5px;line-height:1.65;color:var(--chalk-3);margin:6px 0 0;padding-left:16px;border-left:1px solid var(--rule);white-space:pre-wrap}
+.out .ok{color:var(--ok)}.out .bad{color:var(--fail)}
+.out .add{color:var(--ok)}.out .del{color:var(--fail)}
+
+/* subagents of Antigravity: amber-owned, four lanes */
+.lanes-hd{display:flex;align-items:center;gap:9px;margin-bottom:8px}
+.lanes-hd b{font-family:var(--sheet);font-weight:600;font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--amber-2)}
+.lanes-hd span{font-family:var(--data);font-size:10.5px;color:var(--chalk-3)}
+.lanes{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--rule);border:1px solid var(--amber-3);border-radius:3px;overflow:hidden;max-width:960px}
+.lane{background:var(--turf-800);padding:11px 13px 13px;min-width:0}
+.lane header{display:flex;align-items:center;gap:7px;margin-bottom:9px}
+.lane header b{font-family:var(--sheet);font-weight:600;font-size:10.5px;letter-spacing:.14em;text-transform:uppercase}
+.lane header i{width:5px;height:5px;border-radius:50%;font-style:normal;flex:0 0 auto;background:currentColor}
+.lane.def header{color:var(--def)}
+.lane.mid header{color:var(--mid)}
+.lane.fwd header{color:var(--fwd)}
+.lane.gk  header{color:var(--gk)}
+.lane .file{font-family:var(--data);font-size:10px;color:var(--chalk-3);margin-bottom:8px;word-break:break-all}
+.delta{display:flex;justify-content:space-between;gap:8px;font-family:var(--data);font-size:11px;padding:3px 0;color:var(--chalk-2)}
+.delta u{text-decoration:none;color:var(--chalk-3)}
+.delta s{text-decoration:none;color:var(--chalk-3);opacity:.65}
+.delta em{font-style:normal;color:var(--ok)}
+.working{font-family:var(--data);font-size:11px;color:var(--amber-2);display:flex;align-items:center;gap:7px}
+.working i{width:4px;height:4px;border-radius:50%;background:var(--amber);font-style:normal;animation:tick .9s steps(2,end) infinite}
+
+/* the game's own agents: a separate system, never amber */
+.handoff{
+  max-width:960px;border:1px solid var(--sys-3);border-radius:3px;
+  background:rgba(79,194,216,.035);overflow:hidden;
+}
+.handoff>header{
+  display:flex;align-items:center;gap:10px;padding:8px 13px;
+  background:rgba(79,194,216,.07);border-bottom:1px solid var(--sys-3);
+}
+.handoff>header b{font-family:var(--sheet);font-weight:700;font-size:10.5px;letter-spacing:.17em;text-transform:uppercase;color:var(--sys)}
+.handoff>header span{font-family:var(--data);font-size:10px;color:var(--sys-2);margin-left:auto}
+.chain{padding:11px 14px 13px;display:flex;flex-direction:column;gap:7px}
+.node{display:grid;grid-template-columns:88px 1fr;gap:12px;align-items:baseline;font-size:13.5px;line-height:1.5}
+.node>b{font-family:var(--sheet);font-weight:600;font-size:10px;letter-spacing:.14em;text-transform:uppercase;text-align:right}
+.node p{margin:0;font-weight:300;color:var(--chalk-2);font-family:var(--prose);font-size:14.5px}
+.node code{font-family:var(--data);font-size:11.5px;color:var(--chalk-3)}
+.n-coach>b{color:var(--sys)}
+.n-captain>b{color:var(--sys-2)}
+.n-def>b{color:var(--def)}.n-mid>b{color:var(--mid)}.n-fwd>b{color:var(--fwd)}.n-gk>b{color:var(--gk)}
+.node.indent{padding-left:22px;border-left:1px solid var(--sys-3);margin-left:34px;grid-template-columns:66px 1fr}
+
+.flip{display:inline-flex;align-items:center;gap:11px;border:1px solid var(--amber);background:rgba(255,176,32,.09);padding:7px 14px 7px 11px;border-radius:2px}
+.flip b{font-family:var(--sheet);font-weight:700;font-size:12px;letter-spacing:.2em;text-transform:uppercase;color:var(--amber)}
+.flip span{font-family:var(--data);font-size:11px;color:var(--amber-2)}
+
+/* ── composer ────────────────────────────────────────────── */
+.composer{flex:0 0 auto;border-top:1px solid var(--rule);background:var(--turf-800);padding:0 30px 16px var(--gutter)}
+/* live actor banner: you always know who has the ball */
+.acting{
+  display:flex;align-items:center;gap:11px;margin:0 -30px 13px calc(var(--gutter) * -1);
+  padding:9px 30px 9px var(--gutter);
+  background:rgba(255,176,32,.07);border-bottom:1px solid var(--amber-3);
+}
+.acting i{width:6px;height:6px;border-radius:50%;background:var(--amber);font-style:normal;animation:tick .9s steps(2,end) infinite;flex:0 0 auto}
+.acting b{font-family:var(--sheet);font-weight:700;font-size:12px;letter-spacing:.17em;text-transform:uppercase;color:var(--amber)}
+.acting em{font-style:normal;font-size:14px;font-weight:300;color:var(--chalk-2)}
+.acting code{font-family:var(--data);font-size:11.5px;color:var(--amber-2);margin-left:auto}
+.chips{display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap}
+.chip{font-family:var(--sheet);font-weight:600;font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--amber-2);background:transparent;border:1px solid var(--amber-3);border-radius:2px;padding:5px 11px;cursor:pointer}
+.chip:hover{color:var(--amber);border-color:var(--amber-2)}
+.chip.ghost{color:var(--chalk-3);border-color:var(--rule)}
+.chip.ghost:hover{color:var(--chalk-2);border-color:var(--chalk-3)}
+.entry{display:flex;gap:12px;align-items:stretch}
+.entry input{flex:1;background:var(--turf-700);border:1px solid var(--rule);border-radius:2px;padding:13px 16px;color:var(--chalk);font-family:var(--prose);font-size:16px;font-weight:300}
+.entry input::placeholder{color:var(--chalk-3);font-style:italic}
+.entry input:focus{outline:none;border-color:var(--amber-2);box-shadow:0 0 0 1px var(--amber-3)}
+.send{font-family:var(--sheet);font-weight:700;font-size:13px;letter-spacing:.2em;text-transform:uppercase;background:var(--amber);color:#14100A;border:none;border-radius:2px;padding:0 26px;cursor:pointer}
+.send:hover{background:#FFC04A}
+.halt{font-family:var(--sheet);font-weight:600;font-size:12px;letter-spacing:.16em;text-transform:uppercase;background:transparent;color:var(--chalk-2);border:1px solid var(--rule);border-radius:2px;padding:0 18px;cursor:pointer}
+.halt:hover{color:var(--fail);border-color:var(--fail)}
+
+/* ── setup-blocked ───────────────────────────────────────── */
+.blocked{display:none;padding:13px 30px 13px var(--gutter);background:rgba(224,108,90,.1);border-bottom:1px solid rgba(224,108,90,.42)}
+body.is-blocked .blocked{display:block}
+body.is-blocked .entry input,body.is-blocked .send,body.is-blocked .acting{opacity:.4;pointer-events:none}
+body.is-blocked .agy-chip{border-color:rgba(224,108,90,.5);background:rgba(224,108,90,.08)}
+body.is-blocked .agy-chip i{background:var(--fail);box-shadow:0 0 8px rgba(224,108,90,.8);animation:none}
+body.is-blocked .agy-chip b{color:var(--fail)}
+body.is-blocked .agy-chip span{color:var(--fail);opacity:.8}
+.blocked b{font-family:var(--sheet);font-weight:700;font-size:12.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--fail);display:block;margin-bottom:4px}
+.blocked p{margin:0;font-size:14.5px;font-weight:300;color:var(--chalk-2)}
+.blocked code{font-family:var(--data);font-size:13px;color:var(--chalk);background:rgba(255,255,255,.05);padding:1px 6px;border-radius:2px}
+
+:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
+::-webkit-scrollbar{width:9px}
+::-webkit-scrollbar-thumb{background:var(--rule);border-radius:5px}
+::-webkit-scrollbar-track{background:transparent}
+@media (prefers-reduced-motion:reduce){*{animation:none!important}}
+@media (max-width:1180px){
+  :root{--gutter:82px}
+  .sheet{flex:0 0 250px}
+  .lanes{grid-template-columns:repeat(2,1fr)}
+}
+@media (max-width:800px){
+  .split{flex-direction:column}
+  .sheet{flex:0 0 auto;border-right:none;border-bottom:1px solid var(--rule);max-height:230px}
+  .lanes{grid-template-columns:1fr}
+  .touchline{gap:14px;overflow-x:auto}
+  .node,.node.indent{grid-template-columns:1fr;gap:2px}
+  .node>b{text-align:left}
+}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <header class="touchline">
+    <div class="mark"><b>Dugout</b><span>Technical area</span></div>
+    <div class="agy-chip"><i></i><b>Antigravity</b><span>0.1.9 · working</span></div>
+    <div class="vr"></div>
+    <div class="rig">
+      <span class="lbl">Game</span>
+      <div class="svc"><i></i><em>PITCH</em>5173</div>
+      <div class="svc"><i></i><em>COACH</em>8000</div>
+      <div class="svc"><i></i><em>CAPTAIN</em>8001</div>
+    </div>
+    <div class="scoreline">
+      <div class="clock"><i></i>71′ · 0:40 LEFT</div>
+      <div class="score"><span class="t">US</span><span class="n lead">3</span><span class="t">–</span><span class="n">1</span><span class="t">THEM</span></div>
+    </div>
+  </header>
+
+  <div class="blocked">
+    <b>Antigravity isn't logged in</b>
+    <p>Run <code>agy login</code> in a terminal, then reload this page. The dugout can't send anything until it can reach the agent.</p>
+  </div>
+
+  <div class="split">
+
+    <aside class="sheet">
+      <div class="sheet-hd">
+        <div class="eyebrow">Team sheet</div>
+        <p>Five things <b>Antigravity</b> can do for you. Send the suggested line, edit it, or just say what you want.</p>
+      </div>
+
+      <ol class="stages">
+        <li class="stage done"><div class="tile">1</div><div>
+          <h3>Rebrand the team</h3>
+          <span class="done-note">2 sprite sheets rewritten</span>
+        </div></li>
+
+        <li class="stage done"><div class="tile">2</div><div>
+          <h3>Take the field</h3>
+          <span class="done-note">kick-off at 00′ · 1 retry</span>
+        </div></li>
+
+        <li class="stage done"><div class="tile">3</div><div>
+          <h3>Read the game</h3>
+          <span class="done-note">4 players scouted</span>
+        </div></li>
+
+        <li class="stage done"><div class="tile">4</div><div>
+          <h3>Tune the squad</h3>
+          <span class="done-note">11 attributes · live in 1.8s</span>
+          <span class="by">Antigravity ×4 subagents</span>
+        </div></li>
+
+        <li class="stage live"><div class="tile">5</div><div>
+          <h3>Shout to the bench</h3>
+          <p>Antigravity types into the game's shout bar and hands off to the game's own agents.</p>
+          <span class="by sys">Game agents respond</span>
+          <div class="suggest">
+            <span>Suggested</span>
+            <q>Tell the bench to sit deep and kill the clock.</q>
+          </div>
+        </div></li>
+      </ol>
+
+      <div class="sheet-ft"><span>58 events</span><span>24.1k tokens</span></div>
+    </aside>
+
+    <div class="log-wrap">
+      <div class="log-hd">
+        <h2>Match log</h2>
+        <em>who acted · when · stamped to the match clock</em>
+      </div>
+
+      <div class="log">
+
+        <div class="ev a-you">
+          <div class="min"><b>--′</b><span class="who">You</span></div>
+          <div class="body"><p class="say you">Kit us out in black and gold with a wolf crest, then get us on the pitch.</p></div>
+        </div>
+
+        <div class="ev a-agy">
+          <div class="min"><b>--′</b><span class="who">Antigravity</span></div>
+          <div class="body"><p class="thought">Two sprite sheets to make, and they have to survive the chroma key. I'll keep the crest large and high-contrast so it reads at 117px.</p></div>
+        </div>
+
+        <div class="ev a-agy">
+          <div class="min same"><b>--′</b><span class="who cont">·</span></div>
+          <div class="body">
+            <div class="act"><span class="verb">Called</span><span class="call"><span class="fn">generate_team_avatars</span><span class="arg">(team="blue", jersey="black", crest="gold wolf head")</span></span></div>
+            <pre class="out"><span class="ok">✓</span> wrote game/frontend/public/assets/player_blue.png  (1408×768)
+<span class="ok">✓</span> wrote game/frontend/public/assets/player_red.png   (1408×768)</pre>
+            <div class="flip" style="margin-top:11px"><b>Stage 1 clear</b><span>Rebrand the team</span></div>
+          </div>
+        </div>
+
+        <div class="ev a-agy">
+          <div class="min"><b>--′</b><span class="who cont">·</span></div>
+          <div class="body">
+            <p class="say">The kit's done. Now I need a way to actually play, so I'll write a Playwright script that opens the game, starts a match, and keeps a status file up to date while it runs.</p>
+            <div class="act" style="margin-top:11px"><span class="verb">Wrote</span><span class="call"><span class="path">/tmp/play_futsal.py</span></span></div>
+            <pre class="out">page.goto("http://localhost:5173")
+page.click("#kick-off-btn")
+while True:
+    s = page.evaluate("window.__futsal.status()")
+    Path("/tmp/futsal_status.json").write_text(json.dumps(s))</pre>
+          </div>
+        </div>
+
+        <div class="ev a-agy">
+          <div class="min same"><b>--′</b><span class="who cont">·</span></div>
+          <div class="body">
+            <div class="act"><span class="verb">Ran</span><span class="call"><span class="arg">python /tmp/play_futsal.py</span></span></div>
+            <pre class="out"><span class="bad">✗ exit 1</span>
+TimeoutError: locator.click: Timeout 30000ms exceeded.
+  waiting for element to be stable - element is not stable</pre>
+          </div>
+        </div>
+
+        <div class="ev a-agy">
+          <div class="min same"><b>--′</b><span class="who cont">·</span></div>
+          <div class="body">
+            <p class="thought">The kick-off button has a pulse animation on it, so Playwright's stability check never passes. It isn't actually unclickable, I just need to skip the check.</p>
+            <div class="act" style="margin-top:10px"><span class="verb">Edited</span><span class="call"><span class="path">/tmp/play_futsal.py</span></span></div>
+            <pre class="out"><span class="del">- page.click("#kick-off-btn")</span>
+<span class="add">+ page.click("#kick-off-btn", force=True)</span></pre>
+          </div>
+        </div>
+
+        <div class="ev a-agy">
+          <div class="min"><b>00′</b><span class="who cont">·</span></div>
+          <div class="body">
+            <div class="act"><span class="verb">Ran</span><span class="call"><span class="arg">python /tmp/play_futsal.py</span></span></div>
+            <pre class="out"><span class="ok">✓</span> kick-off · streaming to /tmp/futsal_status.json</pre>
+            <div class="flip" style="margin-top:11px"><b>Stage 2 clear</b><span>Take the field</span></div>
+          </div>
+        </div>
+
+        <div class="ev a-agy">
+          <div class="min"><b>61′</b><span class="who cont">·</span></div>
+          <div class="body">
+            <div class="act"><span class="verb">Called</span><span class="call"><span class="fn">get_match_status</span><span class="arg">()</span> · <span class="fn">read_player_stats</span><span class="arg">()</span></span></div>
+            <pre class="out">score 1–1 · 4:10 remaining
+defender    speed 58  tackling 61  positioning 55   [0–100]
+midfielder  speed 66  passing  70  stamina     62   [0–100]
+forward     speed 71  shooting 68  finishing   64   [0–100]
+goalkeeper  reflexes 60  handling 57  diving   59   [0–100]</pre>
+            <p class="say" style="margin-top:11px">We're level with four minutes left. The midfield is losing the ball before it reaches the forward, and the defender is a step slow on the counter. That's where I'd spend the changes.</p>
+            <div class="flip" style="margin-top:11px"><b>Stage 3 clear</b><span>Read the game</span></div>
+          </div>
+        </div>
+
+        <div class="ev a-you">
+          <div class="min"><b>65′</b><span class="who">You</span></div>
+          <div class="body"><p class="say you">We're only one goal up and they keep breaking through the middle. Tighten it up.</p></div>
+        </div>
+
+        <div class="ev a-agy">
+          <div class="min"><b>66′</b><span class="who">Antigravity</span></div>
+          <div class="body">
+            <p class="thought">Four players, four files, no overlap, so I can send all four subagents at once. Three attributes each at most, or we won't be able to tell what actually worked.</p>
+            <div class="act" style="margin-top:10px"><span class="verb">Started</span><span class="call"><span class="fn">start_subagent</span> <span class="arg">×4 · parallel</span></span></div>
+          </div>
+        </div>
+
+        <div class="ev a-agy">
+          <div class="min"><b>67′</b><span class="who cont">·</span></div>
+          <div class="body">
+            <div class="lanes-hd"><b>Antigravity subagents</b><span>one player file each</span></div>
+            <div class="lanes">
+              <div class="lane def">
+                <header><i></i><b>Defender</b></header>
+                <div class="file">player_state/defender.json</div>
+                <div class="delta"><u>tackling</u><span><s>61</s> → <em>74</em></span></div>
+                <div class="delta"><u>positioning</u><span><s>55</s> → <em>70</em></span></div>
+                <div class="delta"><u>speed</u><span><s>58</s> → <em>66</em></span></div>
+              </div>
+              <div class="lane mid">
+                <header><i></i><b>Midfielder</b></header>
+                <div class="file">player_state/midfielder.json</div>
+                <div class="delta"><u>stamina</u><span><s>62</s> → <em>78</em></span></div>
+                <div class="delta"><u>passing</u><span><s>70</s> → <em>79</em></span></div>
+                <div class="delta"><u>vision</u><span><s>54</s> → <em>68</em></span></div>
+              </div>
+              <div class="lane fwd">
+                <header><i></i><b>Forward</b></header>
+                <div class="file">player_state/forward.json</div>
+                <div class="delta"><u>finishing</u><span><s>64</s> → <em>77</em></span></div>
+                <div class="delta"><u>shooting</u><span><s>68</s> → <em>76</em></span></div>
+                <div class="delta"><u>speed</u><span><s>71</s> → <em>75</em></span></div>
+              </div>
+              <div class="lane gk">
+                <header><i></i><b>Goalkeeper</b></header>
+                <div class="file">player_state/goalkeeper.json</div>
+                <div class="delta"><u>reflexes</u><span><s>60</s> → <em>73</em></span></div>
+                <div class="delta"><u>diving</u><span><s>59</s> → <em>70</em></span></div>
+              </div>
+            </div>
+            <pre class="out"><span class="ok">✓</span> all values within range · game reloaded 4 files in 1.8s</pre>
+            <div class="flip" style="margin-top:11px"><b>Stage 4 clear</b><span>Tune the squad</span></div>
+          </div>
+        </div>
+
+        <div class="ev a-you">
+          <div class="min"><b>70′</b><span class="who">You</span></div>
+          <div class="body"><p class="say you">Tell the bench to sit deep and kill the clock.</p></div>
+        </div>
+
+        <div class="ev a-agy">
+          <div class="min"><b>70′</b><span class="who">Antigravity</span></div>
+          <div class="body">
+            <p class="thought">This one I shouldn't do myself. If I edit the files directly the players just change; if I shout it, the game's own coach decides what that means. Let it run its own chain.</p>
+            <div class="act" style="margin-top:10px"><span class="verb">Ran</span><span class="call"><span class="arg">playwright · fill <span class="path">#shout-message-input</span> · click <span class="path">#shout-send-btn</span></span></span></div>
+            <pre class="out"><span class="ok">✓</span> "sit deep and kill the clock" handed to the game</pre>
+          </div>
+        </div>
+
+        <div class="ev a-sys">
+          <div class="min"><b>70′</b><span class="who">Game</span></div>
+          <div class="body">
+            <div class="handoff">
+              <header><b>The game's own agents</b><span>ADK · A2A :8001 · not Antigravity</span></header>
+              <div class="chain">
+                <div class="node n-coach"><b>Coach</b><p>Reads the shout, decides it means a low block with the forward dropping in. Sends it to the captain.</p></div>
+                <div class="node n-captain"><b>Captain</b><p>Splits it into four instructions and fans them out to the specialists.</p></div>
+                <div class="node indent n-def"><b>Defender</b><p><code>update_profile</code> positioning +8, aggression −12</p></div>
+                <div class="node indent n-mid"><b>Midfielder</b><p><code>update_profile</code> stamina −6 <em style="color:var(--chalk-3);font-style:normal">(tiring)</em>, then <code>report_injury</code></p></div>
+                <div class="node indent n-fwd"><b>Forward</b><p><code>update_profile</code> drops to a holding line, pressing −15</p></div>
+                <div class="node indent n-gk"><b>Goalkeeper</b><p><code>request_substitution</code> midfielder → bench</p></div>
+                <div class="node n-captain" style="margin-top:2px"><b>Huddle</b><p><code>substitutions.json</code> written · midfielder subbed at 71′</p></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="ev a-agy">
+          <div class="min"><b>71′</b><span class="who">Antigravity</span></div>
+          <div class="body">
+            <div class="act"><span class="verb">Called</span><span class="call"><span class="fn">get_match_status</span><span class="arg">()</span></span></div>
+            <pre class="out">score 3–1 · 0:40 remaining</pre>
+            <p class="say" style="margin-top:11px">That worked better than editing the files would have. I only said "sit deep" and their coach turned it into a substitution I hadn't thought of. We're 3–1 up with forty seconds left, so I'd leave it alone now.</p>
+          </div>
+        </div>
+
+      </div>
+
+      <div class="composer">
+        <div class="acting">
+          <i></i><b>Antigravity</b><em>is watching the clock</em>
+          <code>get_match_status() · poll 2s</code>
+        </div>
+        <div class="chips">
+          <button class="chip">Use suggested line</button>
+          <button class="chip ghost">Reset the squad</button>
+          <button class="chip ghost">Full time</button>
+        </div>
+        <div class="entry">
+          <label for="say" style="position:absolute;left:-9999px">Say something to the dugout</label>
+          <input id="say" placeholder="Say something to the dugout…">
+          <button class="halt">Halt</button>
+          <button class="send">Send</button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+<script>
+  const q = new URLSearchParams(location.search);
+  if (q.get('state') === 'blocked') document.body.classList.add('is-blocked');
+  if (q.get('at') === 'end') {
+    const log = document.querySelector('.log');
+    log.scrollTop = log.scrollHeight;
+  }
+</script>
+</body>
+</html>

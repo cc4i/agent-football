@@ -1,7 +1,9 @@
 # Rebuild `dugout/` as an Antigravity CLI 2.0 showcase
 
 Date: 2026-07-30
-Status: Approved, ready for implementation planning
+Status: Approved, ready for implementation planning. Two questions under
+"Event multiplexer" are open and gate stage 4b: how subagent actions are
+attributed, and whether the dugout reads the game's own agent terminal.
 
 ## Purpose
 
@@ -150,13 +152,33 @@ To render a single coherent timeline, `session.py` fans all three into one
 `asyncio.Queue` and drains it to SSE:
 
 ```python
-async def pump(src, kind):
+async def pump(src, kind, actor):
     async for item in src:
-        await q.put({"kind": kind, "data": item})
+        await q.put({"kind": kind, "actor": actor, "data": item})
 ```
 
 SSE event kinds emitted to the browser: `thought`, `tool_call`, `text`,
 `stage_done`, `error`, `usage`.
+
+Every event also carries an `actor`, because the interface attributes each one
+to whoever performed it (see Interface below). The values are `user`,
+`antigravity`, `subagent:<name>`, and `game`.
+
+Two things about `actor` are unresolved and should be settled before
+`session.py` is written:
+
+- **Subagent attribution.** It is not established that the SDK distinguishes a
+  subagent's thoughts and tool calls from the parent's in the merged stream.
+  `ToolCall` exposes `.name`, `.args`, `.id`, `.canonical_path` and
+  `.server_name`, none of which is a subagent identifier. If no such handle
+  exists, the fallback is to infer the actor from the file each subagent owns,
+  which works only because the guardrails give each one exactly one file.
+- **The game's own agents are not in this stream at all.** The coach, captain
+  and specialists emit to the game's `#terminal-body`, not to Antigravity. To
+  render stage 4b as a handoff rather than a gap, the dugout has to read that
+  terminal as a second source. This is new scope. The cheaper option is to drop
+  it and show only Antigravity's polled observation of the outcome, at the cost
+  of the most interesting moment in the demo.
 
 ### Change required in `game/`
 
@@ -242,6 +264,57 @@ One file per subagent means four parallel writers cannot collide, and a bad run
 cannot corrupt the whole team. The three-attribute cap keeps the effect legible,
 which is the pedagogical point: you should be able to see *why* the team improved.
 
+## Interface
+
+The trajectory is the product, so it gets the space: a narrow team-sheet rail
+for the stages, and the rest of the window for the log. The chat composer is a
+strip at the bottom, not the centre of the screen.
+
+### Attribution is the organising principle
+
+The point of the showcase is that Antigravity does the work, so the interface
+must never render an action without saying who took it. Three rules:
+
+**Every event names its actor.** The log's left gutter carries the match minute
+and the actor together, and the rule running down it is tinted by actor. The
+name prints only when control changes hands, so `you -> antigravity -> game ->
+antigravity` reads as a sequence of handoffs instead of a stamp repeated on
+every line.
+
+**Actions are verb-led, not bare code.** `CALLED generate_team_avatars(...)`,
+`RAN python /tmp/play_futsal.py`, `WROTE /tmp/play_futsal.py`. A tool call
+rendered on its own reads as output from nowhere.
+
+**Amber is reserved for Antigravity, cyan for the game's agents.** This one is
+load-bearing rather than decorative. Stage 4b puts two multi-agent systems on
+screen at once, and the game's existing terminal already colours its coach
+amber (`#f59e0b` in `game/frontend/src/style.css`). Reusing amber for both would
+make Antigravity and the game's coach indistinguishable at exactly the moment
+the demo is trying to show one driving the other. The game's chain is therefore
+rendered inside its own bordered, cyan panel, captioned as not being
+Antigravity.
+
+The four stage-4a subagents keep the game's existing role hues, since they act
+on the same four players. They sit inside an amber-bordered container, because
+they belong to Antigravity.
+
+### Supporting states
+
+- Antigravity has its own status chip in the header, separate from a group
+  labelled for the three game services. Without it the header describes only
+  the game and the agent is invisible.
+- A persistent "Antigravity is working" bar sits above the composer, so the
+  current actor is visible when the log is scrolled away.
+- The match clock, not wall time, stamps every event. Before kick-off it reads
+  `--'`, which is the same distinction `window.__futsal.status()` returns as
+  `null`. During stage 4 the tuning loop is racing the clock, so the timestamp
+  carries information rather than decorating.
+
+The approved static mockup is `specs/assets/dugout-mockup.html`, with `?at=end`
+and `?state=blocked` for the stage-4b and not-logged-in states. Its player
+attribute values are illustrative only and do not match the real ones; see the
+plan.
+
 ## Error handling
 
 Ordered by likelihood of occurring in practice.
@@ -313,8 +386,10 @@ plus chroma-key and resize against a fixture image.
 
 **Integration.** The event multiplexer is tested against a stub `ChatResponse`
 that yields known thoughts, tool calls and chunks; assert that every event
-arrives and that ordering is sane. This is the component most likely to hide a
-subtle bug and the easiest to isolate.
+arrives, that ordering is sane, and that each one carries the right `actor`.
+This is the component most likely to hide a subtle bug and the easiest to
+isolate. Actor attribution is worth asserting explicitly: a silently wrong
+actor still renders, it just renders a lie about who did the work.
 
 **End to end.** A documented manual smoke checklist, deliberately not automated.
 Agent nondeterminism would make such assertions flaky, and a flaky test in a
