@@ -40,9 +40,10 @@ class ChatRequest(BaseModel):
     @field_validator("message")
     @classmethod
     def not_blank(cls, value: str) -> str:
-        if not value.strip():
+        stripped = value.strip()
+        if not stripped:
             raise ValueError("message cannot be blank")
-        return value.strip()
+        return stripped
 
 
 def _frame(kind: str, actor: str, payload) -> str:
@@ -70,24 +71,25 @@ def chat(request: ChatRequest):
     async def stream():
         yield _frame("user", ACTOR_USER, request.message)
         try:
-            agent = get_agent()
-            response = agent.chat(request.message)
-        except AgentUnavailable as exc:
-            yield _frame("error", "antigravity", str(exc))
-            return
-        except Exception as exc:
-            yield _frame("error", "antigravity", f"the agent failed to start: {exc}")
-            return
+            try:
+                agent = get_agent()
+                response = agent.chat(request.message)
+            except AgentUnavailable as exc:
+                yield _frame("error", "antigravity", str(exc))
+                return
+            except Exception as exc:
+                yield _frame("error", "antigravity", f"the agent failed to start: {exc}")
+                return
 
-        try:
-            async for event in multiplex(response):
-                payload = event["data"]
-                if event["kind"] == "tool_call":
-                    payload = {"name": payload.name, "args": payload.args}
-                yield _frame(event["kind"], event["actor"], payload)
-        except Exception as exc:
-            yield _frame("error", "antigravity", str(exc))
-
-        yield _frame("stage_done", "antigravity", stage_status())
+            try:
+                async for event in multiplex(response):
+                    payload = event["data"]
+                    if event["kind"] == "tool_call":
+                        payload = {"name": payload.name, "args": payload.args}
+                    yield _frame(event["kind"], event["actor"], payload)
+            except Exception as exc:
+                yield _frame("error", "antigravity", str(exc))
+        finally:
+            yield _frame("stage_done", "antigravity", stage_status())
 
     return StreamingResponse(stream(), media_type="text/event-stream")
