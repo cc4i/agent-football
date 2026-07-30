@@ -1,15 +1,25 @@
 """Read-only views of the running match, for the agent."""
 
 import json
+import time
 from pathlib import Path
 
 from attributes import PLAYER_STATE_DIR, ROLES, range_for
 
 STATUS_FILE = Path("/tmp/futsal_status.json")
+STATUS_MAX_AGE_SEC = 15.0
 
 # Reading the game is not observable on disk, so the stage predicate needs the
 # tools to say they ran. Reset by the app on a fresh session.
 CALLED: set[str] = set()
+
+
+def status_is_fresh() -> bool:
+    """A live match rewrites the status file constantly; a frozen one is dead."""
+    try:
+        return (time.time() - STATUS_FILE.stat().st_mtime) <= STATUS_MAX_AGE_SEC
+    except OSError:
+        return False
 
 
 def get_match_status() -> dict:
@@ -19,6 +29,8 @@ def get_match_status() -> dict:
     window.__futsal.status(). No file means no match is being played.
     """
     CALLED.add("get_match_status")
+    if not status_is_fresh():
+        return {"error": "game_not_running"}
     try:
         payload = json.loads(STATUS_FILE.read_text())
     except (OSError, json.JSONDecodeError):
