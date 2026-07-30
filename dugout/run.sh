@@ -51,7 +51,9 @@ if ! command -v agy >/dev/null 2>&1; then
   exit 1
 fi
 
-# Install chromium for the Playwright script that drives the game
+# Install chromium for the Playwright script that drives the game.
+# Idempotent: skipped if the browser is already present.
+echo "--> Installing Playwright chromium (skipped if already present)..."
 uv run playwright install chromium
 
 echo "--> Starting Avatar Creator on http://$HOST:$PORT ..."
