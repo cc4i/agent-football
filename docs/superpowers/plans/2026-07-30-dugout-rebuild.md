@@ -968,7 +968,6 @@ Create `dugout/stages.py`:
 ```python
 """The quest, as data. Predicates are pure functions over filesystem state."""
 
-import json
 import time
 from dataclasses import dataclass
 from typing import Callable
@@ -976,7 +975,6 @@ from typing import Callable
 from attributes import PLAYER_STATE_DIR, ROLES
 from tools import match
 from tools.avatars import SPRITE_DIR
-from tools.match import STATUS_FILE
 
 
 # Stages describe this session's progress, not the repository's contents.
