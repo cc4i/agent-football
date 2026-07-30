@@ -117,6 +117,8 @@ def get_agent():
 
 
 def agent_health() -> dict:
+    if _AGENT is not None:
+        return {"ok": True, "detail": "ready"}
     if not os.environ.get("GOOGLE_CLOUD_PROJECT"):
         return {"ok": False,
                 "detail": "GOOGLE_CLOUD_PROJECT is not set. Check dugout/.env."}
