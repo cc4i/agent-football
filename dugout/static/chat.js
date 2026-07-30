@@ -144,8 +144,9 @@ async function send() {
       }
       else if (kind === 'error') { addEvent(actor, minute, el('pre', 'out bad', payload)); }
       else if (kind === 'usage') {
-        if (payload !== null) {
-          tokenCount = payload;
+        const total = payload?.total;
+        if (typeof total === 'number' && isFinite(total)) {
+          tokenCount = total;
           document.querySelector('#token-count').textContent = `${(tokenCount / 1000).toFixed(1)}k tokens`;
         }
       }

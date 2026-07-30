@@ -127,3 +127,43 @@ def test_index_has_no_mocked_trajectory_left(monkeypatch):
     assert "58 events" not in body
     assert "24.1k tokens" not in body
     assert "· working" not in body
+
+
+def test_usage_payload_is_converted_to_a_plain_total(monkeypatch):
+    class FakeUsage:
+        total_token_count = 24100
+
+    class FakeAgent:
+        def chat(self, message):
+            return object()
+
+    async def fake_multiplex(response):
+        yield {"kind": "usage", "actor": "antigravity", "data": FakeUsage()}
+
+    c = client(monkeypatch, get_agent=lambda: FakeAgent(),
+               multiplex=fake_multiplex, stage_status=lambda: [])
+    with c.stream("POST", "/chat", json={"message": "hi"}) as r:
+        body = "".join(r.iter_text())
+
+    frame = next(b for b in body.split("\n\n") if "event: usage" in b)
+    data = json.loads(next(l[6:] for l in frame.splitlines() if l.startswith("data: ")))
+    assert data["payload"] == {"total": 24100}
+
+
+def test_usage_payload_of_none_serialises_without_error(monkeypatch):
+    class FakeAgent:
+        def chat(self, message):
+            return object()
+
+    async def fake_multiplex(response):
+        yield {"kind": "usage", "actor": "antigravity", "data": None}
+
+    c = client(monkeypatch, get_agent=lambda: FakeAgent(),
+               multiplex=fake_multiplex, stage_status=lambda: [])
+    with c.stream("POST", "/chat", json={"message": "hi"}) as r:
+        body = "".join(r.iter_text())
+
+    assert "event: usage" in body
+    frame = next(b for b in body.split("\n\n") if "event: usage" in b)
+    data = json.loads(next(l[6:] for l in frame.splitlines() if l.startswith("data: ")))
+    assert data["payload"] is None

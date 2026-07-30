@@ -83,6 +83,8 @@ async def _turn(message: str):
             payload = event["data"]
             if event["kind"] == "tool_call":
                 payload = {"name": payload.name, "args": payload.args}
+            elif event["kind"] == "usage" and payload is not None:
+                payload = {"total": getattr(payload, "total_token_count", None)}
             yield _frame(event["kind"], event["actor"], payload)
     except Exception as exc:
         yield _frame("error", "antigravity", str(exc))
