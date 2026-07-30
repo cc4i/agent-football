@@ -248,6 +248,8 @@ git commit -m "Add dugout attribute schema derived from game baselines"
 - Produces:
   - `STATUS_FILE: Path` = `Path("/tmp/futsal_status.json")`
   - `CALLED: set[str]` - names of tools invoked this session, so `stages.py` can tell that the agent actually read the game
+  - `STATUS_MAX_AGE_SEC: float` = `15.0`
+  - `status_is_fresh() -> bool` - True when `STATUS_FILE` was written within `STATUS_MAX_AGE_SEC`
   - `get_match_status() -> dict` - either `{"error": "game_not_running"}` or `{"score1": int, "score2": int, "matchTime": float, "gameActive": bool}`
   - `read_player_stats(role: str | None = None) -> dict` - `{role: {attribute: {"value": float, "min": float, "max": float}}}`
 
@@ -795,6 +797,44 @@ git commit -m "Add curated avatar generation tool and drop get_index_html"
 **Files:**
 - Create: `dugout/stages.py`
 - Create: `dugout/tests/test_stages.py`
+- Modify: `dugout/tools/match.py` (add `STATUS_MAX_AGE_SEC` and `status_is_fresh`, and make `get_match_status` refuse a stale file)
+- Modify: `dugout/tests/test_match_tools.py` (one test for the stale case)
+
+**Amendment to Task 2.** `get_match_status` currently trusts any parseable status file. The file is written continuously by the agent's Playwright script, so a frozen one means that script died: the score is history, not the live match. Reading it would have the agent tune against a match that already ended. Add to `dugout/tools/match.py`:
+
+```python
+STATUS_MAX_AGE_SEC = 15.0
+
+
+def status_is_fresh() -> bool:
+    """A live match rewrites the status file constantly; a frozen one is dead."""
+    try:
+        return (time.time() - STATUS_FILE.stat().st_mtime) <= STATUS_MAX_AGE_SEC
+    except OSError:
+        return False
+```
+
+with `import time` at the top, and make `get_match_status` return the same typed error when the file is stale, immediately after the `CALLED.add(...)` line:
+
+```python
+    if not status_is_fresh():
+        return {"error": "game_not_running"}
+```
+
+Add this test to `dugout/tests/test_match_tools.py`:
+
+```python
+def test_status_reports_game_not_running_when_the_file_is_stale(tmp_path, monkeypatch):
+    import os
+    f = tmp_path / "status.json"
+    f.write_text(json.dumps({"score1": 1, "score2": 0, "gameActive": True}))
+    old = time.time() - (match.STATUS_MAX_AGE_SEC + 30)
+    os.utime(f, (old, old))
+    monkeypatch.setattr(match, "STATUS_FILE", f)
+    assert match.get_match_status() == {"error": "game_not_running"}
+```
+
+with `import time` added to that test file. The four existing status tests write their file immediately before reading it, so they stay fresh and keep passing.
 
 **Interfaces:**
 - Consumes: `tools.match.STATUS_FILE`, `tools.avatars.SPRITE_DIR`, `attributes.PLAYER_STATE_DIR`, `attributes.ROLES`
@@ -811,6 +851,7 @@ Create `dugout/tests/test_stages.py`:
 
 ```python
 import json
+import os
 import time
 
 import pytest
@@ -875,18 +916,38 @@ def test_read_the_game_needs_the_stats_tool_to_have_run(fake_fs, monkeypatch):
     assert by_id["read_the_game"].is_done() is True
 
 
-def test_take_the_field_needs_a_live_status_file(fake_fs):
+def test_take_the_field_needs_a_live_status_file(fake_fs, monkeypatch):
+    monkeypatch.setattr(stages.match, "STATUS_FILE", fake_fs / "status.json")
     by_id = {s.id: s for s in stages.STAGES}
     assert by_id["take_the_field"].is_done() is False
     (fake_fs / "status.json").write_text(json.dumps({"score1": 0, "score2": 0}))
     assert by_id["take_the_field"].is_done() is True
 
 
-def test_tune_is_done_when_a_role_diverges_from_its_baseline(fake_fs):
+def test_a_stale_status_file_does_not_count_as_being_on_the_field(fake_fs, monkeypatch):
+    f = fake_fs / "status.json"
+    f.write_text(json.dumps({"score1": 1, "score2": 0}))
+    old = time.time() - (stages.match.STATUS_MAX_AGE_SEC + 30)
+    os.utime(f, (old, old))
+    monkeypatch.setattr(stages.match, "STATUS_FILE", f)
+    by_id = {s.id: s for s in stages.STAGES}
+    assert by_id["take_the_field"].is_done() is False
+
+
+def test_tune_is_done_once_a_role_file_is_rewritten_this_session(fake_fs, monkeypatch):
+    monkeypatch.setattr(stages, "STARTED_AT", time.time())
     by_id = {s.id: s for s in stages.STAGES}
     assert by_id["tune_the_squad"].is_done() is False
     (fake_fs / "player_state" / "forward.json").write_text(json.dumps({"pace": 0.9}))
     assert by_id["tune_the_squad"].is_done() is True
+
+
+def test_role_files_shipped_by_the_repo_do_not_count_as_tuned(fake_fs, monkeypatch):
+    # Three of the four shipped role files already differ from their baselines,
+    # so a content comparison would read as done on a clean checkout.
+    monkeypatch.setattr(stages, "STARTED_AT", time.time() + 60)
+    by_id = {s.id: s for s in stages.STAGES}
+    assert by_id["tune_the_squad"].is_done() is False
 
 
 def test_stage_status_is_json_serialisable(fake_fs):
@@ -945,10 +1006,12 @@ def _rebranded() -> bool:
 
 
 def _on_the_field() -> bool:
-    try:
-        return isinstance(json.loads(STATUS_FILE.read_text()), dict)
-    except (OSError, json.JSONDecodeError):
-        return False
+    """True only while a match is actually being played right now.
+
+    A status file left over from an earlier run would otherwise make this
+    stage look complete before the agent had done anything.
+    """
+    return match.status_is_fresh() and "error" not in match.get_match_status()
 
 
 def _scouted() -> bool:
@@ -957,13 +1020,15 @@ def _scouted() -> bool:
 
 
 def _tuned() -> bool:
+    """True once a role file has been rewritten during this session.
+
+    Comparing against the baseline does not work: the repository ships live
+    files that already differ from their baselines for three of the four
+    roles, so a content diff reads as done before anything has happened.
+    """
     for role in ROLES:
-        try:
-            live = json.loads((PLAYER_STATE_DIR / f"{role}.json").read_text())
-            base = json.loads((PLAYER_STATE_DIR / f"{role}_baseline.json").read_text())
-        except (OSError, json.JSONDecodeError):
-            continue
-        if live != base:
+        live = PLAYER_STATE_DIR / f"{role}.json"
+        if live.exists() and live.stat().st_mtime >= STARTED_AT:
             return True
     return False
 
@@ -1011,7 +1076,7 @@ def stage_status() -> list[dict]:
 - [ ] **Step 4: Run the tests and make sure they pass**
 
 Run: `cd dugout && uv run pytest tests/test_stages.py -v`
-Expected: 9 passed.
+Expected: 11 passed.
 
 - [ ] **Step 5: Commit**
 
