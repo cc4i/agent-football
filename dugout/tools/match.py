@@ -4,7 +4,7 @@ import json
 import time
 from pathlib import Path
 
-from attributes import PLAYER_STATE_DIR, ROLES, range_for
+from attributes import PLAYER_STATE_DIR, ROLES, baseline_profile, range_for
 
 STATUS_FILE = Path("/tmp/futsal_status.json")
 STATUS_MAX_AGE_SEC = 15.0
@@ -58,7 +58,10 @@ def read_player_stats(role: str | None = None) -> dict:
     stats = {}
     for name in wanted:
         profile = json.loads((PLAYER_STATE_DIR / f"{name}.json").read_text())
-        low_high = {k: range_for(k) for k in profile}
+        # Ranges come from the baseline, the same source tuning validates
+        # against, so a tuner is never shown bounds its change would fail.
+        baseline = baseline_profile(name)
+        low_high = {k: range_for(k, baseline.get(k)) for k in profile}
         stats[name] = {
             k: {"value": v, "min": low_high[k][0], "max": low_high[k][1]}
             for k, v in profile.items()

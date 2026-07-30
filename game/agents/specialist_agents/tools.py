@@ -16,6 +16,8 @@ import json
 import os
 import shutil
 import sys
+
+from . import profile_guard
 from google.adk.tools.mcp_tool import McpToolset
 from google.adk.tools.mcp_tool.mcp_session_manager import StdioConnectionParams
 from mcp import StdioServerParameters
@@ -198,6 +200,12 @@ def update_profile(role: str, changes: dict) -> str:
         role: The player role ('defender', 'midfielder', 'forward', 'goalkeeper').
         changes: A dictionary of attributes to update (e.g. {"attackPositioning": 0.9, "aggression": 0.8}).
     """
+    problems = profile_guard.validate(PLAYER_STATE_DIR, role, changes)
+    if problems:
+        # Hand the reasons back so the agent can correct itself, rather than
+        # writing a nonsense attribute the simulation will then act on.
+        return "Rejected: " + "; ".join(problems)
+
     file_path = os.path.join(PLAYER_STATE_DIR, f"{role}.json")
     try:
         if not os.path.exists(file_path):

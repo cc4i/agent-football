@@ -74,3 +74,22 @@ def test_read_status_does_not_record_a_tool_call(monkeypatch, tmp_path):
 def test_read_status_reports_no_match_the_same_way(monkeypatch, tmp_path):
     monkeypatch.setattr(match, "STATUS_FILE", tmp_path / "missing.json")
     assert match.read_status() == {"error": "game_not_running"}
+
+
+def test_reported_ranges_match_what_tuning_actually_enforces():
+    # A tuner reads its bounds here and is validated elsewhere. If the two
+    # disagree, the midfielder's decisionsDelay=150 is reported as 0 to 1 and
+    # any change it makes is refused.
+    from attributes import ROLES, validate_changes
+    from tools.match import read_player_stats
+
+    for role in ROLES:
+        for attribute, info in read_player_stats(role)[role].items():
+            value = info["value"]
+            if not isinstance(value, (int, float)) or isinstance(value, bool):
+                continue
+            assert info["min"] <= value <= info["max"], (
+                f"{role}.{attribute} is {value} but reported as "
+                f"{info['min']} to {info['max']}")
+            assert validate_changes(role, {attribute: info["min"]}) == []
+            assert validate_changes(role, {attribute: info["max"]}) == []

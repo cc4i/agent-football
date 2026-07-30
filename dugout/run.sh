@@ -37,6 +37,17 @@ if [ ! -f ".env" ]; then
     exit 1
 fi
 
+# The game's ADK servers read their own .env. Without it they still start and
+# the pitch still renders, so the only symptom is baseline backup and restore
+# failing with "No API key was provided" deep in the browser console. Warn
+# rather than exit: the dugout itself works fine, only stage 9 breaks.
+if [ ! -f "../game/.env" ]; then
+    echo "WARNING: no game/.env found." >&2
+    echo "         cp game/.env.example game/.env" >&2
+    echo "         Without it the game's coach and captain fail every call," >&2
+    echo "         and the squad will not reset when you refresh the pitch." >&2
+fi
+
 # Create/update .venv from pyproject.toml + uv.lock
 echo "--> Syncing python environment with uv..."
 uv sync --all-groups

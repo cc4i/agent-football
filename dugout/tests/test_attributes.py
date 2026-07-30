@@ -49,3 +49,18 @@ def test_out_of_range_value_is_a_violation():
 def test_non_numeric_value_is_a_violation():
     violations = validate_changes("forward", {"finishing": "fast"})
     assert len(violations) == 1
+
+
+def test_a_unit_bearing_attribute_outside_the_table_is_inferred():
+    # The shipped midfielder carries decisionsDelay=150 alongside
+    # decisionDelay. Read as a 0-1 weight it makes the game's own current
+    # state illegal, so a tuner echoing it back gets refused.
+    import json
+
+    from attributes import PLAYER_STATE_DIR, ROLES, validate_changes
+
+    for role in ROLES:
+        live = json.loads((PLAYER_STATE_DIR / f"{role}.json").read_text())
+        numeric = {k: v for k, v in live.items()
+                   if isinstance(v, (int, float)) and not isinstance(v, bool)}
+        assert validate_changes(role, numeric) == [], role
