@@ -80,6 +80,15 @@ the Playwright script it writes in stage 2. Run this on your own machine.
    new baseline instead. And it goes through the game's ADK coach, so it needs
    game/.env; check the browser console if the files do not change.
 
+Afterwards, run `git status`. A smoke run dirties tracked files and some of it
+is not obvious: the sprites are regenerated, the four role files are tuned,
+and the `*_baseline.json` files get rewritten too, because the game captures
+whatever is on disk as the new baseline on a first page load. Committing that
+would ship a tuned squad as the starting eleven. Restore
+`game/frontend/public/player_state/` and `game/frontend/public/assets/sprites/`
+unless you meant to keep them, and delete the scripts the agent wrote at the
+repository root.
+
 Failure to check on purpose: stop the game stack and send a message. The three
 game dots go red within about four seconds, since the header polls rather than
 reading once at load. The agent has shell access, so it does not just report
