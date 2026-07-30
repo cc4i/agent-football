@@ -17,7 +17,31 @@ import io
 import base64
 from PIL import Image
 
-def apply_chroma_key(image: Image.Image, key_color=(0, 255, 0), tolerance=120) -> Image.Image:
+def detect_key_color(image: Image.Image, fallback=(0, 255, 0)):
+    """The background colour actually present, taken from the four corners.
+
+    The prompt asks for #00FF00 and the model returns whatever green it likes -
+    (162, 247, 60) in practice, which is 173 away from pure green and so sails
+    past any sane fixed tolerance, leaving the sheet fully opaque. The corners
+    are background by construction, so ask the image instead of guessing.
+    """
+    rgb = image.convert("RGB")
+    w, h = rgb.size
+    corners = [rgb.getpixel(p) for p in
+               ((0, 0), (w - 1, 0), (0, h - 1), (w - 1, h - 1))]
+    mean = tuple(sum(c[i] for c in corners) / len(corners) for i in range(3))
+    # Generated backgrounds carry a little noise, so agreement is approximate.
+    # Corners that genuinely disagree mean this is not a flat screen.
+    spread = max(sum((c[i] - mean[i]) ** 2 for i in range(3)) ** 0.5
+                 for c in corners)
+    if spread > 12:
+        return fallback
+    r, g, b = (round(v) for v in mean)
+    # Only trust the sample if it really is a green screen.
+    return (r, g, b) if g > r and g > b else fallback
+
+
+def apply_chroma_key(image: Image.Image, key_color=(0, 255, 0), tolerance=60) -> Image.Image:
     """
     Removes the solid background color (chroma-keying) and makes it transparent.
     Used to remove the green screen background from generated spritesheets.
@@ -61,9 +85,13 @@ def process_avatar_image(image_bytes: bytes, target_size: tuple) -> Image.Image:
     Loads, resizes, and applies chroma key transparency to the image.
     """
     image = Image.open(io.BytesIO(image_bytes))
+    # Sample before resizing: interpolation smears the border into the figure.
+    key_color = detect_key_color(image)
     if image.size != target_size:
         image = image.resize(target_size, Image.Resampling.LANCZOS)
-    return apply_chroma_key(image, key_color=(0, 255, 0), tolerance=120)
+    # Tight: the screen is uniform, and gold trim sits only ~109 from the lime
+    # the model returns, so a loose radius erases the crest along with it.
+    return apply_chroma_key(image, key_color=key_color, tolerance=60)
 
 
 def save_and_encode_image(image: Image.Image, filename: str, output_dir: str, make_default_gk: bool = False) -> str:

@@ -44,7 +44,7 @@ def _client():
 
 def _generate_one(client, prompt: str, filename: str, make_default_gk: bool):
     response = client.models.generate_content(
-        model="gemini-2.5-flash-image", contents=prompt)
+        model="gemini-3.1-flash-image", contents=prompt)
     image_bytes = utils.extract_image_bytes(response)
     if not image_bytes:
         return None
