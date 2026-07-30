@@ -141,3 +141,5 @@ Thumbs.db
 *.adk
 
 node_modules/
+# Local agent harness state, including git worktrees.
+.claude/
