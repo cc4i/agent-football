@@ -71,14 +71,16 @@ def generate_team_avatars(team: str, color: str, logo: str, style: str) -> dict:
 
     outfield = _generate_one(
         client, prompts.get_player_prompt(color, logo, style),
-        f"player_{team}.png", False)
+        f"player_{team}_team.png", False)
     if outfield is None:
         raise AvatarGenerationError(
             f"the model returned no image for the {team} outfield players")
 
+    # Only our own keeper becomes the fallback goalkeeper.png; the opponent's
+    # must not overwrite it.
     keeper = _generate_one(
         client, prompts.get_goalkeeper_prompt(color, logo, style),
-        f"goalkeeper_{team}.png", True)
+        f"goalkeeper_{team}_team.png", team == "blue")
     if keeper is None:
         raise AvatarGenerationError(
             f"the model returned no image for the {team} goalkeeper")
