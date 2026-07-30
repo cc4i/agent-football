@@ -66,30 +66,34 @@ def stages():
     return stage_status()
 
 
+async def _turn(message: str):
+    """Yield one turn's frames. Never raises: failures become error frames."""
+    try:
+        agent = get_agent()
+        response = agent.chat(message)
+    except AgentUnavailable as exc:
+        yield _frame("error", "antigravity", str(exc))
+        return
+    except Exception as exc:
+        yield _frame("error", "antigravity", f"the agent failed to start: {exc}")
+        return
+
+    try:
+        async for event in multiplex(response):
+            payload = event["data"]
+            if event["kind"] == "tool_call":
+                payload = {"name": payload.name, "args": payload.args}
+            yield _frame(event["kind"], event["actor"], payload)
+    except Exception as exc:
+        yield _frame("error", "antigravity", str(exc))
+
+
 @app.post("/chat")
 def chat(request: ChatRequest):
     async def stream():
         yield _frame("user", ACTOR_USER, request.message)
-        try:
-            try:
-                agent = get_agent()
-                response = agent.chat(request.message)
-            except AgentUnavailable as exc:
-                yield _frame("error", "antigravity", str(exc))
-                return
-            except Exception as exc:
-                yield _frame("error", "antigravity", f"the agent failed to start: {exc}")
-                return
-
-            try:
-                async for event in multiplex(response):
-                    payload = event["data"]
-                    if event["kind"] == "tool_call":
-                        payload = {"name": payload.name, "args": payload.args}
-                    yield _frame(event["kind"], event["actor"], payload)
-            except Exception as exc:
-                yield _frame("error", "antigravity", str(exc))
-        finally:
-            yield _frame("stage_done", "antigravity", stage_status())
+        async for frame in _turn(request.message):
+            yield frame
+        yield _frame("stage_done", "antigravity", stage_status())
 
     return StreamingResponse(stream(), media_type="text/event-stream")

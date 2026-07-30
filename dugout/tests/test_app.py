@@ -90,3 +90,22 @@ def test_chat_streams_every_event_kind_with_actor_and_payload(monkeypatch):
     assert tool_frame["actor"] == "subagent:forward-tuner"
     assert tool_frame["payload"] == {"name": "read_player_stats", "args": {"role": "forward"}}
     assert dict(frames)["error"]["payload"] == "a plain string"
+
+
+async def test_the_stream_closes_cleanly_when_the_client_disconnects(monkeypatch):
+    class FakeAgent:
+        def chat(self, message):
+            return object()
+
+    async def fake_multiplex(response):
+        yield {"kind": "thought", "actor": "antigravity", "data": "one"}
+        yield {"kind": "text", "actor": "antigravity", "data": "two"}
+
+    monkeypatch.setattr(app_module, "get_agent", lambda: FakeAgent())
+    monkeypatch.setattr(app_module, "multiplex", fake_multiplex)
+    monkeypatch.setattr(app_module, "stage_status", lambda: [])
+
+    # Test _turn directly - it must handle close without yielding in finally
+    gen = app_module._turn("hello")
+    assert await gen.__anext__()
+    await gen.aclose()  # this raised RuntimeError under the yield-in-finally version
