@@ -16,6 +16,7 @@ import './style.css';
 import Phaser from 'phaser';
 import { SoccerGameScene, GAME_DURATION_SEC, STATUS_CHECK_MS } from './game';
 import { Sound } from './audio';
+import { createStatusHook } from './status.js';
 
 let gameInstance = null;
 let currentProfiles = {};
@@ -697,6 +698,7 @@ function startPhaserGame() {
   };
 
   gameInstance = new Phaser.Game(config);
+  window.__futsal = { status: createStatusHook(() => gameInstance) };
 
   gameInstance.events.once('ready', () => {
     const scene = gameInstance.scene.getScene('SoccerGameScene');
