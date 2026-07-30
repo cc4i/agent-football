@@ -18,6 +18,9 @@ let lastActor = null;
 let eventCount = 0;
 let tokenCount = null;
 let matchClock = null;
+let skills = [];
+// The quest stage each skill belongs to.
+const SKILL_STAGES = { tune_the_squad: true };
 let inFlight = null;
 
 const label = (actor) =>
@@ -68,21 +71,87 @@ function richText(cls, source) {
   return p;
 }
 
+function changesTable(changes, reason) {
+  // A tuner's whole contribution is which numbers it moved. As raw JSON on one
+  // line that is unreadable, and this is the stage people are here to watch.
+  const box = el('div', 'changes');
+  const table = el('table');
+  for (const [key, value] of Object.entries(changes)) {
+    const row = el('tr');
+    row.append(el('td', 'k', key), el('td', 'v', String(value)));
+    table.append(row);
+  }
+  box.append(table);
+  if (reason) box.append(el('p', 'why', reason));
+  return box;
+}
+
 function toolCallNode(payload) {
   const wrap = el('div', 'act');
   wrap.append(el('span', 'verb', VERB[payload.name] || 'Called'));
   const call = el('span', 'call');
   call.append(el('span', 'fn', payload.name));
-  call.append(el('span', 'arg', `(${JSON.stringify(payload.args ?? {})})`));
+
+  const args = payload.args ?? {};
+  const isTune = payload.name.startsWith('tune_') && args.changes;
+  if (!isTune) call.append(el('span', 'arg', `(${JSON.stringify(args)})`));
   wrap.append(call);
+
+  if (isTune) wrap.append(changesTable(args.changes, args.reason));
   return wrap;
+}
+
+function kitNode(payload) {
+  // Show the strip that was just generated. Served by the game on :5173, with
+  // the timestamp busting the cache so a re-run does not show the old kit.
+  const box = el('div', 'kit');
+  box.append(el('span', 'verb', 'Kit'));
+  for (const src of payload.images) {
+    const img = document.createElement('img');
+    img.src = `http://localhost:5173${src}?t=${payload.at}`;
+    img.alt = `${payload.team} team kit`;
+    box.append(img);
+  }
+  return box;
+}
+
+function skillBody(source) {
+  // Kept in a <pre> so the tables stay aligned, but the markdown markers
+  // themselves are noise. Built as nodes, never innerHTML.
+  const out = document.createDocumentFragment();
+  for (const line of String(source).split('\n')) {
+    const heading = line.match(/^(#{1,6})\s+(.*)$/);
+    if (heading) {
+      out.append(el('b', 'skill-h', heading[2]), document.createTextNode('\n'));
+      continue;
+    }
+    for (const [i, part] of line.split('**').entries()) {
+      if (part) out.append(i % 2 ? el('b', null, part) : document.createTextNode(part));
+    }
+    out.append(document.createTextNode('\n'));
+  }
+  return out;
+}
+
+function openSkill(skill) {
+  const sheet = document.querySelector('.skill-sheet');
+  sheet.querySelector('.skill-name').textContent = skill.name;
+  sheet.querySelector('.skill-desc').textContent = skill.description;
+  sheet.querySelector('.skill-body').replaceChildren(skillBody(skill.body));
+  sheet.hidden = false;
+}
+
+async function loadSkills() {
+  skills = await (await fetch('/skills')).json();
 }
 
 async function renderStages() {
   const data = await (await fetch('/stages')).json();
   stagesEl.replaceChildren(...data.map((s, i) => {
+    // Nothing is ever locked. Done is a badge, not a gate: the point is to
+    // rebrand, tune, look at the result and go again.
     const isLive = !s.done && data.slice(0, i).every(p => p.done);
-    const li = el('li', `stage ${s.done ? 'done' : (isLive ? 'live' : 'locked')}`);
+    const li = el('li', `stage ${s.done ? 'done' : (isLive ? 'live' : 'open')}`);
 
     const tile = el('div', 'tile', String(i + 1));
     const content = el('div');
@@ -91,13 +160,20 @@ async function renderStages() {
 
     content.append(h3, p);
 
-    if (isLive) {
-      const suggest = el('div', 'suggest');
-      const suggestSpan = el('span', null, 'Suggested');
-      const suggestQ = el('q', null, s.suggested);
-      suggest.append(suggestSpan, suggestQ);
-      suggest.onclick = () => { input.value = s.suggested; input.focus(); };
-      content.append(suggest);
+    const suggest = el('div', 'suggest');
+    suggest.append(el('span', null, s.done ? 'Run it again' : 'Suggested'),
+                   el('q', null, s.suggested));
+    suggest.onclick = () => { input.value = s.suggested; input.focus(); };
+    content.append(suggest);
+
+    // Tuning is the stage where knowing the simulation decides the result, so
+    // show the manager what Antigravity has been told before it starts.
+    for (const skill of SKILL_STAGES[s.id] ? skills : []) {
+      const chip = el('button', 'skill-chip');
+      chip.append(el('i'), el('span', null, skill.name));
+      chip.title = skill.description;
+      chip.onclick = () => openSkill(skill);
+      content.append(chip);
     }
 
     li.append(tile, content);
@@ -222,6 +298,7 @@ async function send() {
           }
           textNode.textContent += payload;
         }
+        else if (kind === 'kit') { addEvent(actor, minute, kitNode(payload)); textNode = null; }
         else if (kind === 'error') { addEvent(actor, minute, el('pre', 'out bad', payload)); }
         else if (kind === 'usage') {
           const total = payload?.total;
@@ -251,7 +328,13 @@ sendBtn.onclick = send;
 haltBtn.onclick = halt;
 restartBtn.onclick = restart;
 input.onkeydown = (e) => { if (e.key === 'Enter') send(); };
-renderStages();
+document.querySelector('.skill-close').onclick =
+  () => { document.querySelector('.skill-sheet').hidden = true; };
+document.querySelector('.skill-sheet').onclick = (e) => {
+  if (e.target.classList.contains('skill-sheet')) e.target.hidden = true;
+};
+
+loadSkills().then(renderStages);
 checkHealth();
 setInterval(checkHealth, 4000);
 setWorking(false);

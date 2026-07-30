@@ -89,10 +89,10 @@ body::before{
 @keyframes board{0%,100%{box-shadow:0 0 0 0 rgba(255,176,32,.34)}50%{box-shadow:0 0 0 5px rgba(255,176,32,0)}}
 .stage.live{border-left-color:var(--amber);background:linear-gradient(90deg,rgba(255,176,32,.055),transparent 70%)}
 .stage h3{margin:0;font-family:var(--sheet);font-weight:600;font-size:15.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--chalk-2)}
-.stage.done h3{color:var(--chalk-3)}
+.stage.done h3{color:var(--chalk-2)}
 .stage.live h3{color:var(--chalk)}
 .stage p{margin:4px 0 0;font-size:13px;line-height:1.5;color:var(--chalk-3);font-weight:300}
-.stage.locked{opacity:.5}
+.stage.open{opacity:.82}
 .done-note{display:block;margin-top:5px;font-family:var(--data);font-size:10.5px;color:var(--amber-2)}
 .by{display:inline-block;font-family:var(--sheet);font-weight:600;font-size:9px;letter-spacing:.16em;text-transform:uppercase;color:var(--amber-2);border:1px solid var(--amber-3);border-radius:2px;padding:1px 5px;margin-top:6px}
 .by.sys{color:var(--sys-2);border-color:var(--sys-3)}
@@ -258,3 +258,49 @@ body.is-blocked .agy-chip span{color:var(--fail);opacity:.8}
   .node,.node.indent{grid-template-columns:1fr;gap:2px}
   .node>b{text-align:left}
 }
+
+/* ── skills ──────────────────────────────────────────────── */
+/* Amber, because a skill is Antigravity's knowledge and nothing else. */
+.skill-chip{display:flex;align-items:center;gap:7px;margin-top:10px;width:100%;
+  font-family:var(--data);font-size:11px;letter-spacing:.02em;text-align:left;
+  background:rgba(255,176,32,.05);color:var(--amber-2);
+  border:1px dashed var(--amber-3);border-radius:3px;padding:7px 10px;cursor:pointer}
+.skill-chip:hover{color:var(--amber);border-color:var(--amber-2);background:rgba(255,176,32,.09)}
+.skill-chip i{width:5px;height:5px;border-radius:50%;background:var(--amber);flex:0 0 auto}
+.stage.open .skill-chip{opacity:.8}
+
+.skill-sheet{position:fixed;inset:0;z-index:50;display:flex;align-items:center;
+  justify-content:center;padding:40px;background:rgba(5,9,8,.72)}
+.skill-sheet[hidden]{display:none}
+.skill-card{display:flex;flex-direction:column;gap:10px;width:min(860px,100%);
+  max-height:100%;padding:22px 24px;background:var(--turf-800);
+  border:1px solid var(--amber-3);border-radius:4px}
+.skill-hd{display:flex;align-items:center;justify-content:space-between}
+.skill-close{font-family:var(--sheet);font-weight:600;font-size:10px;letter-spacing:.16em;
+  text-transform:uppercase;background:transparent;color:var(--chalk-3);
+  border:1px solid var(--rule);border-radius:2px;padding:4px 10px;cursor:pointer}
+.skill-close:hover{color:var(--chalk);border-color:var(--chalk-3)}
+.skill-name{font-family:var(--data);font-size:15px;color:var(--amber)}
+.skill-desc{margin:0;font-size:13.5px;line-height:1.5;color:var(--chalk-2);font-weight:300}
+.skill-body{margin:0;overflow:auto;padding:14px 16px;background:var(--turf-900);
+  border:1px solid var(--rule);border-radius:3px;
+  font-family:var(--data);font-size:12px;line-height:1.65;color:var(--chalk-2);
+  white-space:pre-wrap;word-break:break-word}
+.skill-body .skill-h{display:inline-block;margin-top:6px;color:var(--amber-2);font-weight:600;letter-spacing:.04em}
+.skill-body b{color:var(--chalk)}
+
+/* ── tuning tables and kit previews in the log ───────────── */
+.changes{margin-top:7px}
+.changes table{border-collapse:collapse;font-family:var(--data);font-size:12px}
+.changes td{padding:2px 0;vertical-align:baseline}
+.changes td.k{color:var(--chalk-3);padding-right:18px;white-space:nowrap}
+.changes td.v{color:var(--amber);text-align:right;font-variant-numeric:tabular-nums}
+.changes .why{margin:7px 0 0;font-size:13px;line-height:1.45;color:var(--chalk-2);font-weight:300}
+
+.kit{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-top:2px}
+/* Checkered so a transparent cut-out is obviously transparent. */
+.kit img{height:118px;width:auto;padding:6px 10px;border:1px solid var(--rule);border-radius:3px;
+  background-color:var(--turf-800);
+  background-image:linear-gradient(45deg,rgba(255,255,255,.022) 25%,transparent 25%,transparent 75%,rgba(255,255,255,.022) 75%),
+                   linear-gradient(45deg,rgba(255,255,255,.022) 25%,transparent 25%,transparent 75%,rgba(255,255,255,.022) 75%);
+  background-size:14px 14px;background-position:0 0,7px 7px}

@@ -281,3 +281,47 @@ def test_reset_still_answers_when_the_agent_cannot_restart(monkeypatch):
     monkeypatch.setattr(app_module, "restart_agent", boom)
     monkeypatch.setattr(app_module, "stage_status", lambda: [])
     assert TestClient(app_module.app).post("/reset").status_code == 200
+
+
+def test_skills_are_served_for_the_team_sheet(monkeypatch):
+    body = TestClient(app_module.app).get("/skills").json()
+    assert any(s["name"] == "winning-the-match" for s in body)
+    assert all({"name", "description", "body"} <= set(s) for s in body)
+
+
+def test_a_rebrand_turn_ends_with_the_new_kit(monkeypatch):
+    class FakeToolCall:
+        name = "generate_team_avatars"
+        args = {"team": "blue", "color": "black"}
+
+    class FakeAgent:
+        async def chat(self, message):
+            return StubResponse()
+
+    async def fake_multiplex(response):
+        yield {"kind": "tool_call", "actor": "antigravity", "data": FakeToolCall()}
+
+    c = client(monkeypatch, get_agent=lambda: FakeAgent(),
+               multiplex=fake_multiplex, stage_status=lambda: [])
+    with c.stream("POST", "/chat", json={"message": "kit us out"}) as r:
+        body = "".join(r.iter_text())
+
+    frame = next(b for b in body.split("\n\n") if "event: kit" in b)
+    data = json.loads(next(l[6:] for l in frame.splitlines() if l.startswith("data: ")))
+    assert data["payload"]["team"] == "blue"
+    assert data["payload"]["images"]
+    assert data["payload"]["at"]
+
+
+def test_a_turn_without_a_rebrand_has_no_kit_frame(monkeypatch):
+    class FakeAgent:
+        async def chat(self, message):
+            return StubResponse()
+
+    async def fake_multiplex(response):
+        yield {"kind": "text", "actor": "antigravity", "data": "nothing to see"}
+
+    c = client(monkeypatch, get_agent=lambda: FakeAgent(),
+               multiplex=fake_multiplex, stage_status=lambda: [])
+    with c.stream("POST", "/chat", json={"message": "hi"}) as r:
+        assert "event: kit" not in "".join(r.iter_text())

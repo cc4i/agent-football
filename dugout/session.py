@@ -14,6 +14,7 @@ from google.antigravity import (
 from google.antigravity.hooks import policy
 from google.antigravity.types import Text
 
+from skills import SKILLS_DIR
 from subagents import SUBAGENTS
 from tools.avatars import generate_team_avatars
 from tools.match import get_match_status, read_player_stats
@@ -147,6 +148,7 @@ def _build_config() -> LocalAgentConfig:
         tools=[generate_team_avatars, get_match_status, read_player_stats,
                *TUNING_TOOL_BY_ROLE.values()],
         subagents=list(SUBAGENTS),
+        skills_paths=[str(SKILLS_DIR)],
         workspaces=[str(REPO_ROOT)],
         vertex=True,
         project=os.environ.get("GOOGLE_CLOUD_PROJECT"),

@@ -21,7 +21,9 @@ from session import (
     start_agent,
     stop_agent,
 )
+from skills import load_skills
 from stages import begin_session, stage_status
+from tools.avatars import SPRITE_DIR
 from tools.match import read_status
 
 load_dotenv()
@@ -72,6 +74,16 @@ class ChatRequest(BaseModel):
         return stripped
 
 
+def kit_preview(team: str) -> dict:
+    """Where the game serves the strip just generated, and when."""
+    names = [f"player_{team}_team.png", f"goalkeeper_{team}_team.png"]
+    live = [n for n in names if (SPRITE_DIR / n).exists()]
+    newest = max((( SPRITE_DIR / n).stat().st_mtime for n in live), default=0)
+    return {"team": team,
+            "images": [f"/assets/sprites/{n}" for n in live],
+            "at": int(newest)}
+
+
 def _frame(kind: str, actor: str, payload, step=None) -> str:
     body = json.dumps({"actor": actor, "payload": payload, "step": step},
                       default=str)
@@ -92,6 +104,12 @@ def health():
 @app.get("/stages")
 def stages():
     return stage_status()
+
+
+@app.get("/skills")
+def skills():
+    """What Antigravity was told. The team sheet links to it."""
+    return load_skills()
 
 
 @app.post("/reset")
@@ -120,15 +138,22 @@ async def _turn(message: str):
         yield _frame("error", "antigravity", f"the agent failed to start: {exc}")
         return
 
+    rebranded = []
     try:
         async for event in multiplex(response):
             payload = event["data"]
             if event["kind"] == "tool_call":
                 payload = {"name": payload.name, "args": payload.args}
+                if payload["name"] == "generate_team_avatars":
+                    rebranded.append(payload["args"].get("team", "blue"))
             elif event["kind"] == "usage" and payload is not None:
                 payload = {"total": getattr(payload, "total_token_count", None)}
             yield _frame(event["kind"], event["actor"], payload,
                          event.get("step"))
+        # The sprites only exist on disk once the tool has returned, so the kit
+        # is shown after the stream rather than alongside the call.
+        for team in dict.fromkeys(rebranded):
+            yield _frame("kit", "antigravity", kit_preview(team))
     except Exception as exc:
         yield _frame("error", "antigravity", str(exc))
     finally:

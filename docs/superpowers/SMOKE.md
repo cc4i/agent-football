@@ -21,9 +21,11 @@ the Playwright script it writes in stage 2. Run this on your own machine.
      the page. The composer stays disabled until the agent is reachable, so being
      unable to type is expected and not a second fault.
 4. Team sheet lists four stages (rebrand, take the field, read the game, tune the
-   squad), none marked done after a fresh dugout launch. Stage completion is
-   session-relative: a filesystem write is only counted if it is newer than the
-   session start. That is what makes the quest replayable, since nobody has to
+   squad), none marked done after a fresh dugout launch. Every stage keeps its
+   suggested line whether or not it is done, so any of them can be run again;
+   a done stage offers "Run it again". Tweaking and re-running is the point.
+   Stage completion is session-relative: a filesystem write only counts if it
+   is newer than the session start. That is what makes the quest replayable, since nobody has to
    reset files by hand.
    - Press Start over to begin a new session without restarting the server.
      It blanks the quest, clears the log and gives the agent a fresh
@@ -31,9 +33,12 @@ the Playwright script it writes in stage 2. Run this on your own machine.
    - Do press it if you open the page onto a quest someone else was halfway
      through. A dugout left running keeps counting yesterday's work, and
      because each stage is judged independently you can otherwise arrive at
-     something incoherent, like stage 4 done while stage 3 is still locked.
+     something incoherent, like stage 4 done while stage 3 has not been run.
 5. Send "Kit us out in black and gold with a wolf crest."
    - Trajectory shows a thought, then CALLED generate_team_avatars.
+   - The log ends with the generated strip itself, outfield sheet and keeper,
+     on a checkered background so a transparent cut-out is obvious. A green
+     rectangle instead means the chroma-key missed.
    - Every event names its actor in the gutter.
    - Stage 1 flips to done. Reload http://localhost:5173 and the new kit is on
      the pitch, and in the portrait in the top left corner. The players are a
@@ -64,6 +69,10 @@ the Playwright script it writes in stage 2. Run this on your own machine.
    - Four subagents run. Each tool call is attributed to its own role, so the
      gutter reads DEFENDER, MIDFIELDER, FORWARD, GOALKEEPER rather than
      Antigravity four times.
+   - Each one renders its change as a table of attribute and new value with
+     the tuner's reason underneath, not a line of JSON.
+   - The winning-the-match skill is listed on this stage. Click it to read
+     exactly what Antigravity was told about the simulation.
    - All four role files are rewritten within a few seconds of each other.
    - Any out-of-range attempt comes back as a violation list, not a crash.
    - A match is three minutes at 1x and a tuning turn takes three to five, so
