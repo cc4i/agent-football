@@ -1,7 +1,5 @@
 import asyncio
 
-import pytest
-
 import session
 
 
@@ -103,3 +101,49 @@ async def test_a_failing_source_becomes_an_error_event_not_a_crash():
     assert "error" in kinds
     assert "text" in kinds
     assert kinds[-1] == "usage"
+
+
+async def test_the_three_streams_are_pumped_concurrently():
+    gate = asyncio.Event()
+
+    class Interlocked(FakeResponse):
+        @property
+        def thoughts(self):
+            async def g():
+                yield "releases the gate"
+                gate.set()
+            return g()
+
+        @property
+        def chunks(self):
+            async def g():
+                await gate.wait()   # a sequential drain never gets here
+                yield "chunk"
+            return g()
+
+    events = await asyncio.wait_for(collect(Interlocked()), timeout=2)
+    assert [e["kind"] for e in events] == ["thought", "text", "usage"]
+
+
+async def test_a_raising_source_property_becomes_an_error_event():
+    class RaisingProperty(FakeResponse):
+        @property
+        def thoughts(self):
+            raise RuntimeError("property read failed")
+
+    events = await collect(RaisingProperty(tool_calls=[FakeToolCall("foo")], chunks=["c"]))
+    kinds = [e["kind"] for e in events]
+    assert "error" in kinds
+    assert "tool_call" in kinds
+    assert "text" in kinds
+    assert kinds[-1] == "usage"
+
+
+async def test_early_consumer_abandonment_closes_cleanly():
+    async def abandon(response):
+        gen = session.multiplex(response)
+        event = await gen.__anext__()
+        assert event["kind"] == "thought"
+        return
+
+    await abandon(FakeResponse(thoughts=["first", "second"], chunks=["c"]))

@@ -20,9 +20,9 @@ def actor_for_tool_call(name: str) -> str:
     return f"subagent:{role}-tuner" if role else ACTOR_AGENT
 
 
-async def _pump(source, kind, queue):
+async def _pump(get_source, kind, queue):
     try:
-        async for item in source:
+        async for item in get_source():
             actor = (actor_for_tool_call(getattr(item, "name", ""))
                      if kind == "tool_call" else ACTOR_AGENT)
             await queue.put({"kind": kind, "actor": actor, "data": item})
@@ -37,9 +37,9 @@ async def multiplex(response):
     """Fan thoughts, tool calls and text chunks into one ordered timeline."""
     queue: asyncio.Queue = asyncio.Queue()
     sources = (
-        (response.thoughts, "thought"),
-        (response.tool_calls, "tool_call"),
-        (response.chunks, "text"),
+        (lambda: response.thoughts, "thought"),
+        (lambda: response.tool_calls, "tool_call"),
+        (lambda: response.chunks, "text"),
     )
     tasks = [asyncio.create_task(_pump(src, kind, queue)) for src, kind in sources]
 
@@ -55,5 +55,8 @@ async def multiplex(response):
         for task in tasks:
             task.cancel()
 
-    yield {"kind": "usage", "actor": ACTOR_AGENT,
-           "data": getattr(response, "usage_metadata", None)}
+    try:
+        usage = response.usage_metadata
+    except Exception:
+        usage = None
+    yield {"kind": "usage", "actor": ACTOR_AGENT, "data": usage}
