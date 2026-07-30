@@ -639,7 +639,7 @@ def test_a_successful_run_reports_both_written_paths(monkeypatch):
     calls = []
 
     def fake_generate_one(client, prompt, filename, make_default_gk):
-        calls.append(filename)
+        calls.append((filename, make_default_gk))
         return f"/sprites/{filename}"
 
     monkeypatch.setattr(avatars, "_client", lambda: object())
@@ -648,9 +648,22 @@ def test_a_successful_run_reports_both_written_paths(monkeypatch):
     result = avatars.generate_team_avatars("blue", "black", "wolf", "blond hair")
 
     assert result["team"] == "blue"
-    assert result["sprite_sheet"] == "/sprites/player_blue.png"
-    assert result["goalkeeper"] == "/sprites/goalkeeper_blue.png"
-    assert calls == ["player_blue.png", "goalkeeper_blue.png"]
+    assert result["sprite_sheet"] == "/sprites/player_blue_team.png"
+    assert result["goalkeeper"] == "/sprites/goalkeeper_blue_team.png"
+    assert calls == [("player_blue_team.png", False),
+                     ("goalkeeper_blue_team.png", True)]
+
+
+def test_the_opponent_keeper_does_not_become_the_default(monkeypatch):
+    calls = []
+    monkeypatch.setattr(avatars, "_client", lambda: object())
+    monkeypatch.setattr(avatars, "_generate_one",
+                        lambda c, p, filename, make_default_gk: (
+                            calls.append((filename, make_default_gk)),
+                            f"/sprites/{filename}")[1])
+    avatars.generate_team_avatars("red", "white", "tiger", "dark hair")
+    assert calls == [("player_red_team.png", False),
+                     ("goalkeeper_red_team.png", False)]
 ```
 
 - [ ] **Step 2: Run it to make sure it fails**
@@ -722,14 +735,16 @@ def generate_team_avatars(team: str, color: str, logo: str, style: str) -> dict:
 
     outfield = _generate_one(
         client, prompts.get_player_prompt(color, logo, style),
-        f"player_{team}.png", False)
+        f"player_{team}_team.png", False)
     if outfield is None:
         raise AvatarGenerationError(
             f"the model returned no image for the {team} outfield players")
 
+    # Only our own keeper becomes the fallback goalkeeper.png; the opponent's
+    # must not overwrite it.
     keeper = _generate_one(
         client, prompts.get_goalkeeper_prompt(color, logo, style),
-        f"goalkeeper_{team}.png", True)
+        f"goalkeeper_{team}_team.png", team == "blue")
     if keeper is None:
         raise AvatarGenerationError(
             f"the model returned no image for the {team} goalkeeper")
@@ -796,6 +811,7 @@ Create `dugout/tests/test_stages.py`:
 
 ```python
 import json
+import time
 
 import pytest
 
@@ -832,13 +848,23 @@ def test_no_em_dash_in_any_stage_copy():
         assert "—" not in (s.title + s.blurb + s.suggested)
 
 
-def test_rebrand_needs_both_sprite_sheets(fake_fs):
+def test_rebrand_needs_both_sprite_sheets(fake_fs, monkeypatch):
+    monkeypatch.setattr(stages, "STARTED_AT", 0)
     by_id = {s.id: s for s in stages.STAGES}
     assert by_id["rebrand"].is_done() is False
-    (fake_fs / "sprites" / "player_blue.png").write_bytes(b"x")
+    (fake_fs / "sprites" / "player_blue_team.png").write_bytes(b"x")
     assert by_id["rebrand"].is_done() is False
-    (fake_fs / "sprites" / "player_red.png").write_bytes(b"x")
+    (fake_fs / "sprites" / "player_red_team.png").write_bytes(b"x")
     assert by_id["rebrand"].is_done() is True
+
+
+def test_sprites_that_predate_this_session_do_not_count(fake_fs, monkeypatch):
+    for team in ("blue", "red"):
+        (fake_fs / "sprites" / f"player_{team}_team.png").write_bytes(b"x")
+    # The repo ships sprites; only a rewrite during this session counts.
+    monkeypatch.setattr(stages, "STARTED_AT", time.time() + 60)
+    by_id = {s.id: s for s in stages.STAGES}
+    assert by_id["rebrand"].is_done() is False
 
 
 def test_read_the_game_needs_the_stats_tool_to_have_run(fake_fs, monkeypatch):
@@ -882,6 +908,7 @@ Create `dugout/stages.py`:
 """The quest, as data. Predicates are pure functions over filesystem state."""
 
 import json
+import time
 from dataclasses import dataclass
 from typing import Callable
 
@@ -889,6 +916,10 @@ from attributes import PLAYER_STATE_DIR, ROLES
 from tools import match
 from tools.avatars import SPRITE_DIR
 from tools.match import STATUS_FILE
+
+
+# Stages describe this session's progress, not the repository's contents.
+STARTED_AT = time.time()
 
 
 @dataclass(frozen=True)
@@ -901,8 +932,16 @@ class Stage:
 
 
 def _rebranded() -> bool:
-    return all((SPRITE_DIR / f"player_{team}.png").exists()
-               for team in ("blue", "red"))
+    """True once both sprite sheets have been rewritten during this session.
+
+    The repository ships working sprites, so existence proves nothing. Only a
+    write newer than process start means the manager actually rebranded.
+    """
+    for team in ("blue", "red"):
+        sheet = SPRITE_DIR / f"player_{team}_team.png"
+        if not sheet.exists() or sheet.stat().st_mtime < STARTED_AT:
+            return False
+    return True
 
 
 def _on_the_field() -> bool:
@@ -972,7 +1011,7 @@ def stage_status() -> list[dict]:
 - [ ] **Step 4: Run the tests and make sure they pass**
 
 Run: `cd dugout && uv run pytest tests/test_stages.py -v`
-Expected: 8 passed.
+Expected: 9 passed.
 
 - [ ] **Step 5: Commit**
 
