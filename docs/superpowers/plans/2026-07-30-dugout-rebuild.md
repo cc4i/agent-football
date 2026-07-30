@@ -14,7 +14,7 @@
 - `SubagentConfig` and `SubagentCapabilities` import from `google.antigravity.types`, **not** the package root. Verified against the installed wheel.
 - Dugout runs on port **8002**. Game stack is Vite :5173, ADK coach :8000, captain A2A :8001.
 - **Never use the em dash `—` anywhere**, in code, comments, copy, commit messages or docs. Use a plain dash `-`.
-- Player attribute values are **floats in 0.0-1.0**, except `tackleCooldown` (ms, ~800), `decisionDelay` (ms, ~80) and `recoverySpeedMultiplier` (~1.2). There are 32 keys per role. Any "0-100" values in the mockup are illustrative and wrong.
+- Player attribute values are **floats in 0.0-1.0**, except `tackleCooldown` (ms, ~800), `decisionDelay` (ms, ~80) and `recoverySpeedMultiplier` (~1.2). Attribute counts differ per role (defender 30, midfielder 42, forward 32, goalkeeper 53), so never hardcode a count. Any "0-100" values in the mockup are illustrative and wrong.
 - The attribute allowlist is derived at runtime from `game/frontend/public/player_state/<role>_baseline.json`. Do **not** reuse the hardcoded default dicts in `game/agents/specialist_agents/tools.py:33-190` or `dugout/app.py:187-335`; they disagree with each other and with disk.
 - The four valid roles are `defender`, `midfielder`, `forward`, `goalkeeper`.
 - In the UI, amber is reserved for Antigravity and nothing else; cyan is reserved for the game's own agent chain. See the Interface section of the spec.
