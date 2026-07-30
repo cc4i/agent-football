@@ -56,17 +56,6 @@ def extract_image_bytes(response):
     return None
 
 
-def get_index_html(base_dir: str) -> str:
-    """
-    Reads and returns the content of the index.html UI file.
-    """
-    index_path = os.path.join(base_dir, "static/index.html")
-    if os.path.exists(index_path):
-        with open(index_path, "r") as f:
-            return f.read()
-    return "<h1>LAB01 UI not found. Please create static/index.html</h1>"
-
-
 def process_avatar_image(image_bytes: bytes, target_size: tuple) -> Image.Image:
     """
     Loads, resizes, and applies chroma key transparency to the image.
