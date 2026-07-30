@@ -1,4 +1,5 @@
 import json
+import os
 
 import pytest
 
@@ -61,3 +62,13 @@ def test_tool_name_maps_back_to_role():
     assert tuning.ROLE_BY_TUNING_TOOL["tune_forward"] == "forward"
     assert set(tuning.ROLE_BY_TUNING_TOOL.values()) == {
         "defender", "midfielder", "forward", "goalkeeper"}
+
+
+def test_failed_write_leaves_original_file_intact(state, monkeypatch):
+    def raise_on_replace(src, dst):
+        raise OSError("disk full")
+    monkeypatch.setattr(os, "replace", raise_on_replace)
+    with pytest.raises(OSError):
+        tuning.tune_forward({"finishing": 0.9}, "needs a goal")
+    profile = json.loads((state / "forward.json").read_text())
+    assert profile["finishing"] == 0.5

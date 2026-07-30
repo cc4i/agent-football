@@ -6,6 +6,7 @@ trajectory renders, because the SDK exposes no subagent id.
 """
 
 import json
+import os
 
 from attributes import PLAYER_STATE_DIR, validate_changes
 
@@ -30,7 +31,9 @@ def _tune(role: str, changes: dict, reason: str) -> dict:
     path = PLAYER_STATE_DIR / f"{role}.json"
     profile = json.loads(path.read_text())
     profile.update(changes)
-    path.write_text(json.dumps(profile, indent=2))
+    tmp = path.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(profile, indent=2))
+    os.replace(tmp, path)
     return {"ok": True, "role": role, "applied": changes, "reason": reason.strip()}
 
 
