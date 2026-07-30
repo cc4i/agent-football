@@ -23,9 +23,9 @@ def fake_fs(tmp_path, monkeypatch):
     return tmp_path
 
 
-def test_four_stages_in_scope():
+def test_the_five_stages_in_scope():
     assert [s.id for s in stages.STAGES] == [
-        "rebrand", "take_the_field", "read_the_game", "tune_the_squad"]
+        "rebrand", "take_the_field", "read_the_game", "tune_the_squad", "shout"]
 
 
 def test_every_stage_has_a_suggested_prompt():
@@ -92,8 +92,9 @@ def test_a_stale_status_file_does_not_count_as_being_on_the_field(fake_fs, monke
     assert by_id["take_the_field"].is_done() is False
 
 
-def test_tune_is_done_once_a_role_file_is_rewritten_this_session(fake_fs, monkeypatch):
+def test_tune_is_done_once_a_tuner_rewrites_a_role_file(fake_fs, monkeypatch):
     monkeypatch.setattr(stages, "STARTED_AT", time.time())
+    monkeypatch.setattr(stages.match, "CALLED", {"tune"})
     by_id = {s.id: s for s in stages.STAGES}
     assert by_id["tune_the_squad"].is_done() is False
     (fake_fs / "player_state" / "forward.json").write_text(json.dumps({"pace": 0.9}))
@@ -136,3 +137,27 @@ def test_a_new_session_counts_work_done_after_it(fake_fs, monkeypatch):
     for name in ("player_blue_team.png", "goalkeeper_blue_team.png"):
         (fake_fs / "sprites" / name).write_bytes(b"x")
     assert by_id["rebrand"].is_done() is True
+
+
+def test_shouting_is_its_own_stage(fake_fs, monkeypatch):
+    monkeypatch.setattr(stages.match, "CALLED", set())
+    by_id = {s.id: s for s in stages.STAGES}
+    assert by_id["shout"].is_done() is False
+    stages.match.CALLED.add("shout_to_the_team")
+    assert by_id["shout"].is_done() is True
+
+
+def test_the_two_routes_tick_only_their_own_stage(fake_fs, monkeypatch):
+    # Both rewrite the same role files, so only the tool that ran tells them
+    # apart. A shout must not claim the subagents were used, or the other way.
+    monkeypatch.setattr(stages, "STARTED_AT", time.time())
+    (fake_fs / "player_state" / "forward.json").write_text(json.dumps({"pace": 0.9}))
+    by_id = {s.id: s for s in stages.STAGES}
+
+    monkeypatch.setattr(stages.match, "CALLED", {"tune"})
+    assert by_id["tune_the_squad"].is_done() is True
+    assert by_id["shout"].is_done() is False
+
+    monkeypatch.setattr(stages.match, "CALLED", {"shout_to_the_team"})
+    assert by_id["tune_the_squad"].is_done() is False
+    assert by_id["shout"].is_done() is True

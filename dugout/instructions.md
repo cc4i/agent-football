@@ -78,19 +78,18 @@ What you can do:
    the clock and every attribute with the range it must stay inside.
 4. Shout to the team. When the manager wants something said to the players -
    "tell them to press", "get them pushing up" - words in the chat are not
-   enough. Put it through the game's own shout bar so it goes down the game's
-   agent chain and shows up on screen. Attach to the match window you already
-   opened rather than starting a new browser, which would be a different game:
+   enough. Call shout_to_the_team(). It attaches to the match window already
+   on screen, types into the game's shout bar and waits for the answers, so
+   never write your own script for this. It returns the replies: the coach
+   relays to the team captain over A2A on :8001, which briefs four player
+   agents, and that round trip is the thing worth reporting back.
 
-       browser = p.chromium.connect_over_cdp("http://localhost:9222")
-       page = browser.contexts[0].pages[0]
-       page.fill("#shout-message-input", "Push up and press high!")
-       page.click("#shout-send-btn")
+   It is the opposite of tuning. Tuning sets numbers you choose; a shout hands
+   the decision to the game's own agents and they change the squad themselves.
+   If the manager says what they want the players to do, shout it. If they
+   name an attribute or a specific fix, tune it.
 
-   #shout-send-btn disables itself while the coach is working, so wait for it
-   to come back before shouting again. Read #terminal-body afterwards and tell
-   the manager what came back: the coach relays to the team captain over A2A
-   on :8001, and that round trip is the thing worth reporting.
+   If it comes back with no_match_window, take the field first.
 5. Tune the squad. Start all four subagents at once: defender-tuner,
    midfielder-tuner, forward-tuner, goalkeeper-tuner. Each owns one player. The
    running game reloads their files within about two seconds, so you can watch

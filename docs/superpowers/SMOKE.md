@@ -20,8 +20,9 @@ the Playwright script it writes in stage 2. Run this on your own machine.
      is a missing Antigravity login. Run `agy login` in a terminal, then reload
      the page. The composer stays disabled until the agent is reachable, so being
      unable to type is expected and not a second fault.
-4. Team sheet lists four stages (rebrand, take the field, read the game, tune the
-   squad), none marked done after a fresh dugout launch. Every stage keeps its
+4. Team sheet lists five stages (rebrand, take the field, read the game, tune
+   the squad, shout to the bench), none marked done after a fresh dugout
+   launch. Every stage keeps its
    suggested line whether or not it is done, so any of them can be run again;
    a done stage offers "Run it again". Tweaking and re-running is the point.
    Stage completion is session-relative: a filesystem write only counts if it
@@ -56,13 +57,19 @@ the Playwright script it writes in stage 2. Run this on your own machine.
      http://localhost:9222/json/version answers, which is how later turns
      reach this same window.
 7. Send "How are we doing?" and confirm it reports a real score.
-8. Send "Tell the lads to push up and press high."
-   - Antigravity attaches to the match window already on screen rather than
-     opening a second one, and types into the game's shout bar. Watch the
-     window, not just the dugout: the shout appears in the trace panel.
+8. Send "Tell the lads to push up and press high." This is stage 5 on the team
+   sheet, the other way to change the team.
+   - One call to shout_to_the_team, not a script it writes itself. It attaches
+     to the match window already on screen rather than opening a second one.
+     Watch the window: the shout appears in the trace panel.
    - The chain runs coach, then team captain over A2A on :8001, then the four
-     specialists, and each player answers in #terminal-body. Antigravity
-     reports those answers back to you.
+     specialists, and each player answers in #terminal-body. The tool waits for
+     all four and Antigravity reports them back, so it should call it once.
+   - Stage 5 ticks, stage 4 does not. Both routes rewrite the same role files,
+     so a shout that also ticked "tune the squad" would be claiming the
+     subagents ran when they did not.
+   - Shout before taking the field and it comes back no_match_window, which
+     should send Antigravity to kick off first.
    - Out-of-range or invented attributes come back as "Rejected: ..." and the
      specialist corrects itself. Nothing should crash.
 9. Send "They keep breaking through the middle. Tighten it up."

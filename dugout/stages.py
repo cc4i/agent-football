@@ -66,13 +66,23 @@ def _scouted() -> bool:
     return "read_player_stats" in match.CALLED
 
 
-def _tuned() -> bool:
-    """True once a role file has been rewritten during this session.
+def _shouted() -> bool:
+    # A shout leaves the same trace on disk as tuning does, since the game's
+    # own agents edit the role files too. The tool recording itself is the only
+    # thing that tells the two apart.
+    return "shout_to_the_team" in match.CALLED
 
-    Comparing against the baseline does not work: the repository ships live
-    files that already differ from their baselines for three of the four
-    roles, so a content diff reads as done before anything has happened.
+
+def _tuned() -> bool:
+    """True once one of the dugout's own tuners has written a role file.
+
+    Not simply "a role file changed": a shout rewrites the very same files
+    through the game's agents, and ticking this stage for that would claim
+    the manager had used the subagents when they had not. The tool recording
+    itself is what separates the two routes.
     """
+    if "tune" not in match.CALLED:
+        return False
     for role in ROLES:
         live = PLAYER_STATE_DIR / f"{role}.json"
         if live.exists() and live.stat().st_mtime >= STARTED_AT:
@@ -108,6 +118,15 @@ STAGES = (
         blurb="Four subagents, one player file each. Changes land within two seconds.",
         suggested="They keep breaking through the middle. Tighten it up.",
         is_done=_tuned,
+    ),
+    Stage(
+        id="shout",
+        title="Shout to the bench",
+        blurb="The other way to change the team. Antigravity types into the "
+              "game's shout bar and the game's own coach, captain and four "
+              "player agents work out what it means.",
+        suggested="Tell the lads to push up and press high.",
+        is_done=_shouted,
     ),
 )
 

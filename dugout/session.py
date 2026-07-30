@@ -18,6 +18,7 @@ from skills import SKILLS_DIR
 from subagents import SUBAGENTS
 from tools.avatars import generate_team_avatars
 from tools.match import get_match_status, read_player_stats
+from tools.shout import shout_to_the_team
 from tools.tuning import ROLE_BY_TUNING_TOOL, TUNING_TOOL_BY_ROLE
 
 ACTOR_USER = "user"
@@ -146,6 +147,7 @@ def _build_config() -> LocalAgentConfig:
         # guardrail still holds: each tuner is handed only its own role's tool,
         # and the instructions send tuning work to the subagents.
         tools=[generate_team_avatars, get_match_status, read_player_stats,
+               shout_to_the_team,
                *TUNING_TOOL_BY_ROLE.values()],
         subagents=list(SUBAGENTS),
         skills_paths=[str(SKILLS_DIR)],

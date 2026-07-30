@@ -9,6 +9,7 @@ import json
 import os
 
 from attributes import PLAYER_STATE_DIR, validate_changes
+from tools.match import CALLED
 
 MAX_ATTRIBUTES_PER_CALL = 3
 
@@ -34,6 +35,9 @@ def _tune(role: str, changes: dict, reason: str) -> dict:
     tmp = path.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(profile, indent=2))
     os.replace(tmp, path)
+    # A shout rewrites these same files through the game's own agents, so the
+    # quest can only tell the two routes apart by which tool did the writing.
+    CALLED.add("tune")
     return {"ok": True, "role": role, "applied": changes, "reason": reason.strip()}
 
 
