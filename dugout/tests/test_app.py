@@ -109,3 +109,18 @@ async def test_the_stream_closes_cleanly_when_the_client_disconnects(monkeypatch
     gen = app_module._turn("hello")
     assert await gen.__anext__()
     await gen.aclose()  # this raised RuntimeError under the yield-in-finally version
+
+
+def test_index_is_served(monkeypatch):
+    c = client(monkeypatch)
+    r = c.get("/")
+    assert r.status_code == 200
+    assert "Dugout" in r.text
+
+
+def test_index_has_no_mocked_trajectory_left(monkeypatch):
+    c = client(monkeypatch)
+    body = c.get("/").text
+    assert "generate_team_avatars" not in body
+    assert "handoff" not in body
+    assert "—" not in body
