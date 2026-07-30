@@ -30,13 +30,15 @@ the Playwright script it writes in stage 2. Run this on your own machine.
    - Trajectory shows a thought, then CALLED generate_team_avatars.
    - Every event names its actor in the gutter.
    - Stage 1 flips to done. Reload http://localhost:5173 and the new kit is on
-     the pitch.
+     the pitch, and in the portrait in the top left corner. The players are a
+     few pixels tall mid-match, so that portrait is where you actually read
+     the strip; the opponent's sits in the top right for comparison.
 6. Send "Now get us on the pitch."
    - Antigravity writes a Playwright script and runs it.
    - A Chrome window opens in front of you and plays the match, muted. This is
      the point of the stage: if it comes up headless, the script is wrong.
-   - It drops the simulation to 0.5x before kick-off, so the three minute match
-     runs for six and is still going when you tune the squad in step 8.
+   - The simulation runs at 1x. Antigravity must not touch the speed slider on
+     its own; that control belongs to you.
    - If it hits the #kick-off-btn stability timeout, it should retry with
      force=True on its own. That self-correction is the moment worth watching.
    - /tmp/futsal_status.json appears and updates, and
@@ -58,12 +60,13 @@ the Playwright script it writes in stage 2. Run this on your own machine.
      Antigravity four times.
    - All four role files are rewritten within a few seconds of each other.
    - Any out-of-range attempt comes back as a violation list, not a crash.
-   - The match should still be playing when they land, because step 6 halved
-     the simulation speed. Watch the window: the back line visibly tightens
-     within about two seconds of the files changing.
-   - If the match has already ended, ask for another kick-off and repeat. A
-     tuning turn takes three to five minutes against a six minute match, so
-     it is close.
+   - A match is three minutes at 1x and a tuning turn takes three to five, so
+     expect full time before the changes land. That is the honest default.
+   - To watch them land instead, drag the simulation speed down to 0.5x before
+     kick-off, which buys six minutes. Then watch the window rather than the
+     dugout: the back line tightens within about two seconds of the files
+     changing, because the game re-reads player_state every two seconds and
+     pushes it straight into the running match.
 10. Refresh http://localhost:5173 in the tab you already had open: baselines
    restore and the squad is clean again. Two things to know. It must be the
    same tab, because the restore is keyed on sessionStorage and a new tab or

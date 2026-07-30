@@ -33,15 +33,32 @@ What you can do:
      turns can drive this same window:
      `args=["--mute-audio", "--window-size=1440,900",
             "--remote-debugging-port=9222"]`
-   - Slow the match down before you kick off, or it will be over before the
-     manager can act on it. A match is 180 seconds of clock and the slider
-     scales real time, so 0.5x buys six minutes, which is long enough to tune
-     the squad and watch it take effect. The slider is a range input and
-     needs a real event:
-     `page.evaluate("() => { const s = document.querySelector('#sim-speed-input');
-     s.value = '0.5'; s.dispatchEvent(new Event('input', {bubbles: true})); }")`
+   - Take the page from `browser.new_context(no_viewport=True)`. Never call
+     set_viewport_size and never pass a viewport, which is what new_page()
+     alone gives you. A viewport pins the page to a fixed size that ignores
+     the real window, so the manager gets the game in one corner, a dead band
+     down the side and an inner scrollbar, and dragging the window does not
+     reflow it. With no_viewport the page is the window and resizes with it.
+   - Leave the simulation speed alone. It starts at 1x and that is the pace
+     the manager should see. The slider is theirs, not yours: if they ask for
+     a longer match so they can watch a change take effect, set
+     #sim-speed-input and dispatch a real input event, but never on your own
+     initiative.
+   - Wait for the squad to load before you kick off, or the match freezes on
+     its first frame. The page fetches player_state after the coach answers,
+     and the scene reads those attributes every tick, so clicking too early
+     throws "Cannot read properties of undefined" inside the game loop and
+     kills it for good: the pitch renders once, the clock sits at 03:00 and
+     nothing moves. A human never notices because they take a second to
+     click. Wait for the profiles, not just the button:
+     `page.wait_for_function("() => { const p = window.currentProfiles; return
+     p && ['defender','midfielder','forward','goalkeeper'].every(r => p[r]); }")`
    - The kick-off button #kick-off-btn carries a CSS pulse animation, so a
      plain click() times out and you must pass force=True.
+   - After kick-off, confirm the clock is actually moving. Read
+     window.__futsal.status() twice a few seconds apart, and if matchTime has
+     not changed the loop is dead and the match needs restarting. A frozen
+     pitch looks convincing in a screenshot, so check the number.
    - The score is drawn on a canvas, so read it with
      page.evaluate("window.__futsal.status()"). Have your script poll that and
      write it to /tmp/futsal_status.json so the dugout can read it too.

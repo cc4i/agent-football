@@ -390,6 +390,7 @@ export class SoccerGameScene extends Phaser.Scene {
     }).setOrigin(0.5);
 
     this.setupCoaches();
+    this.setupKitPortraits();
 
     this.startTimer();
     this.gameActive = true;
@@ -1580,6 +1581,37 @@ export class SoccerGameScene extends Phaser.Scene {
     plate.fillRoundedRect(cx - w / 2, y - h / 2, w, h, 5);
     plate.strokeRoundedRect(cx - w / 2, y - h / 2, w, h, 5);
     this.children.bringToTop(text);
+  }
+
+  setupKitPortraits() {
+    // The kit is regenerated from the dugout, and at match scale the players
+    // are a few pixels tall, so a rebrand barely registers. Each side gets a
+    // portrait of its outfield strip in a top corner, framed like the
+    // scoreboard that sits between them.
+    const PANEL_W = 78;
+    const PANEL_H = 116;
+    const TOP = 18;
+    const INSET = 22;
+
+    // Frame 0 is the standing pose. The crop trims the neighbouring frame's
+    // boot, which overhangs the frame edge on a generated sheet.
+    const CROP = { x: 40, y: 110, w: 250, h: 550 };
+
+    const portrait = (panelX, texture, accent) => {
+      const gfx = this.add.graphics();
+      gfx.fillStyle(0x0f172a, 0.85);
+      gfx.fillRoundedRect(panelX, TOP, PANEL_W, PANEL_H, 10);
+      gfx.lineStyle(1.5, accent, 0.8);
+      gfx.strokeRoundedRect(panelX, TOP, PANEL_W, PANEL_H, 10);
+
+      const kit = this.add.sprite(
+        panelX + PANEL_W / 2, TOP + PANEL_H / 2, texture, 0);
+      kit.setCrop(CROP.x, CROP.y, CROP.w, CROP.h);
+      kit.setScale((PANEL_H - 14) / CROP.h);
+    };
+
+    portrait(INSET, 'player_blue', 0x60a5fa);
+    portrait(this.scale.width - INSET - PANEL_W, 'player_red', 0xf87171);
   }
 
   setupCoaches() {
