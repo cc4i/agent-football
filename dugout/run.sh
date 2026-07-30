@@ -39,7 +39,20 @@ fi
 
 # Create/update .venv from pyproject.toml + uv.lock
 echo "--> Syncing python environment with uv..."
-uv sync
+uv sync --all-groups
+
+# Preflight: verify agy is on PATH. We deliberately do NOT shell out to
+# `agy status`, which opens a TTY-based UI and fails outright in a
+# non-interactive shell. Login state is verified at runtime by GET /health,
+# which is where the UI surfaces it.
+if ! command -v agy >/dev/null 2>&1; then
+  echo "ERROR: the 'agy' CLI is not on PATH." >&2
+  echo "  Install Antigravity, then run: agy login" >&2
+  exit 1
+fi
+
+# Install chromium for the Playwright script that drives the game
+uv run playwright install chromium
 
 echo "--> Starting Avatar Creator on http://$HOST:$PORT ..."
 exec uv run uvicorn app:app --host "$HOST" --port "$PORT" "$@"
