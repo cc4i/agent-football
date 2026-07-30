@@ -1,9 +1,9 @@
-![Agentic Football Banner](img/banner.png)
+![Futsal WorldCup Banner](img/banner.png)
 
-# ⚽ Agentic Football Workshop - Developer & Maintainer Guide
+# ⚽ Futsal WorldCup Workshop - Developer & Maintainer Guide
 
 > [!NOTE]
-> This document is intended strictly for developers, maintainers, and authors of the Agentic Football Workshop codebase. If you are a workshop participant, please follow the student-facing instructions in [LAB_INSTRUCTIONS.md](LAB_INSTRUCTIONS.md).
+> This document is intended strictly for developers, maintainers, and authors of the Futsal WorldCup Workshop codebase. If you are a workshop participant, please follow the student-facing instructions in [LAB_INSTRUCTIONS.md](LAB_INSTRUCTIONS.md).
 
 This repository contains the source code, Phaser engine assets, and Agent Development Kit (ADK) configurations for a 5v5 interactive LLM soccer simulator workshop. The codebase is divided into two primary sections: **LAB01** (asset generation and custom onboarding) and **LAB02** (the live multi-agent simulation).
 

@@ -61,6 +61,7 @@ export class SoccerGameScene extends Phaser.Scene {
     this.load.image('pitch', '/assets/backgrounds/pitch.png');
     this.load.image('scoreboard', '/assets/ui/scoreboard.png');
     this.load.image('coach_portrait', '/assets/ui/coach_portrait.png');
+    this.load.image('opponent_coach_portrait', '/assets/ui/opponent_coach_portrait.png');
     this.load.image('shout_input', '/assets/ui/shout_input.png');
     this.load.image('ball', '/assets/sprites/ball.png');
 
@@ -1559,8 +1560,31 @@ export class SoccerGameScene extends Phaser.Scene {
     this.gameActive = true;
   }
 
+  addCoachNameplate(x, y, label, color) {
+    const text = this.add.text(x, y, label, {
+      fontFamily: '"Outfit", "Inter", Arial, sans-serif',
+      fontSize: '15px',
+      color: '#0b1220',
+      fontStyle: 'bold'
+    }).setOrigin(0.5);
+
+    const w = text.width + 20;
+    const h = text.height + 8;
+    // Both plates sit in the bottom corners, so keep them inside the canvas.
+    const cx = Phaser.Math.Clamp(x, w / 2 + 10, this.scale.width - w / 2 - 10);
+    text.setX(cx);
+
+    const plate = this.add.graphics();
+    plate.fillStyle(color, 1);
+    plate.lineStyle(2, 0x0b1220, 0.9);
+    plate.fillRoundedRect(cx - w / 2, y - h / 2, w, h, 5);
+    plate.strokeRoundedRect(cx - w / 2, y - h / 2, w, h, 5);
+    this.children.bringToTop(text);
+  }
+
   setupCoaches() {
     this.coach1 = this.add.image(60, 715, 'coach_portrait').setScale(0.10);
+    this.addCoachNameplate(62, 744, 'YOU · BLUE', 0x60a5fa);
     this.shoutGraphics1 = this.add.graphics().setAlpha(0);
     this.shoutText1 = this.add.text(160, 668, '', {
       fontFamily: 'monospace',
@@ -1569,7 +1593,9 @@ export class SoccerGameScene extends Phaser.Scene {
       fontStyle: 'bold'
     }).setOrigin(0.5).setAlpha(0);
 
-    this.coach2 = this.add.image(1348, 715, 'coach_portrait').setScale(0.10).setFlipX(true);
+    // y is nudged 6px so the opponent's cropped torso lines up with coach 1's.
+    this.coach2 = this.add.image(1348, 721, 'opponent_coach_portrait').setScale(0.10);
+    this.addCoachNameplate(1346, 744, 'OPPONENT · RED', 0xf87171);
     this.shoutGraphics2 = this.add.graphics().setAlpha(0);
     this.shoutText2 = this.add.text(1248, 668, '', {
       fontFamily: 'monospace',

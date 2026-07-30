@@ -1,0 +1,17 @@
+{
+  "midfielder": {
+    "action": "substitute",
+    "reason": "exhausted",
+    "ts": 1785395126.405028
+  },
+  "forward": {
+    "action": "substitute",
+    "reason": "tired",
+    "ts": 1785395071.944333
+  },
+  "defender": {
+    "action": "substitute",
+    "reason": "tired",
+    "ts": 1785395126.532912
+  }
+}

@@ -33,14 +33,14 @@ from utils import (
 
 # Load environment variables
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-dotenv_path = os.path.join(BASE_DIR, "../.env")
+dotenv_path = os.path.join(BASE_DIR, ".env")
 if os.path.exists(dotenv_path):
     load_dotenv(dotenv_path)
 
-app = FastAPI(title="LAB01 - Avatar Spritesheet Generator")
+app = FastAPI(title="Futsal WorldCup - Avatar Spritesheet Generator")
 
-# Target directory for saving spritesheets directly into LAB02
-OUTPUT_DIR = os.path.abspath(os.path.join(BASE_DIR, "../LAB02/frontend/public/assets/sprites"))
+# Target directory for saving spritesheets directly into the game
+OUTPUT_DIR = os.path.abspath(os.path.join(BASE_DIR, "../game/frontend/public/assets/sprites"))
 
 class TeamAttributes(BaseModel):
     color: str
@@ -51,11 +51,7 @@ class TeamAttributes(BaseModel):
 # Key: "blue" (My Team) or "red" (Opponent)
 chat_sessions = {}
 
-# TODO: Task 1 - Initialize the Gemini Client
-# Use the google-genai SDK to create a Client instance.
-# The client will automatically pick up your Vertex AI environment
-# Hint: Use genai.Client().
-client = None  # Replace this with your initialization code
+client = genai.Client()
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -76,22 +72,16 @@ async def generate_team_stream(team_id: str, team_data: TeamAttributes):
     # Load modular player prompt
     player_prompt = get_player_prompt(color, logo, style)
     
-    # TODO: Task 2 - Create a style-consistent chat session
-    # Create a brand new async chat session for this team using client.aio.chats.create.
-    # We use a chat session so that the second asset (goalkeeper) can reference the first one (player) in history!
-    # Model to use: "publishers/google/models/gemini-3.1-flash-image"
-    chat = None  # Replace this with your chat creation code using client.aio.chats.create
-    
+
+    chat = client.aio.chats.create(model="publishers/google/models/gemini-3.1-flash-image")
+
+
     chat_sessions[team_id] = chat
     
     yield f"data: {json.dumps({'status': 'log', 'message': 'Sending player prompt to Gemini...'})}\n\n"
     
     try:
-        # TODO: Task 3a - Generate the Outfield Player Spritesheet
-        # Send the player_prompt to the active chat session (async call).
-        # Configure it to return an IMAGE modality and set the aspect_ratio to "16:9" in the image_config.
-        # Hint: Use await chat.send_message with types.GenerateContentConfig.
-        response = None  # Replace this with your generation call
+        response = await chat.send_message( player_prompt, config=types.GenerateContentConfig( response_modalities=["IMAGE"], image_config=types.ImageConfig(aspect_ratio="16:9") ) )
     except Exception as e:
         yield f"data: {json.dumps({'status': 'error', 'message': f'Gemini Error: {str(e)}'})}\n\n"
         return
@@ -121,13 +111,9 @@ async def generate_team_stream(team_id: str, team_data: TeamAttributes):
     yield f"data: {json.dumps({'status': 'log', 'message': 'Sending goalkeeper prompt to Gemini...'})}\n\n"
     
     try:
-        # TODO: Task 3b - Generate the Goalkeeper Spritesheet (Style Consistent)
-        # Send the gk_prompt to the SAME active chat session (async call).
-        # Because we are using the same chat session, Gemini will use the history of the player
-        # we just generated to keep the goalkeeper's style, logo, and jersey consistent!
-        # Configure it to return an IMAGE modality and set the aspect_ratio to "16:9" in the image_config.
-        # Hint: Use await chat.send_message with types.GenerateContentConfig.
-        response = None  # Replace this with your generation call
+        # Reuses the chat session from the player above, so Gemini carries that
+        # style, logo and jersey over to the goalkeeper.
+        response = await chat.send_message( gk_prompt, config=types.GenerateContentConfig( response_modalities=["IMAGE"], image_config=types.ImageConfig(aspect_ratio="16:9") ) )
     except Exception as e:
         yield f"data: {json.dumps({'status': 'error', 'message': f'Gemini Error: {str(e)}'})}\n\n"
         return
@@ -176,7 +162,7 @@ class SaveProfilesRequest(BaseModel):
 @app.post("/save/profiles")
 async def save_profiles(request: SaveProfilesRequest):
     try:
-        target_dir = os.path.abspath(os.path.join(BASE_DIR, "../LAB02/frontend/public/player_state"))
+        target_dir = os.path.abspath(os.path.join(BASE_DIR, "../game/frontend/public/player_state"))
         os.makedirs(target_dir, exist_ok=True)
         
         profiles = {

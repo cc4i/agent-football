@@ -66,7 +66,7 @@ for stale in .adk agents/.adk; do
     fi
 done
 
-echo "Starting WorldCup Game services in MODE: $MODE..."
+echo "Starting Futsal WorldCup services in MODE: $MODE..."
 
 # 1. Start Captain Server
 echo "--> Starting Team Captain A2A Server..."

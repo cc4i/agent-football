@@ -30,8 +30,8 @@ document.querySelector('#app').innerHTML = `
   <div class="game-wrapper">
     <!-- Title Header -->
     <header class="game-header">
-      <h1 class="neon-text">Worldcup Mania</h1>
-      <p class="sub-title">Gemini-powered Agentic Football</p>
+      <h1 class="neon-text">Futsal WorldCup</h1>
+      <p class="sub-title">Gemini-powered Agentic Futsal</p>
     </header>
 
     <!-- Simulation Speed Control -->
@@ -64,7 +64,7 @@ document.querySelector('#app').innerHTML = `
           </div>
 
           <div style="text-align: center; color: var(--text-muted); max-width: 500px; line-height: 1.6; font-size: 0.95rem;">
-            <p>Welcome to the Automated Soccer Simulator Sandbox!</p>
+            <p>Welcome to the Automated Futsal Simulator Sandbox!</p>
             <p>Both teams play autonomously based on their behavioral attributes. Manually update individual files under the player_state/ folder on disk to tweak attributes, or adjust simulation speed to run experiments.</p>
           </div>
 
@@ -384,7 +384,7 @@ async function sendInstructionToAgent(msg, options = {}) {
     // shout instead of dropping it, otherwise it disappears with no user-visible trace.
     if (isBackgroundRequestInProgress) {
       pendingShout = msg;
-      appendTerminalLine("system", `> ⏳ Shout queued: "${msg}" — waiting for the status check to finish...`);
+      appendTerminalLine("system", `> ⏳ Shout queued: "${msg}" - waiting for the status check to finish...`);
       setShoutControls(false, "Queued...");
       return;
     }
@@ -411,30 +411,33 @@ async function sendInstructionToAgent(msg, options = {}) {
       appendTerminalLine("system", `> 🤖 Running periodic status check...`);
     }
 
-    // 1. Create a session if we don't have one
-    if (!currentSessionId) {
-      console.log("Creating new agent session...");
-      const sessionRes = await fetch('/api-apps/agents/users/user/sessions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json, text/plain, */*'
-        },
-        body: JSON.stringify({
-          state: {
-            __session_metadata__: {
-              displayName: "Football Coach Session"
-            }
+    // 1. Every instruction gets its own session.
+    // Reusing one session for a whole match grows both the coach's history and the
+    // captain's A2A context with each turn, and flash-lite starts failing on the
+    // bloated context: transfer_to_agent comes back MALFORMED_FUNCTION_CALL, or the
+    // captain invocation dies and A2A relays a bare "An error occurred during
+    // processing". Measured 2/8 huddles when reused vs 6/6 with a fresh session.
+    // Shouts are independent instructions, so there is no history worth keeping.
+    console.log("Creating new agent session...");
+    const sessionRes = await fetch('/api-apps/agents/users/user/sessions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json, text/plain, */*'
+      },
+      body: JSON.stringify({
+        state: {
+          __session_metadata__: {
+            displayName: "Futsal Coach Session"
           }
-        })
-      });
-      if (!sessionRes.ok) {
-        throw new Error(`Failed to create session: ${sessionRes.statusText}`);
-      }
-      const sessionData = await sessionRes.json();
-      currentSessionId = sessionData.id;
-      console.log(`Agent session created successfully. Session ID: ${currentSessionId}`);
+        }
+      })
+    });
+    if (!sessionRes.ok) {
+      throw new Error(`Failed to create session: ${sessionRes.statusText}`);
     }
+    currentSessionId = (await sessionRes.json()).id;
+    console.log(`Agent session created successfully. Session ID: ${currentSessionId}`);
 
     // 2. Send the message to /run_sse with streaming: true
     console.log(`Sending instruction to agent (streaming): "${outgoingMsg}"`);

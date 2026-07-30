@@ -1,0 +1,18 @@
+[project]
+name = "futsal-worldcup-branding"
+version = "0.1.0"
+description = "Onboarding portal: generates team spritesheets and player profiles for the simulator."
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi==0.136.3",
+    "uvicorn==0.48.0",
+    "google-genai==1.75.0",
+    "pillow",
+    "python-dotenv==1.2.2",
+    "pydantic",
+]
+
+# app.py imports `prompts` and `utils` as top-level modules from this directory,
+# so there is nothing to build or install.
+[tool.uv]
+package = false
