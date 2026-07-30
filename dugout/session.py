@@ -2,6 +2,7 @@
 
 import asyncio
 import os
+from contextlib import AsyncExitStack
 from pathlib import Path
 
 from google.antigravity import (
@@ -10,11 +11,12 @@ from google.antigravity import (
     CapabilitiesConfig,
     LocalAgentConfig,
 )
+from google.antigravity.types import Text
 
 from subagents import SUBAGENTS
 from tools.avatars import generate_team_avatars
 from tools.match import get_match_status, read_player_stats
-from tools.tuning import ROLE_BY_TUNING_TOOL
+from tools.tuning import ROLE_BY_TUNING_TOOL, TUNING_TOOL_BY_ROLE
 
 ACTOR_USER = "user"
 ACTOR_AGENT = "antigravity"
@@ -45,13 +47,25 @@ async def _pump(get_source, kind, queue):
         await queue.put(_DONE)
 
 
+async def _text_deltas(response):
+    """The model's spoken text, and nothing else.
+
+    `chunks` is the unfiltered stream: thoughts and tool calls surface on it too,
+    so passing it straight through doubles every event that already has its own
+    pump and prints the raw object repr in the match log.
+    """
+    async for chunk in response.chunks:
+        if isinstance(chunk, Text):
+            yield chunk.text
+
+
 async def multiplex(response):
     """Fan thoughts, tool calls and text chunks into one ordered timeline."""
     queue: asyncio.Queue = asyncio.Queue()
     sources = (
         (lambda: response.thoughts, "thought"),
         (lambda: response.tool_calls, "tool_call"),
-        (lambda: response.chunks, "text"),
+        (lambda: _text_deltas(response), "text"),
     )
     tasks = [asyncio.create_task(_pump(src, kind, queue)) for src, kind in sources]
 
@@ -76,6 +90,8 @@ async def multiplex(response):
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 _AGENT = None
+_STACK = None
+_START_ERROR = None
 
 
 class AgentUnavailable(RuntimeError):
@@ -97,7 +113,11 @@ def _build_config() -> LocalAgentConfig:
                 BuiltinTools.FINISH,
             ],
         ),
-        tools=[generate_team_avatars, get_match_status, read_player_stats],
+        # The SDK requires every subagent tool on the main config as well. The
+        # guardrail still holds: each tuner is handed only its own role's tool,
+        # and the instructions send tuning work to the subagents.
+        tools=[generate_team_avatars, get_match_status, read_player_stats,
+               *TUNING_TOOL_BY_ROLE.values()],
         subagents=list(SUBAGENTS),
         workspaces=[str(REPO_ROOT)],
         vertex=True,
@@ -106,13 +126,36 @@ def _build_config() -> LocalAgentConfig:
     )
 
 
+async def start_agent():
+    """Enter the agent's async context once, for the life of the process.
+
+    The SDK refuses to chat outside `async with Agent(...)`, so the context has
+    to outlive a single request rather than be rebuilt per turn.
+    """
+    global _AGENT, _STACK, _START_ERROR
+    if _AGENT is not None:
+        return _AGENT
+    stack = AsyncExitStack()
+    try:
+        _AGENT = await stack.enter_async_context(Agent(_build_config()))
+    except Exception as exc:
+        await stack.aclose()
+        _START_ERROR = str(exc)
+        raise AgentUnavailable(str(exc)) from exc
+    _STACK, _START_ERROR = stack, None
+    return _AGENT
+
+
+async def stop_agent() -> None:
+    global _AGENT, _STACK
+    if _STACK is not None:
+        await _STACK.aclose()
+    _AGENT, _STACK = None, None
+
+
 def get_agent():
-    global _AGENT
     if _AGENT is None:
-        try:
-            _AGENT = Agent(_build_config())
-        except Exception as exc:
-            raise AgentUnavailable(str(exc)) from exc
+        raise AgentUnavailable(_START_ERROR or "the agent session is not started")
     return _AGENT
 
 
@@ -122,10 +165,7 @@ def agent_health() -> dict:
     if not os.environ.get("GOOGLE_CLOUD_PROJECT"):
         return {"ok": False,
                 "detail": "GOOGLE_CLOUD_PROJECT is not set. Check dugout/.env."}
-    try:
-        get_agent()
-    except AgentUnavailable as exc:
-        return {"ok": False,
-                "detail": f"Antigravity could not start. Run `agy login` in a "
-                          f"terminal, then reload. ({exc})"}
-    return {"ok": True, "detail": "ready"}
+    return {"ok": False,
+            "detail": f"Antigravity could not start. Run `agy login` in a "
+                      f"terminal, then restart the dugout. "
+                      f"({_START_ERROR or 'session not started'})"}

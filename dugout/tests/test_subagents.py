@@ -47,3 +47,14 @@ def test_each_subagent_has_the_tuning_tool_for_its_own_role():
         assert len(tuning) == 1
         assert tuning[0].__name__ == expected[sub.name]
         assert expected[sub.name] in sub.system_instructions
+
+
+def test_every_subagent_tool_is_registered_on_the_main_agent():
+    # The SDK validates this at Agent construction: an unregistered subagent
+    # tool aborts startup with "is not registered on the main agent config".
+    import session
+
+    main = {getattr(t, "__name__", "") for t in session._build_config().tools}
+    for sub in SUBAGENTS:
+        for tool in sub.tools:
+            assert getattr(tool, "__name__", "") in main

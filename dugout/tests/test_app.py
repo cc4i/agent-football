@@ -1,4 +1,5 @@
 import json
+import socket
 
 from fastapi.testclient import TestClient
 
@@ -33,6 +34,20 @@ def test_game_services_reports_false_for_a_closed_port(monkeypatch):
     assert app_module.game_services() == {"nothing": False}
 
 
+def test_game_services_finds_a_service_bound_only_to_ipv6(monkeypatch):
+    # Vite binds localhost, which resolves to ::1 alone on macOS. Probing a
+    # literal 127.0.0.1 misses it and the pitch dot reads dead mid-match.
+    server = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
+    server.bind(("::1", 0))
+    server.listen(1)
+    try:
+        monkeypatch.setattr(
+            app_module, "GAME_SERVICES", {"pitch": server.getsockname()[1]})
+        assert app_module.game_services() == {"pitch": True}
+    finally:
+        server.close()
+
+
 def test_stages_returns_the_quest(monkeypatch):
     c = client(monkeypatch, stage_status=lambda: [{"id": "rebrand", "done": True}])
     assert c.get("/stages").json() == [{"id": "rebrand", "done": True}]
@@ -61,7 +76,7 @@ def test_chat_streams_every_event_kind_with_actor_and_payload(monkeypatch):
         args = {"role": "forward"}
 
     class FakeAgent:
-        def chat(self, message):
+        async def chat(self, message):
             return object()
 
     async def fake_multiplex(response):
@@ -94,7 +109,7 @@ def test_chat_streams_every_event_kind_with_actor_and_payload(monkeypatch):
 
 async def test_the_stream_closes_cleanly_when_the_client_disconnects(monkeypatch):
     class FakeAgent:
-        def chat(self, message):
+        async def chat(self, message):
             return object()
 
     async def fake_multiplex(response):
@@ -109,6 +124,29 @@ async def test_the_stream_closes_cleanly_when_the_client_disconnects(monkeypatch
     gen = app_module._turn("hello")
     assert await gen.__anext__()
     await gen.aclose()  # this raised RuntimeError under the yield-in-finally version
+
+
+def test_turn_awaits_chat_before_streaming(monkeypatch):
+    # Agent.chat is `async def` and resolves to the ChatResponse holding the
+    # streams. Handing the bare coroutine to the multiplexer produces three
+    # "'coroutine' object has no attribute ..." frames and no trajectory.
+    resolved = object()
+    seen = {}
+
+    class FakeAgent:
+        async def chat(self, message):
+            return resolved
+
+    async def fake_multiplex(response):
+        seen["response"] = response
+        yield {"kind": "text", "actor": "antigravity", "data": "ok"}
+
+    c = client(monkeypatch, get_agent=lambda: FakeAgent(),
+               multiplex=fake_multiplex, stage_status=lambda: [])
+    with c.stream("POST", "/chat", json={"message": "hi"}) as r:
+        "".join(r.iter_text())
+
+    assert seen["response"] is resolved
 
 
 def test_index_is_served(monkeypatch):
@@ -134,7 +172,7 @@ def test_usage_payload_is_converted_to_a_plain_total(monkeypatch):
         total_token_count = 24100
 
     class FakeAgent:
-        def chat(self, message):
+        async def chat(self, message):
             return object()
 
     async def fake_multiplex(response):
@@ -152,7 +190,7 @@ def test_usage_payload_is_converted_to_a_plain_total(monkeypatch):
 
 def test_usage_payload_of_none_serialises_without_error(monkeypatch):
     class FakeAgent:
-        def chat(self, message):
+        async def chat(self, message):
             return object()
 
     async def fake_multiplex(response):

@@ -1,5 +1,7 @@
 import asyncio
 
+from google.antigravity.types import Text, Thought
+
 import session
 
 
@@ -17,7 +19,10 @@ class FakeResponse:
 
     def __init__(self, thoughts=(), tool_calls=(), chunks=(), usage="u"):
         self._thoughts, self._tool_calls = list(thoughts), list(tool_calls)
-        self._chunks, self._usage = list(chunks), usage
+        # The real stream carries StreamChunk objects, never bare strings.
+        self._chunks = [Text(step_index=0, text=c) if isinstance(c, str) else c
+                        for c in chunks]
+        self._usage = usage
 
     async def _drain(self, items, delay):
         for item in items:
@@ -118,7 +123,7 @@ async def test_the_three_streams_are_pumped_concurrently():
         def chunks(self):
             async def g():
                 await gate.wait()   # a sequential drain never gets here
-                yield "chunk"
+                yield Text(step_index=0, text="chunk")
             return g()
 
     events = await asyncio.wait_for(collect(Interlocked()), timeout=2)
@@ -147,3 +152,22 @@ async def test_early_consumer_abandonment_closes_cleanly():
         return
 
     await abandon(FakeResponse(thoughts=["first", "second"], chunks=["c"]))
+
+
+async def test_only_text_chunks_reach_the_text_stream():
+    # chunks is the unfiltered stream: thoughts and tool calls arrive on it too.
+    # Passing them through doubles every event that has its own pump and renders
+    # the raw object repr in the match log.
+    events = await collect(FakeResponse(chunks=[
+        Text(step_index=1, text="on the "),
+        Thought(step_index=1, text="internal reasoning"),
+        Text(step_index=1, text="ball"),
+    ]))
+    assert [e["data"] for e in events if e["kind"] == "text"] == ["on the ", "ball"]
+
+
+async def test_a_thought_is_not_duplicated_by_the_chunk_stream():
+    thought = Thought(step_index=0, text="sizing up the kit")
+    events = await collect(FakeResponse(thoughts=["sizing up the kit"],
+                                        chunks=[thought]))
+    assert [e["kind"] for e in events] == ["thought", "usage"]

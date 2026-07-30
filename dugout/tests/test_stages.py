@@ -37,19 +37,29 @@ def test_no_em_dash_in_any_stage_copy():
         assert "—" not in (s.title + s.blurb + s.suggested)
 
 
-def test_rebrand_needs_both_sprite_sheets(fake_fs, monkeypatch):
+def test_rebrand_needs_our_own_sheet_and_keeper(fake_fs, monkeypatch):
     monkeypatch.setattr(stages, "STARTED_AT", 0)
     by_id = {s.id: s for s in stages.STAGES}
     assert by_id["rebrand"].is_done() is False
     (fake_fs / "sprites" / "player_blue_team.png").write_bytes(b"x")
     assert by_id["rebrand"].is_done() is False
-    (fake_fs / "sprites" / "player_red_team.png").write_bytes(b"x")
+    (fake_fs / "sprites" / "goalkeeper_blue_team.png").write_bytes(b"x")
+    assert by_id["rebrand"].is_done() is True
+
+
+def test_rebrand_does_not_wait_on_the_opponent(fake_fs, monkeypatch):
+    # "Kit us out" rebrands blue alone. Demanding red too leaves the stage
+    # stuck live after the manager has done exactly what was asked.
+    monkeypatch.setattr(stages, "STARTED_AT", 0)
+    for name in ("player_blue_team.png", "goalkeeper_blue_team.png"):
+        (fake_fs / "sprites" / name).write_bytes(b"x")
+    by_id = {s.id: s for s in stages.STAGES}
     assert by_id["rebrand"].is_done() is True
 
 
 def test_sprites_that_predate_this_session_do_not_count(fake_fs, monkeypatch):
-    for team in ("blue", "red"):
-        (fake_fs / "sprites" / f"player_{team}_team.png").write_bytes(b"x")
+    for name in ("player_blue_team.png", "goalkeeper_blue_team.png"):
+        (fake_fs / "sprites" / name).write_bytes(b"x")
     # The repo ships sprites; only a rewrite during this session counts.
     monkeypatch.setattr(stages, "STARTED_AT", time.time() + 60)
     by_id = {s.id: s for s in stages.STAGES}

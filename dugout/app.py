@@ -2,6 +2,7 @@
 
 import json
 import socket
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -10,7 +11,15 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, field_validator
 
-from session import ACTOR_USER, AgentUnavailable, agent_health, get_agent, multiplex
+from session import (
+    ACTOR_USER,
+    AgentUnavailable,
+    agent_health,
+    get_agent,
+    multiplex,
+    start_agent,
+    stop_agent,
+)
 from stages import stage_status
 
 load_dotenv()
@@ -18,7 +27,20 @@ load_dotenv()
 STATIC_DIR = Path(__file__).parent / "static"
 GAME_SERVICES = {"pitch": 5173, "coach": 8000, "captain": 8001}
 
-app = FastAPI(title="Dugout")
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    # A failed start must not stop the server: the page needs to boot so it can
+    # render the red banner explaining why the agent is unreachable.
+    try:
+        await start_agent()
+    except AgentUnavailable:
+        pass
+    yield
+    await stop_agent()
+
+
+app = FastAPI(title="Dugout", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
@@ -27,7 +49,9 @@ def game_services() -> dict:
     up = {}
     for name, port in GAME_SERVICES.items():
         try:
-            with socket.create_connection(("127.0.0.1", port), timeout=0.25):
+            # "localhost", not a literal, so both address families are tried:
+            # Vite binds ::1 alone while the ADK servers bind 127.0.0.1.
+            with socket.create_connection(("localhost", port), timeout=0.25):
                 up[name] = True
         except OSError:
             up[name] = False
@@ -70,7 +94,7 @@ async def _turn(message: str):
     """Yield one turn's frames. Never raises: failures become error frames."""
     try:
         agent = get_agent()
-        response = agent.chat(message)
+        response = await agent.chat(message)
     except AgentUnavailable as exc:
         yield _frame("error", "antigravity", str(exc))
         return

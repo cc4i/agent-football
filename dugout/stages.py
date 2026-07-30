@@ -23,13 +23,15 @@ class Stage:
 
 
 def _rebranded() -> bool:
-    """True once both sprite sheets have been rewritten during this session.
+    """True once our own side has been re-kitted during this session.
 
+    Blue alone: "kit us out" never touches the opponent, so waiting on red
+    leaves the stage live after the manager has done exactly what was asked.
     The repository ships working sprites, so existence proves nothing. Only a
     write newer than process start means the manager actually rebranded.
     """
-    for team in ("blue", "red"):
-        sheet = SPRITE_DIR / f"player_{team}_team.png"
+    for name in ("player_blue_team.png", "goalkeeper_blue_team.png"):
+        sheet = SPRITE_DIR / name
         if not sheet.exists() or sheet.stat().st_mtime < STARTED_AT:
             return False
     return True
