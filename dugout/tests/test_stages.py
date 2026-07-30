@@ -112,3 +112,27 @@ def test_stage_status_is_json_serialisable(fake_fs):
     payload = stages.stage_status()
     json.dumps(payload)
     assert {"id", "title", "blurb", "suggested", "done"} == set(payload[0])
+
+
+def test_new_session_makes_every_stage_pending_again(fake_fs, monkeypatch):
+    # The quest is only replayable if it can be reset without restarting the
+    # server. Work done before the reset must stop counting.
+    for name in ("player_blue_team.png", "goalkeeper_blue_team.png"):
+        (fake_fs / "sprites" / name).write_bytes(b"x")
+    monkeypatch.setattr(stages, "STARTED_AT", 0)
+    stages.match.CALLED.add("read_player_stats")
+    assert any(s["done"] for s in stages.stage_status())
+
+    stages.begin_session()
+
+    assert not any(s["done"] for s in stages.stage_status())
+    assert stages.match.CALLED == set()
+
+
+def test_a_new_session_counts_work_done_after_it(fake_fs, monkeypatch):
+    stages.begin_session()
+    by_id = {s.id: s for s in stages.STAGES}
+    assert by_id["rebrand"].is_done() is False
+    for name in ("player_blue_team.png", "goalkeeper_blue_team.png"):
+        (fake_fs / "sprites" / name).write_bytes(b"x")
+    assert by_id["rebrand"].is_done() is True

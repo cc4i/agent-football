@@ -13,6 +13,21 @@ from tools.avatars import SPRITE_DIR
 STARTED_AT = time.time()
 
 
+def begin_session() -> None:
+    """Start the quest over without restarting the server.
+
+    Every predicate is relative to this moment, so moving it forward and
+    forgetting which tools have run is the whole reset. The workshop is
+    replayable only because this exists: otherwise a dugout left running
+    keeps yesterday's sprites and yesterday's tuning marked as done, and the
+    next person opens the page already halfway through a quest they have not
+    started.
+    """
+    global STARTED_AT
+    STARTED_AT = time.time()
+    match.CALLED.clear()
+
+
 @dataclass(frozen=True)
 class Stage:
     id: str

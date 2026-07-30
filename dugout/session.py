@@ -174,6 +174,12 @@ async def start_agent():
     return _AGENT
 
 
+async def restart_agent():
+    """Throw away the conversation and start a fresh one."""
+    await stop_agent()
+    return await start_agent()
+
+
 async def stop_agent() -> None:
     global _AGENT, _STACK
     if _STACK is not None:

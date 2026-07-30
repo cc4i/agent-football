@@ -3,6 +3,7 @@ const stagesEl = document.querySelector('.stages');
 const input = document.querySelector('#say');
 const sendBtn = document.querySelector('.send');
 const haltBtn = document.querySelector('.halt');
+const restartBtn = document.querySelector('.restart');
 const acting = document.querySelector('.acting');
 
 const ACTOR_CLASS = { user: 'a-you', antigravity: 'a-agy' };
@@ -113,7 +114,30 @@ async function checkHealth() {
     document.querySelector(`.svc[data-service="${name}"]`)
       ?.classList.toggle('down', !up);
   }
+  // Three unexplained port numbers mean nothing until one of them dies, so
+  // say what to do at the moment it matters.
+  document.querySelector('.rig-warn').hidden = Object.values(game).every(Boolean);
   showScoreline(match);
+}
+
+async function restart() {
+  if (inFlight) return;
+  restartBtn.disabled = true;
+  try {
+    await fetch('/reset', { method: 'POST' });
+    log.replaceChildren(el('div', 'empty-state'));
+    log.firstChild.append(
+      el('h3', null, 'Nothing has happened yet'),
+      el('p', null, 'Send the suggested line from the team sheet or type your own.'));
+    lastActor = null;
+    eventCount = 0;
+    tokenCount = null;
+    document.querySelector('#event-count').textContent = '0 events';
+    document.querySelector('#token-count').textContent = '-';
+    await renderStages();
+  } finally {
+    restartBtn.disabled = false;
+  }
 }
 
 function showScoreline(match) {
@@ -225,6 +249,7 @@ function halt() {
 
 sendBtn.onclick = send;
 haltBtn.onclick = halt;
+restartBtn.onclick = restart;
 input.onkeydown = (e) => { if (e.key === 'Enter') send(); };
 renderStages();
 checkHealth();

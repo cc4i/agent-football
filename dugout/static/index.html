@@ -16,11 +16,15 @@
     <div class="mark"><b>Dugout</b><span>Technical area</span></div>
     <div class="agy-chip"><i></i><b>Antigravity</b><span id="agy-status">0.1.9 · ready</span></div>
     <div class="vr"></div>
-    <div class="rig">
-      <span class="lbl">Game</span>
-      <div class="svc" data-service="pitch"><i></i><em>PITCH</em>5173</div>
-      <div class="svc" data-service="coach"><i></i><em>COACH</em>8000</div>
-      <div class="svc" data-service="captain"><i></i><em>CAPTAIN</em>8001</div>
+    <div class="rig" title="The three processes game/run.sh starts. A green dot means the dugout can reach it.">
+      <span class="lbl">Game stack</span>
+      <div class="svc" data-service="pitch"
+           title="Pitch: the game itself, a Vite app on http://localhost:5173"><i></i><em>PITCH</em>:5173</div>
+      <div class="svc" data-service="coach"
+           title="Coach: the game's own ADK agent on :8000. Your shouts go to it first."><i></i><em>COACH</em>:8000</div>
+      <div class="svc" data-service="captain"
+           title="Captain: the game's team captain on :8001, reached over A2A. It briefs the four player agents."><i></i><em>CAPTAIN</em>:8001</div>
+      <span class="rig-warn" hidden>not running &middot; <code>game/run.sh</code></span>
     </div>
     <div class="scoreline" hidden></div>
   </header>
@@ -34,7 +38,7 @@
 
     <aside class="sheet">
       <div class="sheet-hd">
-        <div class="eyebrow">Team sheet</div>
+        <div class="eyebrow">Team sheet<button class="restart" title="Clear the quest and start a new conversation. The kit and the squad on disk are left alone.">Start over</button></div>
         <p>Four things <b>Antigravity</b> can do for you. Send the suggested line, edit it, or just say what you want.</p>
       </div>
 

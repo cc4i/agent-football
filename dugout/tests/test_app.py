@@ -6,6 +6,12 @@ from fastapi.testclient import TestClient
 import app as app_module
 
 
+def _noop_async(record, key):
+    async def run():
+        record[key] = True
+    return run
+
+
 class StubResponse:
     """ChatResponse exposes cancel(); _turn calls it when the client leaves."""
 
@@ -248,3 +254,30 @@ async def test_a_client_disconnect_cancels_the_agent_turn(monkeypatch):
     await gen.__anext__()
     await gen.aclose()
     assert cancelled == [True]
+
+
+def test_reset_starts_a_fresh_quest(monkeypatch):
+    called = {}
+
+    def begin():
+        called["stages"] = True
+
+    monkeypatch.setattr(app_module, "begin_session", begin)
+    monkeypatch.setattr(app_module, "restart_agent", _noop_async(called, "agent"))
+    monkeypatch.setattr(app_module, "stage_status", lambda: [{"id": "rebrand", "done": False}])
+
+    body = TestClient(app_module.app).post("/reset").json()
+    assert called == {"stages": True, "agent": True}
+    assert body == [{"id": "rebrand", "done": False}]
+
+
+def test_reset_still_answers_when_the_agent_cannot_restart(monkeypatch):
+    # The quest must clear even if agy is unreachable, or a broken login
+    # leaves the manager stuck on someone else's half-finished quest.
+    async def boom():
+        raise app_module.AgentUnavailable("no login")
+
+    monkeypatch.setattr(app_module, "begin_session", lambda: None)
+    monkeypatch.setattr(app_module, "restart_agent", boom)
+    monkeypatch.setattr(app_module, "stage_status", lambda: [])
+    assert TestClient(app_module.app).post("/reset").status_code == 200

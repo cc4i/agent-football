@@ -23,9 +23,15 @@ the Playwright script it writes in stage 2. Run this on your own machine.
 4. Team sheet lists four stages (rebrand, take the field, read the game, tune the
    squad), none marked done after a fresh dugout launch. Stage completion is
    session-relative: a filesystem write is only counted if it is newer than the
-   dugout process start. Restarting the dugout therefore blanks the quest even
-   though the work really happened. This is what makes the quest replayable,
-   since each run starts clean without anyone having to reset files by hand.
+   session start. That is what makes the quest replayable, since nobody has to
+   reset files by hand.
+   - Press Start over to begin a new session without restarting the server.
+     It blanks the quest, clears the log and gives the agent a fresh
+     conversation, leaving the kit and the squad on disk alone.
+   - Do press it if you open the page onto a quest someone else was halfway
+     through. A dugout left running keeps counting yesterday's work, and
+     because each stage is judged independently you can otherwise arrive at
+     something incoherent, like stage 4 done while stage 3 is still locked.
 5. Send "Kit us out in black and gold with a wolf crest."
    - Trajectory shows a thought, then CALLED generate_team_avatars.
    - Every event names its actor in the gutter.

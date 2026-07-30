@@ -17,10 +17,11 @@ from session import (
     agent_health,
     get_agent,
     multiplex,
+    restart_agent,
     start_agent,
     stop_agent,
 )
-from stages import stage_status
+from stages import begin_session, stage_status
 from tools.match import read_status
 
 load_dotenv()
@@ -90,6 +91,20 @@ def health():
 
 @app.get("/stages")
 def stages():
+    return stage_status()
+
+
+@app.post("/reset")
+async def reset():
+    """Start the quest over: blank the stages and forget the conversation."""
+    begin_session()
+    try:
+        await restart_agent()
+    except AgentUnavailable:
+        # The quest still clears. /health already explains an unreachable
+        # agent, and refusing to reset would strand the manager on someone
+        # else's half-finished quest.
+        pass
     return stage_status()
 
 
