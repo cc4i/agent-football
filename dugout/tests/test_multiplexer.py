@@ -171,3 +171,14 @@ async def test_a_thought_is_not_duplicated_by_the_chunk_stream():
     events = await collect(FakeResponse(thoughts=["sizing up the kit"],
                                         chunks=[thought]))
     assert [e["kind"] for e in events] == ["thought", "usage"]
+
+
+async def test_text_events_carry_the_step_they_belong_to():
+    # Four subagents stream text at once. Without the step index the client
+    # concatenates them into one paragraph and the sentences interleave.
+    events = await collect(FakeResponse(chunks=[
+        Text(step_index=3, text="defender done"),
+        Text(step_index=7, text="keeper done"),
+    ]))
+    steps = [(e["step"], e["data"]) for e in events if e["kind"] == "text"]
+    assert steps == [(3, "defender done"), (7, "keeper done")]

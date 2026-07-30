@@ -71,8 +71,9 @@ class ChatRequest(BaseModel):
         return stripped
 
 
-def _frame(kind: str, actor: str, payload) -> str:
-    body = json.dumps({"actor": actor, "payload": payload}, default=str)
+def _frame(kind: str, actor: str, payload, step=None) -> str:
+    body = json.dumps({"actor": actor, "payload": payload, "step": step},
+                      default=str)
     return f"event: {kind}\ndata: {body}\n\n"
 
 
@@ -111,7 +112,8 @@ async def _turn(message: str):
                 payload = {"name": payload.name, "args": payload.args}
             elif event["kind"] == "usage" and payload is not None:
                 payload = {"total": getattr(payload, "total_token_count", None)}
-            yield _frame(event["kind"], event["actor"], payload)
+            yield _frame(event["kind"], event["actor"], payload,
+                         event.get("step"))
     except Exception as exc:
         yield _frame("error", "antigravity", str(exc))
     finally:

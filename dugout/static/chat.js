@@ -129,8 +129,14 @@ function showScoreline(match) {
     el('em', null, minuteLabel()));
 }
 
-const minuteLabel = () =>
-  matchClock === null ? "--′" : `${Math.floor(matchClock / 60)}′`;
+// matchTime counts down, so this is time remaining, shown exactly as the
+// game's own scoreboard shows it. Rendering it as an elapsed minute would run
+// the match log backwards.
+const minuteLabel = () => {
+  if (matchClock === null) return '--:--';
+  const m = Math.floor(matchClock / 60);
+  return `${m}:${String(matchClock % 60).padStart(2, '0')}`;
+};
 
 function setWorking(on, detail) {
   acting.style.display = on ? 'flex' : 'none';
@@ -163,6 +169,7 @@ async function send() {
   const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
   let buffer = '';
   let textNode = null;
+  let textStep = null;
 
   try {
     for (;;) {
@@ -175,14 +182,20 @@ async function send() {
         const kind = frame.match(/^event: (.+)$/m)?.[1];
         const data = frame.match(/^data: (.+)$/m)?.[1];
         if (!kind || !data) continue;
-        const { actor, payload } = JSON.parse(data);
+        const { actor, payload, step } = JSON.parse(data);
         const minute = minuteLabel();
 
         if (kind === 'user') { addEvent(actor, minute, el('p', 'say you', payload)); }
         else if (kind === 'thought') { addEvent(actor, minute, richText('thought', payload)); textNode = null; }
         else if (kind === 'tool_call') { addEvent(actor, minute, toolCallNode(payload)); textNode = null; }
         else if (kind === 'text') {
-          if (!textNode) { textNode = el('p', 'say', ''); addEvent(actor, minute, textNode); }
+          // A new step means a different speaker; appending would splice two
+          // subagents' sentences into one another.
+          if (!textNode || step !== textStep) {
+            textNode = el('p', 'say', '');
+            textStep = step;
+            addEvent(actor, minute, textNode);
+          }
           textNode.textContent += payload;
         }
         else if (kind === 'error') { addEvent(actor, minute, el('pre', 'out bad', payload)); }

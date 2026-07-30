@@ -11,6 +11,7 @@ from google.antigravity import (
     CapabilitiesConfig,
     LocalAgentConfig,
 )
+from google.antigravity.hooks import policy
 from google.antigravity.types import Text
 
 from subagents import SUBAGENTS
@@ -39,7 +40,12 @@ async def _pump(get_source, kind, queue):
         async for item in get_source():
             actor = (actor_for_tool_call(getattr(item, "name", ""))
                      if kind == "tool_call" else ACTOR_AGENT)
-            await queue.put({"kind": kind, "actor": actor, "data": item})
+            event = {"kind": kind, "actor": actor, "data": item}
+            if kind == "text":
+                # Concurrent subagents share this stream. The step index is what
+                # keeps their sentences from being spliced into one another.
+                event["data"], event["step"] = item.text, item.step_index
+            await queue.put(event)
     except Exception as exc:  # a dead stream must not kill the other two
         await queue.put({"kind": "error", "actor": ACTOR_AGENT,
                          "data": f"{kind} stream failed: {exc}"})
@@ -56,7 +62,7 @@ async def _text_deltas(response):
     """
     async for chunk in response.chunks:
         if isinstance(chunk, Text):
-            yield chunk.text
+            yield chunk
 
 
 async def multiplex(response):
@@ -98,8 +104,21 @@ class AgentUnavailable(RuntimeError):
     """The SDK could not start an agent, almost always because agy is not logged in."""
 
 
+def _policies():
+    """Let the agent run the script it just wrote, but only inside the repo.
+
+    The SDK default is confirm_run_command, which denies run_command outright
+    when there is no interactive handler to ask. Nothing can ask in a server,
+    and stage 2 is the agent running its own Playwright script, so it would
+    fail every time. Path-scoped denials outrank the wildcard allow, so file
+    writes outside the workspace are still refused.
+    """
+    return [*policy.workspace_only([str(REPO_ROOT)]), policy.allow_all()]
+
+
 def _build_config() -> LocalAgentConfig:
     return LocalAgentConfig(
+        policies=_policies(),
         system_instructions=(Path(__file__).parent / "instructions.md").read_text(),
         capabilities=CapabilitiesConfig(
             enable_subagents=True,
