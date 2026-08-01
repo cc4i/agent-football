@@ -2,7 +2,7 @@
 name = "futsal-worldcup-game"
 version = "0.1.0"
 description = "Multi-agent 2D futsal simulation: ADK coach/captain agents and MCP condition tools."
-requires-python = ">=3.10"
+requires-python = ">=3.14"
 dependencies = [
     # A2A protocol (coach <-> captain) and MCP tools (player injury/substitution)
     "google-adk[a2a]==2.1.0",
