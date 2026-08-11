@@ -7,7 +7,7 @@ const restartBtn = document.querySelector('.restart');
 const acting = document.querySelector('.acting');
 
 const ACTOR_CLASS = { user: 'a-you', antigravity: 'a-agy', game: 'a-sys' };
-const ACTOR_LABEL = { user: 'You', antigravity: 'Antigravity', game: "The game's agents" };
+const ACTOR_LABEL = { user: 'You', antigravity: 'Antigravity', game: 'Game' };
 const VERB = {
   generate_team_avatars: 'Called', get_match_status: 'Called',
   read_player_stats: 'Called', create_file: 'Wrote', edit_file: 'Edited',
@@ -97,11 +97,11 @@ function panelFor(actor, minute) {
   wrap.append(head, lanes);
 
   panels[family] = { lanes, byRole: {} };
-  addEvent(actor, minute, wrap);
+  addEvent(family === 'a-sys' ? actor : 'antigravity', minute, wrap);
   return panels[family];
 }
 
-function laneFor(panel, role) {
+function laneFor(panel, role, file) {
   if (panel.byRole[role]) return panel.byRole[role];
 
   const lane = el('div', `lane ${LANE_CLASS[role] || ''}`);
@@ -111,7 +111,7 @@ function laneFor(panel, role) {
   working.append(el('i'), el('span', null, 'working…'));
   const rows = el('div', 'rows');
   const whys = el('div', 'whys');
-  lane.append(header, el('div', 'file', `player_state/${role}.json`),
+  lane.append(header, el('div', 'file', file || `player_state/${role}.json`),
               working, rows, whys);
 
   panel.lanes.append(lane);
@@ -154,7 +154,7 @@ function deltaRow(d) {
 function drawTuning(actor, minute, entries) {
   const panel = panelFor(actor, minute);
   for (const entry of entries) {
-    const lane = laneFor(panel, entry.role);
+    const lane = laneFor(panel, entry.role, entry.file);
     lane.working.remove();
     for (const d of entry.deltas) {
       // A second call touching the same attribute keeps one row. What the

@@ -196,8 +196,7 @@ body::before{
 .ev.a-sys .delta em{color:var(--sys)}
 .ev.a-sys .bar .moved{background:var(--sys-2)}
 .ev.a-sys .bar .now{background:var(--sys)}
-.ev.a-sys .working{color:var(--sys-2)}
-.ev.a-sys .working i{background:var(--sys)}
+.ev.a-sys .bar .now.off{background:var(--fail)}
 
 /* the game's own agents: a separate system, never amber */
 .handoff{
