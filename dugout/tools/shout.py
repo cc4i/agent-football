@@ -11,7 +11,10 @@ some second browser nobody is watching.
 """
 
 import asyncio
+import json
 
+from attributes import PLAYER_STATE_DIR, ROLES
+from deltas import describe_change
 from tools.match import CALLED, read_status
 
 DEBUG_URL = "http://localhost:9222"
@@ -22,6 +25,38 @@ TERMINAL = "#terminal-body"
 
 # The coach, the captain and four player agents all answer in turn.
 REPLY_TIMEOUT_MS = 120000
+
+
+def _profiles() -> dict:
+    """The four squad files as they stand. Unreadable ones are skipped.
+
+    A missing or half-written file is not worth failing a shout over: the
+    replies are the point of the tool and the diff is the extra.
+    """
+    squad = {}
+    for role in ROLES:
+        try:
+            squad[role] = json.loads(
+                (PLAYER_STATE_DIR / f"{role}.json").read_text())
+        except (OSError, json.JSONDecodeError):
+            continue
+    return squad
+
+
+def _diff(before: dict, after: dict) -> list:
+    """What the game's own agents changed, one entry per role that moved.
+
+    A role missing from `before` is skipped rather than reported as new:
+    there is nothing to measure the move against.
+    """
+    changed = []
+    for role, profile in after.items():
+        if role not in before:
+            continue
+        change = describe_change(role, before[role], profile)
+        if change:
+            changed.append(change)
+    return changed
 
 
 def _chain_complete(replies: list[str]) -> bool:
@@ -77,6 +112,10 @@ async def shout_to_the_team(message: str) -> dict:
                     break
                 await asyncio.sleep(0.5)
 
+            # Snapshot the squad before the chain runs. The game's agents
+            # write these same four files, and their replies never say which
+            # numbers they chose.
+            squad_before = _profiles()
             before = await page.inner_text(TERMINAL)
             await page.fill(SHOUT_INPUT, stripped)
             await button.click()
@@ -101,7 +140,8 @@ async def shout_to_the_team(message: str) -> dict:
                     break
 
             replies = _new_lines(before, seen)
-            result = {"shouted": stripped, "replies": replies}
+            result = {"shouted": stripped, "replies": replies,
+                      "changed": _diff(squad_before, _profiles())}
             if not _chain_complete(replies):
                 # The players only answer during a live match, so a half
                 # finished chain after full time is expected, not a fault.
