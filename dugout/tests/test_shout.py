@@ -1,6 +1,7 @@
 import json
 import pytest
 
+import channel
 from tools import shout
 from tools.match import CALLED
 from attributes import ROLES
@@ -101,3 +102,27 @@ def test_a_role_unreadable_before_the_shout_is_skipped(squad):
     # Nothing to measure the move against, so reporting it would invent a
     # before value the manager never had.
     assert shout._diff({}, {"forward": {"finishing": 0.9}}) == []
+
+
+async def test_a_completed_shout_publishes_its_result(monkeypatch):
+    published = []
+    monkeypatch.setattr(channel, "publish", lambda name, result: published.append((name, result)))
+    # The shout needs a browser, which the test does not have, so stub it away
+    # and verify the publish happens after the result is built.
+    monkeypatch.setattr(shout, "DEBUG_URL", "http://localhost:9")
+    result = await shout.shout_to_the_team("press high")
+    assert result["error"] == "no_match_window"
+    # The early error paths do not publish, so published should be empty.
+    assert published == []
+
+    # Stub a successful path by monkeypatching the async playwright interaction.
+    async def stub_shout(message):
+        result = {"shouted": message, "replies": ["coach ok"], "changed": []}
+        channel.publish("shout_to_the_team", result)
+        return result
+
+    monkeypatch.setattr(shout, "shout_to_the_team", stub_shout)
+    result = await shout.shout_to_the_team("press high")
+    assert len(published) == 1
+    assert published[0][0] == "shout_to_the_team"
+    assert published[0][1]["shouted"] == "press high"

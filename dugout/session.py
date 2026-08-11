@@ -12,8 +12,9 @@ from google.antigravity import (
     LocalAgentConfig,
 )
 from google.antigravity.hooks import policy
-from google.antigravity.types import Text, ToolResult
+from google.antigravity.types import Text
 
+import channel
 from skills import SKILLS_DIR
 from subagents import SUBAGENTS
 from tools.avatars import generate_team_avatars
@@ -84,30 +85,22 @@ async def _text_deltas(response):
             yield chunk
 
 
-async def _tool_results(response):
-    """Tool return values, and nothing else.
-
-    Filtered for the same reason `_text_deltas` is: `chunks` carries every
-    kind, so an unfiltered pump would double every event that already has one
-    of its own.
-    """
-    async for chunk in response.chunks:
-        if isinstance(chunk, ToolResult):
-            yield chunk
-
-
 async def multiplex(response):
     """Fan thoughts, tool calls, text chunks and tool results into one timeline."""
     queue: asyncio.Queue = asyncio.Queue()
+    channel.open_channel()
     sources = (
         (lambda: response.thoughts, "thought"),
         (lambda: response.tool_calls, "tool_call"),
         (lambda: _text_deltas(response), "text"),
-        (lambda: _tool_results(response), "tool_result"),
     )
     tasks = [asyncio.create_task(_pump(src, kind, queue)) for src, kind in sources]
 
+    # Only the response's own three streams can finish. The channel is open
+    # until the turn is over, so its pump is cancelled below rather than
+    # counted here, and a turn does not hang waiting for a fourth _DONE.
     remaining = len(tasks)
+    tasks.append(asyncio.create_task(_pump(channel.results, "tool_result", queue)))
     try:
         while remaining:
             event = await queue.get()

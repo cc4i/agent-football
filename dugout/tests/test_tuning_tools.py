@@ -3,6 +3,7 @@ import os
 
 import pytest
 
+import channel
 from tools import tuning
 
 
@@ -101,3 +102,23 @@ def test_a_refused_change_reports_no_movement(state):
     result = tuning.tune_forward({"finishing": 2.0}, "score more")
     assert result["ok"] is False
     assert "changed" not in result
+
+
+def test_a_successful_tune_publishes_its_result(state, monkeypatch):
+    published = []
+    monkeypatch.setattr(channel, "publish", lambda name, result: published.append((name, result)))
+    result = tuning.tune_midfielder({"aggression": 0.7}, "hold the line")
+    assert len(published) == 1
+    assert published[0][0] == "tune_midfielder"
+    assert published[0][1] == result
+    assert published[0][1]["ok"] is True
+
+
+def test_a_refused_tune_publishes_too(state, monkeypatch):
+    published = []
+    monkeypatch.setattr(channel, "publish", lambda name, result: published.append((name, result)))
+    result = tuning.tune_defender({"finishing": 2.0}, "bad value")
+    assert len(published) == 1
+    assert published[0][0] == "tune_defender"
+    assert published[0][1]["ok"] is False
+    assert "violations" in published[0][1]

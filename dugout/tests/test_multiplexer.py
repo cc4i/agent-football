@@ -1,7 +1,8 @@
 import asyncio
 
-from google.antigravity.types import Text, Thought, ToolResult
+from google.antigravity.types import Text, Thought
 
+import channel
 import session
 
 
@@ -196,31 +197,68 @@ def test_a_tuning_result_is_attributed_to_its_subagent():
             == "subagent:goalkeeper-tuner")
 
 
-async def test_tool_results_arrive_on_their_own_stream():
-    events = await collect(FakeResponse(chunks=[
-        ToolResult(name="tune_forward", result={"ok": True}),
-    ]))
+async def test_a_published_result_surfaces_as_a_tool_result_event():
+    async def publish_soon():
+        # multiplex opens the channel, so wait just long enough for that.
+        await asyncio.sleep(0.0001)
+        channel.publish("tune_forward", {"ok": True})
+
+    task = asyncio.create_task(publish_soon())
+    events = await collect(FakeResponse(thoughts=["thinking"]))
+    await task
     results = [e for e in events if e["kind"] == "tool_result"]
     assert len(results) == 1
     assert results[0]["data"].name == "tune_forward"
-    assert results[0]["actor"] == "subagent:forward-tuner"
+    assert results[0]["data"].result == {"ok": True}
 
 
-async def test_a_tool_result_does_not_leak_into_the_text_stream():
-    # chunks is the unfiltered stream. An unfiltered pump would print the raw
-    # object repr in the match log, the same way a Thought would.
-    events = await collect(FakeResponse(chunks=[
-        Text(step_index=0, text="done"),
-        ToolResult(name="tune_forward", result={"ok": True}),
-    ]))
-    assert [e["data"] for e in events if e["kind"] == "text"] == ["done"]
+async def test_a_tune_result_is_attributed_to_its_subagent():
+    async def publish_soon():
+        await asyncio.sleep(0.0001)
+        channel.publish("tune_goalkeeper", {"ok": True})
+
+    task = asyncio.create_task(publish_soon())
+    events = await collect(FakeResponse(thoughts=["thinking"]))
+    await task
+    results = [e for e in events if e["kind"] == "tool_result"]
+    assert results[0]["actor"] == "subagent:goalkeeper-tuner"
 
 
-async def test_usage_is_still_the_final_event_with_four_pumps():
-    events = await collect(FakeResponse(
-        thoughts=["t"],
-        tool_calls=[FakeToolCall("get_match_status")],
-        chunks=[Text(step_index=0, text="c"),
-                ToolResult(name="get_match_status", result={})]))
+async def test_a_shout_result_is_attributed_to_the_game():
+    async def publish_soon():
+        await asyncio.sleep(0.0001)
+        channel.publish("shout_to_the_team", {"shouted": "press"})
+
+    task = asyncio.create_task(publish_soon())
+    events = await collect(FakeResponse(thoughts=["thinking"]))
+    await task
+    results = [e for e in events if e["kind"] == "tool_result"]
+    assert results[0]["actor"] == session.ACTOR_GAME
+
+
+async def test_a_turn_with_nothing_published_still_finishes():
+    # The channel's pump is not counted in remaining, so the multiplexer does
+    # not wait for a fourth _DONE that will never arrive.
+    events = await asyncio.wait_for(collect(FakeResponse(thoughts=["t"])), timeout=2)
+    assert events[-1]["kind"] == "usage"
+
+
+async def test_usage_is_still_the_final_event_with_a_published_result():
+    async def publish_soon():
+        await asyncio.sleep(0.0001)
+        channel.publish("tune_forward", {"ok": True})
+
+    task = asyncio.create_task(publish_soon())
+    events = await collect(FakeResponse(thoughts=["t"], chunks=["c"]))
+    await task
     assert events[-1]["kind"] == "usage"
     assert [e["kind"] for e in events].count("usage") == 1
+
+
+async def test_a_tool_result_on_the_chunk_stream_is_not_what_we_read():
+    # The SDK never puts a ToolResult on `chunks`: conversation.receive_chunks
+    # yields Thought, Text and ToolCall only. Anything that appears there is
+    # not a tool result, and must not be mistaken for one.
+    response = FakeResponse(chunks=[Text(step_index=0, text="hello")])
+    kinds = [event["kind"] async for event in session.multiplex(response)]
+    assert "tool_result" not in kinds

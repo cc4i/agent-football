@@ -13,6 +13,7 @@ some second browser nobody is watching.
 import asyncio
 import json
 
+import channel
 from attributes import PLAYER_STATE_DIR, ROLES
 from deltas import describe_change
 from tools.match import CALLED, read_status
@@ -153,6 +154,7 @@ async def shout_to_the_team(message: str) -> dict:
                     if over else
                     f"The players had not all answered within {int(deadline)}s. "
                     "Report what came back; shouting again will not fetch more.")
+            channel.publish("shout_to_the_team", result)
             return result
         finally:
             await browser.close()

@@ -8,6 +8,7 @@ trajectory renders, because the SDK exposes no subagent id.
 import json
 import os
 
+import channel
 from attributes import PLAYER_STATE_DIR, validate_changes
 from deltas import describe_change
 from tools.match import CALLED
@@ -28,7 +29,9 @@ def _tune(role: str, changes: dict, reason: str) -> dict:
     if not violations:
         violations = validate_changes(role, changes)
     if violations:
-        return {"ok": False, "role": role, "violations": violations}
+        refused = {"ok": False, "role": role, "violations": violations}
+        channel.publish(f"tune_{role}", refused)
+        return refused
 
     path = PLAYER_STATE_DIR / f"{role}.json"
     profile = json.loads(path.read_text())
@@ -43,9 +46,11 @@ def _tune(role: str, changes: dict, reason: str) -> dict:
     # quest can only tell the two routes apart by which tool did the writing.
     CALLED.add("tune")
     change = describe_change(role, before, changes, reason.strip())
-    return {"ok": True, "role": role, "applied": changes,
-            "reason": reason.strip(),
-            "changed": [change] if change else []}
+    result = {"ok": True, "role": role, "applied": changes,
+              "reason": reason.strip(),
+              "changed": [change] if change else []}
+    channel.publish(f"tune_{role}", result)
+    return result
 
 
 def tune_defender(changes: dict, reason: str) -> dict:
