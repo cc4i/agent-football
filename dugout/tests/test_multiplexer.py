@@ -1,6 +1,6 @@
 import asyncio
 
-from google.antigravity.types import Text, Thought
+from google.antigravity.types import Text, Thought, ToolResult
 
 import session
 
@@ -182,3 +182,45 @@ async def test_text_events_carry_the_step_they_belong_to():
     ]))
     steps = [(e["step"], e["data"]) for e in events if e["kind"] == "text"]
     assert steps == [(3, "defender done"), (7, "keeper done")]
+
+
+def test_a_shout_result_belongs_to_the_game_not_antigravity():
+    # The call is Antigravity's, because Antigravity made it. The numbers are
+    # the game's, because its own coach, captain and players chose them.
+    assert session.actor_for_tool_call("shout_to_the_team") == session.ACTOR_AGENT
+    assert session.actor_for_tool_result("shout_to_the_team") == session.ACTOR_GAME
+
+
+def test_a_tuning_result_is_attributed_to_its_subagent():
+    assert (session.actor_for_tool_result("tune_goalkeeper")
+            == "subagent:goalkeeper-tuner")
+
+
+async def test_tool_results_arrive_on_their_own_stream():
+    events = await collect(FakeResponse(chunks=[
+        ToolResult(name="tune_forward", result={"ok": True}),
+    ]))
+    results = [e for e in events if e["kind"] == "tool_result"]
+    assert len(results) == 1
+    assert results[0]["data"].name == "tune_forward"
+    assert results[0]["actor"] == "subagent:forward-tuner"
+
+
+async def test_a_tool_result_does_not_leak_into_the_text_stream():
+    # chunks is the unfiltered stream. An unfiltered pump would print the raw
+    # object repr in the match log, the same way a Thought would.
+    events = await collect(FakeResponse(chunks=[
+        Text(step_index=0, text="done"),
+        ToolResult(name="tune_forward", result={"ok": True}),
+    ]))
+    assert [e["data"] for e in events if e["kind"] == "text"] == ["done"]
+
+
+async def test_usage_is_still_the_final_event_with_four_pumps():
+    events = await collect(FakeResponse(
+        thoughts=["t"],
+        tool_calls=[FakeToolCall("get_match_status")],
+        chunks=[Text(step_index=0, text="c"),
+                ToolResult(name="get_match_status", result={})]))
+    assert events[-1]["kind"] == "usage"
+    assert [e["kind"] for e in events].count("usage") == 1

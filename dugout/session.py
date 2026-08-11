@@ -12,7 +12,7 @@ from google.antigravity import (
     LocalAgentConfig,
 )
 from google.antigravity.hooks import policy
-from google.antigravity.types import Text
+from google.antigravity.types import Text, ToolResult
 
 from skills import SKILLS_DIR
 from subagents import SUBAGENTS
@@ -23,6 +23,7 @@ from tools.tuning import ROLE_BY_TUNING_TOOL, TUNING_TOOL_BY_ROLE
 
 ACTOR_USER = "user"
 ACTOR_AGENT = "antigravity"
+ACTOR_GAME = "game"
 
 _DONE = object()
 
@@ -37,11 +38,27 @@ def actor_for_tool_call(name: str) -> str:
     return f"subagent:{role}-tuner" if role else ACTOR_AGENT
 
 
+def actor_for_tool_result(name: str) -> str:
+    """Attribute a tool's return value to whoever decided it.
+
+    Only the shout differs from its own call. Antigravity types the shout, so
+    the call is Antigravity's, but the game's coach, captain and four player
+    agents pick the numbers that come back, so the result is theirs.
+    """
+    if name == "shout_to_the_team":
+        return ACTOR_GAME
+    return actor_for_tool_call(name)
+
+
+_ACTOR_BY_KIND = {"tool_call": actor_for_tool_call,
+                  "tool_result": actor_for_tool_result}
+
+
 async def _pump(get_source, kind, queue):
     try:
         async for item in get_source():
-            actor = (actor_for_tool_call(getattr(item, "name", ""))
-                     if kind == "tool_call" else ACTOR_AGENT)
+            pick = _ACTOR_BY_KIND.get(kind)
+            actor = pick(getattr(item, "name", "")) if pick else ACTOR_AGENT
             event = {"kind": kind, "actor": actor, "data": item}
             if kind == "text":
                 # Concurrent subagents share this stream. The step index is what
@@ -67,13 +84,26 @@ async def _text_deltas(response):
             yield chunk
 
 
+async def _tool_results(response):
+    """Tool return values, and nothing else.
+
+    Filtered for the same reason `_text_deltas` is: `chunks` carries every
+    kind, so an unfiltered pump would double every event that already has one
+    of its own.
+    """
+    async for chunk in response.chunks:
+        if isinstance(chunk, ToolResult):
+            yield chunk
+
+
 async def multiplex(response):
-    """Fan thoughts, tool calls and text chunks into one ordered timeline."""
+    """Fan thoughts, tool calls, text chunks and tool results into one timeline."""
     queue: asyncio.Queue = asyncio.Queue()
     sources = (
         (lambda: response.thoughts, "thought"),
         (lambda: response.tool_calls, "tool_call"),
         (lambda: _text_deltas(response), "text"),
+        (lambda: _tool_results(response), "tool_result"),
     )
     tasks = [asyncio.create_task(_pump(src, kind, queue)) for src, kind in sources]
 
