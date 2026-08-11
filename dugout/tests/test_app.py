@@ -325,3 +325,46 @@ def test_a_turn_without_a_rebrand_has_no_kit_frame(monkeypatch):
                multiplex=fake_multiplex, stage_status=lambda: [])
     with c.stream("POST", "/chat", json={"message": "hi"}) as r:
         assert "event: kit" not in "".join(r.iter_text())
+
+
+def test_a_tuning_result_becomes_panels_with_markers():
+    panels = app_module.tuning_panels({"changed": [{
+        "role": "forward",
+        "file": "player_state/forward.json",
+        "reason": "score more",
+        "deltas": [{"attribute": "finishing", "before": 0.2, "after": 0.8,
+                    "baseline": 0.5, "min": 0.0, "max": 1.0}]}]})
+    delta = panels[0]["deltas"][0]
+    assert delta["beforePct"] == 20.0
+    assert delta["afterPct"] == 80.0
+    assert delta["baselinePct"] == 50.0
+    assert panels[0]["reason"] == "score more"
+
+
+def test_a_shout_that_moved_two_roles_becomes_two_panels():
+    panels = app_module.tuning_panels({"changed": [
+        {"role": "forward", "file": "player_state/forward.json", "reason": None,
+         "deltas": [{"attribute": "finishing", "before": 0.2, "after": 0.8,
+                     "baseline": 0.5, "min": 0.0, "max": 1.0}]},
+        {"role": "defender", "file": "player_state/defender.json", "reason": None,
+         "deltas": [{"attribute": "clearance", "before": 0.7, "after": 0.9,
+                     "baseline": 0.5, "min": 0.0, "max": 1.0}]}]})
+    assert [p["role"] for p in panels] == ["forward", "defender"]
+
+
+def test_a_refused_tune_becomes_a_panel_of_violations():
+    panels = app_module.tuning_panels({
+        "ok": False, "role": "defender",
+        "violations": ["finishing=2.0 is outside 0.0 to 1.0"]})
+    assert panels[0]["role"] == "defender"
+    assert panels[0]["deltas"] == []
+    assert panels[0]["violations"] == ["finishing=2.0 is outside 0.0 to 1.0"]
+
+
+def test_every_other_tool_result_stays_out_of_the_log():
+    # The log has never shown tool results. Printing them all now would bury
+    # the trajectory under shell output.
+    assert app_module.tuning_panels({"stdout": "ok"}) == []
+    assert app_module.tuning_panels({"changed": []}) == []
+    assert app_module.tuning_panels("a string") == []
+    assert app_module.tuning_panels(None) == []
