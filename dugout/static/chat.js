@@ -6,8 +6,8 @@ const haltBtn = document.querySelector('.halt');
 const restartBtn = document.querySelector('.restart');
 const acting = document.querySelector('.acting');
 
-const ACTOR_CLASS = { user: 'a-you', antigravity: 'a-agy' };
-const ACTOR_LABEL = { user: 'You', antigravity: 'Antigravity' };
+const ACTOR_CLASS = { user: 'a-you', antigravity: 'a-agy', game: 'a-sys' };
+const ACTOR_LABEL = { user: 'You', antigravity: 'Antigravity', game: "The game's agents" };
 const VERB = {
   generate_team_avatars: 'Called', get_match_status: 'Called',
   read_player_stats: 'Called', create_file: 'Wrote', edit_file: 'Edited',
@@ -71,19 +71,118 @@ function richText(cls, source) {
   return p;
 }
 
-function changesTable(changes, reason) {
-  // A tuner's whole contribution is which numbers it moved. As raw JSON on one
-  // line that is unreadable, and this is the stage people are here to watch.
-  const box = el('div', 'changes');
-  const table = el('table');
-  for (const [key, value] of Object.entries(changes)) {
-    const row = el('tr');
-    row.append(el('td', 'k', key), el('td', 'v', String(value)));
-    table.append(row);
+const LANE_CLASS = { defender: 'def', midfielder: 'mid', forward: 'fwd', goalkeeper: 'gk' };
+const TUNERS = Object.keys(LANE_CLASS).map((role) => `${role}-tuner`);
+const PANEL_HEAD = {
+  'a-agy': ['Antigravity subagents', 'one player file each'],
+  'a-sys': ["The game's agents", 'four player agents, through the coach'],
+};
+
+// One panel per turn per system, so four subagents working at once read as
+// four lanes filling in rather than a dozen scattered log entries.
+let panels = {};
+
+const at = (node, pct) => { node.style.left = `${pct}%`; return node; };
+const fmt = (n) => (typeof n === 'number' ? String(Number(n.toFixed(3))) : String(n));
+
+function panelFor(actor, minute) {
+  const family = actorClass(actor);
+  if (panels[family]) return panels[family];
+
+  const [title, note] = PANEL_HEAD[family] || PANEL_HEAD['a-agy'];
+  const head = el('div', 'lanes-hd');
+  head.append(el('b', null, title), el('span', null, note));
+  const lanes = el('div', 'lanes');
+  const wrap = el('div');
+  wrap.append(head, lanes);
+
+  panels[family] = { lanes, byRole: {} };
+  addEvent(actor, minute, wrap);
+  return panels[family];
+}
+
+function laneFor(panel, role) {
+  if (panel.byRole[role]) return panel.byRole[role];
+
+  const lane = el('div', `lane ${LANE_CLASS[role] || ''}`);
+  const header = el('header');
+  header.append(el('i'), el('b', null, role));
+  const working = el('div', 'working');
+  working.append(el('i'), el('span', null, 'working…'));
+  const rows = el('div', 'rows');
+  const whys = el('div', 'whys');
+  lane.append(header, el('div', 'file', `player_state/${role}.json`),
+              working, rows, whys);
+
+  panel.lanes.append(lane);
+  panel.byRole[role] = { working, rows, whys, byAttribute: {} };
+  return panel.byRole[role];
+}
+
+function barNode(d) {
+  // The bar reinforces the numbers beside it, so it carries the same reading
+  // for anyone who cannot see it.
+  const bar = el('div', 'bar');
+  bar.setAttribute('role', 'img');
+  bar.setAttribute('aria-label',
+    `${d.attribute} moved from ${d.before == null ? 'unset' : fmt(d.before)}`
+    + ` to ${fmt(d.after)}, allowed ${fmt(d.min)} to ${fmt(d.max)}`
+    + (d.baseline == null ? '' : `, shipped ${fmt(d.baseline)}`));
+
+  if (d.baselinePct != null) bar.append(at(el('i', 'tick'), d.baselinePct));
+  if (d.beforePct != null) {
+    const moved = at(el('i', 'moved'), Math.min(d.beforePct, d.afterPct));
+    moved.style.width = `${Math.abs(d.afterPct - d.beforePct)}%`;
+    bar.append(moved, at(el('i', 'was'), d.beforePct));
   }
-  box.append(table);
-  if (reason) box.append(el('p', 'why', reason));
-  return box;
+  bar.append(at(el('i', `now${d.off ? ' off' : ''}`), d.afterPct));
+  return bar;
+}
+
+function deltaRow(d) {
+  const row = el('div', 'row');
+  const line = el('div', 'delta');
+  const values = el('span');
+  values.append(el('s', null, d.before == null ? '-' : fmt(d.before)),
+                document.createTextNode(' → '),
+                el('em', null, fmt(d.after)));
+  line.append(el('u', null, d.attribute), values);
+  row.append(line, barNode(d));
+  return row;
+}
+
+function drawTuning(actor, minute, entries) {
+  const panel = panelFor(actor, minute);
+  for (const entry of entries) {
+    const lane = laneFor(panel, entry.role);
+    lane.working.remove();
+    for (const d of entry.deltas) {
+      // A second call touching the same attribute keeps one row. What the
+      // manager wants measured from is the first value, not the last.
+      const seen = lane.byAttribute[d.attribute];
+      const merged = seen ? { ...d, before: seen.before, beforePct: seen.beforePct } : d;
+      const row = deltaRow(merged);
+      if (seen) seen.row.replaceWith(row); else lane.rows.append(row);
+      lane.byAttribute[d.attribute] =
+        { row, before: merged.before, beforePct: merged.beforePct };
+    }
+    if (entry.reason) lane.whys.append(el('p', 'why', entry.reason));
+    if (entry.violations) {
+      // .out .bad is a descendant selector (chat.css:150), so the red text
+      // has to be a child node rather than a second class on the same node.
+      const out = el('pre', 'out');
+      out.append(el('span', 'bad', entry.violations.join('\n')));
+      lane.whys.append(out);
+    }
+  }
+  log.scrollTop = log.scrollHeight;
+}
+
+function startedTuners(args) {
+  // The SDK does not name the subagent in a field worth relying on, so the
+  // four tuner names are matched against the whole argument blob.
+  const blob = JSON.stringify(args ?? {});
+  return TUNERS.filter((name) => blob.includes(name));
 }
 
 function toolCallNode(payload) {
@@ -91,13 +190,12 @@ function toolCallNode(payload) {
   wrap.append(el('span', 'verb', VERB[payload.name] || 'Called'));
   const call = el('span', 'call');
   call.append(el('span', 'fn', payload.name));
-
-  const args = payload.args ?? {};
-  const isTune = payload.name.startsWith('tune_') && args.changes;
-  if (!isTune) call.append(el('span', 'arg', `(${JSON.stringify(args)})`));
+  // A tune's arguments are the changed numbers, and the lanes panel draws
+  // those properly a moment later. Printing the raw JSON here as well is the
+  // clutter this widget exists to remove.
+  if (!payload.name.startsWith('tune_'))
+    call.append(el('span', 'arg', `(${JSON.stringify(payload.args ?? {})})`));
   wrap.append(call);
-
-  if (isTune) wrap.append(changesTable(args.changes, args.reason));
   return wrap;
 }
 
@@ -206,6 +304,7 @@ async function restart() {
       el('h3', null, 'Nothing has happened yet'),
       el('p', null, 'Send the suggested line from the team sheet or type your own.'));
     lastActor = null;
+    panels = {};
     eventCount = 0;
     tokenCount = null;
     document.querySelector('#event-count').textContent = '0 events';
@@ -251,6 +350,7 @@ async function send() {
   input.value = '';
   inFlight = new AbortController();
   setWorking(true, 'thinking');
+  panels = {};
 
   let res;
   try {
@@ -287,7 +387,16 @@ async function send() {
 
         if (kind === 'user') { addEvent(actor, minute, el('p', 'say you', payload)); }
         else if (kind === 'thought') { addEvent(actor, minute, richText('thought', payload)); textNode = null; }
-        else if (kind === 'tool_call') { addEvent(actor, minute, toolCallNode(payload)); textNode = null; }
+        else if (kind === 'tool_call') {
+          addEvent(actor, minute, toolCallNode(payload));
+          textNode = null;
+          // A started tuner gets its lane straight away, so the panel shows
+          // four subagents at work rather than appearing only once one lands.
+          for (const name of payload.name === 'start_subagent'
+            ? startedTuners(payload.args) : [])
+            laneFor(panelFor('antigravity', minute), name.replace('-tuner', ''));
+        }
+        else if (kind === 'tuning') { drawTuning(actor, minute, payload); textNode = null; }
         else if (kind === 'text') {
           // A new step means a different speaker; appending would splice two
           // subagents' sentences into one another.
