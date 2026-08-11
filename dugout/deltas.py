@@ -47,7 +47,10 @@ def describe_change(role: str, before: dict, after: dict,
 
 
 def marker(value: float, low: float, high: float) -> tuple[float, bool]:
-    """Where a value sits on its range as a percentage, and whether it fits.
+    """Where a value sits on its range as a percentage, and whether it broke out.
+
+    The percentage is clamped to the track and the flag is True when the value
+    did not fit, which is what draws it red.
 
     A tuned value is validated and always fits. A shout writes through the
     game's own agents, which can land outside the band, and a marker silently

@@ -98,6 +98,23 @@ def test_a_shout_carries_no_reason_because_it_gave_none(squad):
     assert changed[0]["reason"] is None
 
 
+def test_a_role_whose_baseline_is_unreadable_is_skipped_not_raised(squad):
+    # The game rewrites the *_baseline.json files on a page load, so one can be
+    # caught half written. The same bargain as _profiles: the replies are the
+    # point of the tool and the diff is the extra, and losing the diff must not
+    # lose the replies, which a second shout cannot fetch back.
+    (squad / "forward_baseline.json").write_text("{ half writ")
+    before = {"forward": {"finishing": 0.5}, "defender": {"finishing": 0.5}}
+    after = {"forward": {"finishing": 0.9}, "defender": {"finishing": 0.9}}
+    assert [c["role"] for c in shout._diff(before, after)] == ["defender"]
+
+
+def test_a_role_whose_baseline_is_missing_is_skipped_not_raised(squad):
+    (squad / "forward_baseline.json").unlink()
+    before = {"forward": {"finishing": 0.5}}
+    assert shout._diff(before, {"forward": {"finishing": 0.9}}) == []
+
+
 def test_a_role_unreadable_before_the_shout_is_skipped(squad):
     # Nothing to measure the move against, so reporting it would invent a
     # before value the manager never had.

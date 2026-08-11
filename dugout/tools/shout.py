@@ -48,13 +48,20 @@ def _diff(before: dict, after: dict) -> list:
     """What the game's own agents changed, one entry per role that moved.
 
     A role missing from `before` is skipped rather than reported as new:
-    there is nothing to measure the move against.
+    there is nothing to measure the move against. So is a role whose baseline
+    will not read: the game rewrites those files on a page load and one can be
+    caught half written. Same bargain as `_profiles`, and a sharper one here,
+    because the replies are already in hand by this point and a second shout
+    fetches new ones rather than the ones a raise would throw away.
     """
     changed = []
     for role, profile in after.items():
         if role not in before:
             continue
-        change = describe_change(role, before[role], profile)
+        try:
+            change = describe_change(role, before[role], profile)
+        except (OSError, ValueError):  # unreadable, unparseable, or unknown role
+            continue
         if change:
             changed.append(change)
     return changed
