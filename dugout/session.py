@@ -55,7 +55,7 @@ _ACTOR_BY_KIND = {"tool_call": actor_for_tool_call,
                   "tool_result": actor_for_tool_result}
 
 
-async def _pump(get_source, kind, queue):
+async def _pump(get_source, kind, queue, signal_done=True):
     try:
         async for item in get_source():
             pick = _ACTOR_BY_KIND.get(kind)
@@ -70,7 +70,8 @@ async def _pump(get_source, kind, queue):
         await queue.put({"kind": "error", "actor": ACTOR_AGENT,
                          "data": f"{kind} stream failed: {exc}"})
     finally:
-        await queue.put(_DONE)
+        if signal_done:
+            await queue.put(_DONE)
 
 
 async def _text_deltas(response):
@@ -100,7 +101,7 @@ async def multiplex(response):
     # until the turn is over, so its pump is cancelled below rather than
     # counted here, and a turn does not hang waiting for a fourth _DONE.
     remaining = len(tasks)
-    tasks.append(asyncio.create_task(_pump(channel.results, "tool_result", queue)))
+    tasks.append(asyncio.create_task(_pump(channel.results, "tool_result", queue, signal_done=False)))
     try:
         while remaining:
             event = await queue.get()
@@ -111,6 +112,7 @@ async def multiplex(response):
     finally:
         for task in tasks:
             task.cancel()
+        channel.close_channel()
 
     try:
         usage = response.usage_metadata

@@ -104,25 +104,51 @@ def test_a_role_unreadable_before_the_shout_is_skipped(squad):
     assert shout._diff({}, {"forward": {"finishing": 0.9}}) == []
 
 
+async def test_early_error_paths_do_not_publish(monkeypatch):
+    published = []
+    monkeypatch.setattr(channel, "publish", lambda name, result: published.append((name, result)))
+    monkeypatch.setattr(shout, "DEBUG_URL", "http://localhost:9")
+    result = await shout.shout_to_the_team("press high")
+    assert result["error"] == "no_match_window" and published == []
+
+
 async def test_a_completed_shout_publishes_its_result(monkeypatch):
     published = []
     monkeypatch.setattr(channel, "publish", lambda name, result: published.append((name, result)))
-    # The shout needs a browser, which the test does not have, so stub it away
-    # and verify the publish happens after the result is built.
-    monkeypatch.setattr(shout, "DEBUG_URL", "http://localhost:9")
-    result = await shout.shout_to_the_team("press high")
-    assert result["error"] == "no_match_window"
-    # The early error paths do not publish, so published should be empty.
-    assert published == []
+    monkeypatch.setattr(shout, "REPLY_TIMEOUT_MS", 0)
+    monkeypatch.setattr(shout, "read_status", lambda: {"gameActive": False})
 
-    # Stub a successful path by monkeypatching the async playwright interaction.
-    async def stub_shout(message):
-        result = {"shouted": message, "replies": ["coach ok"], "changed": []}
-        channel.publish("shout_to_the_team", result)
-        return result
+    class StubButton:
+        async def wait_for(self, state, timeout): pass
+        async def is_enabled(self): return True
+        async def click(self): pass
 
-    monkeypatch.setattr(shout, "shout_to_the_team", stub_shout)
+    class StubPage:
+        url = f"http://{shout.GAME_URL}/match"
+        def locator(self, selector): return StubButton()
+        async def inner_text(self, selector): return "ready"
+        async def fill(self, selector, text): pass
+
+    class StubContext:
+        pages = [StubPage()]
+
+    class StubBrowser:
+        contexts = [StubContext()]
+        async def close(self): pass
+
+    class StubChromium:
+        async def connect_over_cdp(self, url): return StubBrowser()
+
+    class StubPlaywright:
+        chromium = StubChromium()
+        async def __aenter__(self): return self
+        async def __aexit__(self, *args): pass
+
+    def stub_async_playwright():
+        return StubPlaywright()
+
+    monkeypatch.setattr("playwright.async_api.async_playwright", stub_async_playwright)
+
     result = await shout.shout_to_the_team("press high")
-    assert len(published) == 1
-    assert published[0][0] == "shout_to_the_team"
-    assert published[0][1]["shouted"] == "press high"
+    assert published == [("shout_to_the_team", result)]
+    assert "note" in result

@@ -7,6 +7,7 @@ A tool that wants the browser to see its numbers has to say so itself.
 
 The tools run in the server's own process, so a queue is all this takes. It is
 opened per turn, which is also what keeps one turn's panel out of the next.
+The channel carries one turn at a time; overlapping turns would split results.
 """
 
 import asyncio
@@ -40,10 +41,6 @@ def publish(name: str, result) -> None:
     queue, loop = _queue, _loop
     if queue is None or loop is None:
         # A tool called outside a turn, which is how the tool tests call them.
-        return
-    if loop.is_closed():
-        # The loop was running when the channel opened but has since stopped.
-        # This happens in sync tests that call the tool directly.
         return
     loop.call_soon_threadsafe(queue.put_nowait, ToolResult(name=name, result=result))
 

@@ -1,6 +1,6 @@
 import asyncio
 
-from google.antigravity.types import Text, Thought
+from google.antigravity.types import Text, Thought, ToolResult
 
 import channel
 import session
@@ -251,6 +251,7 @@ async def test_usage_is_still_the_final_event_with_a_published_result():
     task = asyncio.create_task(publish_soon())
     events = await collect(FakeResponse(thoughts=["t"], chunks=["c"]))
     await task
+    assert any(e["kind"] == "tool_result" for e in events)
     assert events[-1]["kind"] == "usage"
     assert [e["kind"] for e in events].count("usage") == 1
 
@@ -259,6 +260,6 @@ async def test_a_tool_result_on_the_chunk_stream_is_not_what_we_read():
     # The SDK never puts a ToolResult on `chunks`: conversation.receive_chunks
     # yields Thought, Text and ToolCall only. Anything that appears there is
     # not a tool result, and must not be mistaken for one.
-    response = FakeResponse(chunks=[Text(step_index=0, text="hello")])
+    response = FakeResponse(chunks=[ToolResult(name="tune_forward", result={"ok": True})])
     kinds = [event["kind"] async for event in session.multiplex(response)]
     assert "tool_result" not in kinds
