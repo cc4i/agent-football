@@ -65,6 +65,13 @@ the Playwright script it writes in stage 2. Run this on your own machine.
    - The chain runs coach, then team captain over A2A on :8001, then the four
      specialists, and each player answers in #terminal-body. The tool waits for
      all four and Antigravity reports them back, so it should call it once.
+   - A second panel appears, headed "The game's agents", in cyan. It shows
+     the same bars for whatever the four player agents changed. The
+     shout_to_the_team call above it stays amber and named Antigravity,
+     because Antigravity made the call; the panel is cyan, because the
+     game's agents chose the numbers.
+   - A value they picked outside its allowed band draws as a red bar hard
+     against the end of the track, not as a dot sitting quietly at the edge.
    - Stage 5 ticks, stage 4 does not. Both routes rewrite the same role files,
      so a shout that also ticked "tune the squad" would be claiming the
      subagents ran when they did not.
@@ -76,8 +83,18 @@ the Playwright script it writes in stage 2. Run this on your own machine.
    - Four subagents run. Each tool call is attributed to its own role, so the
      gutter reads DEFENDER, MIDFIELDER, FORWARD, GOALKEEPER rather than
      Antigravity four times.
-   - Each one renders its change as a table of attribute and new value with
-     the tuner's reason underneath, not a line of JSON.
+   - One panel appears, headed "Antigravity subagents", with a lane per role
+     in the role's own colour. A lane opens as soon as its tuner starts and
+     shows a pulsing "working" until it reports, so the four are visibly
+     running at once rather than appearing one at a time.
+   - Each changed attribute is one row: the name, the old value, the new
+     value, and a bar underneath. On the bar, a faint tick is the shipped
+     baseline, a hollow dot is the value before this call, and the filled dot
+     is where it landed. The tuner's reason sits at the foot of its lane.
+   - Nothing renders a line of raw JSON. The tune call itself reads only
+     "Called tune_defender", because the panel carries the numbers.
+   - A tuner that changes the same attribute twice keeps one row, still
+     measured from the first value it moved off.
    - The winning-the-match skill is listed on this stage. Click it to read
      exactly what Antigravity was told about the simulation.
    - All four role files are rewritten within a few seconds of each other.

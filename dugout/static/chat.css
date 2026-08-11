@@ -165,11 +165,50 @@ body::before{
 .lane.gk  header{color:var(--gk)}
 .lane .file{font-family:var(--data);font-size:10px;color:var(--chalk-3);margin-bottom:8px;word-break:break-all}
 .delta{display:flex;justify-content:space-between;gap:8px;font-family:var(--data);font-size:11px;padding:3px 0;color:var(--chalk-2)}
-.delta u{text-decoration:none;color:var(--chalk-3)}
+/* A lane is a quarter of the panel and some attribute names do not fit in it.
+   The numbers are the point of the row, so the name gives way first: it
+   truncates, and carries its full text in a tooltip and in the bar's label. */
+.delta u{text-decoration:none;color:var(--chalk-3);
+         overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.delta>span{flex:0 0 auto;white-space:nowrap}
 .delta s{text-decoration:none;color:var(--chalk-3);opacity:.65}
-.delta em{font-style:normal;color:var(--ok)}
+/* The actor's colour, not a verdict. lineHeight .6 -> .3 and finishing
+   .99 -> .98 are deliberate reductions that make the squad better, so
+   colouring by direction would assert a judgement the widget cannot make. */
+.delta em{font-style:normal;color:var(--amber)}
 .working{font-family:var(--data);font-size:11px;color:var(--amber-2);display:flex;align-items:center;gap:7px}
 .working i{width:4px;height:4px;border-radius:50%;background:var(--amber);font-style:normal;animation:tick .9s steps(2,end) infinite}
+.lane .rows{display:flex;flex-direction:column;gap:1px}
+.lane .why{margin:8px 0 0;font-size:12.5px;line-height:1.45;color:var(--chalk-2);font-weight:300}
+/* A lane is a quarter of the panel, so the shared .out indent is too deep. */
+.lane .out{margin-top:8px;padding-left:9px;font-size:11px}
+
+/* a changed attribute, drawn on the band it must stay inside */
+/* The transparent border is the widest marker's half-width, held back at each
+   end. A marker is centred on its position, so at 0% or 100% half of it would
+   hang off the rail without this. An absolutely positioned child measures its
+   percentages against the padding box, inside the border, so the reserve moves
+   the markers; the rail is drawn from the same box and still spans exactly the
+   distance a marker can travel. */
+.bar{position:relative;height:9px;margin:1px 0 5px;
+     border-left:3.5px solid transparent;border-right:3.5px solid transparent;
+     background:linear-gradient(var(--rule),var(--rule)) left center/100% 1px no-repeat}
+.bar i{position:absolute;font-style:normal}
+.bar .tick{top:0;width:1px;height:9px;margin-left:-.5px;background:var(--chalk-3);opacity:.5}
+.bar .moved{top:4px;height:1px;background:var(--amber-2)}
+.bar .was{top:2px;width:5px;height:5px;margin-left:-2.5px;border-radius:50%;
+          border:1px solid var(--chalk-3);background:var(--turf-800)}
+.bar .now{top:1px;width:7px;height:7px;margin-left:-3.5px;border-radius:50%;background:var(--amber)}
+/* Out of band. A marker parked silently on the rail would read as in range. */
+.bar .now.off{top:0;width:3px;height:9px;margin-left:-1.5px;border-radius:1px;background:var(--fail)}
+
+/* the same panel when the game's own agents chose the numbers */
+.ev.a-sys .lanes{border-color:var(--sys-3)}
+.ev.a-sys .lanes-hd b{color:var(--sys-2)}
+.ev.a-sys .delta em{color:var(--sys)}
+.ev.a-sys .bar .moved{background:var(--sys-2)}
+.ev.a-sys .bar .now{background:var(--sys)}
+.ev.a-sys .bar .now.off{background:var(--fail)}
 
 /* the game's own agents: a separate system, never amber */
 .handoff{
@@ -289,13 +328,7 @@ body.is-blocked .agy-chip span{color:var(--fail);opacity:.8}
 .skill-body .skill-h{display:inline-block;margin-top:6px;color:var(--amber-2);font-weight:600;letter-spacing:.04em}
 .skill-body b{color:var(--chalk)}
 
-/* ── tuning tables and kit previews in the log ───────────── */
-.changes{margin-top:7px}
-.changes table{border-collapse:collapse;font-family:var(--data);font-size:12px}
-.changes td{padding:2px 0;vertical-align:baseline}
-.changes td.k{color:var(--chalk-3);padding-right:18px;white-space:nowrap}
-.changes td.v{color:var(--amber);text-align:right;font-variant-numeric:tabular-nums}
-.changes .why{margin:7px 0 0;font-size:13px;line-height:1.45;color:var(--chalk-2);font-weight:300}
+/* ── kit previews in the log ─────────────────────────────── */
 
 .kit{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-top:2px}
 /* Checkered so a transparent cut-out is obviously transparent. */

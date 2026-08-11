@@ -14,6 +14,7 @@ from google.antigravity import (
 from google.antigravity.hooks import policy
 from google.antigravity.types import Text
 
+import channel
 from skills import SKILLS_DIR
 from subagents import SUBAGENTS
 from tools.avatars import generate_team_avatars
@@ -23,6 +24,7 @@ from tools.tuning import ROLE_BY_TUNING_TOOL, TUNING_TOOL_BY_ROLE
 
 ACTOR_USER = "user"
 ACTOR_AGENT = "antigravity"
+ACTOR_GAME = "game"
 
 _DONE = object()
 
@@ -37,11 +39,27 @@ def actor_for_tool_call(name: str) -> str:
     return f"subagent:{role}-tuner" if role else ACTOR_AGENT
 
 
-async def _pump(get_source, kind, queue):
+def actor_for_tool_result(name: str) -> str:
+    """Attribute a tool's return value to whoever decided it.
+
+    Only the shout differs from its own call. Antigravity types the shout, so
+    the call is Antigravity's, but the game's coach, captain and four player
+    agents pick the numbers that come back, so the result is theirs.
+    """
+    if name == "shout_to_the_team":
+        return ACTOR_GAME
+    return actor_for_tool_call(name)
+
+
+_ACTOR_BY_KIND = {"tool_call": actor_for_tool_call,
+                  "tool_result": actor_for_tool_result}
+
+
+async def _pump(get_source, kind, queue, signal_done=True):
     try:
         async for item in get_source():
-            actor = (actor_for_tool_call(getattr(item, "name", ""))
-                     if kind == "tool_call" else ACTOR_AGENT)
+            pick = _ACTOR_BY_KIND.get(kind)
+            actor = pick(getattr(item, "name", "")) if pick else ACTOR_AGENT
             event = {"kind": kind, "actor": actor, "data": item}
             if kind == "text":
                 # Concurrent subagents share this stream. The step index is what
@@ -52,7 +70,8 @@ async def _pump(get_source, kind, queue):
         await queue.put({"kind": "error", "actor": ACTOR_AGENT,
                          "data": f"{kind} stream failed: {exc}"})
     finally:
-        await queue.put(_DONE)
+        if signal_done:
+            await queue.put(_DONE)
 
 
 async def _text_deltas(response):
@@ -68,8 +87,9 @@ async def _text_deltas(response):
 
 
 async def multiplex(response):
-    """Fan thoughts, tool calls and text chunks into one ordered timeline."""
+    """Fan thoughts, tool calls, text chunks and tool results into one timeline."""
     queue: asyncio.Queue = asyncio.Queue()
+    channel.open_channel()
     sources = (
         (lambda: response.thoughts, "thought"),
         (lambda: response.tool_calls, "tool_call"),
@@ -77,7 +97,11 @@ async def multiplex(response):
     )
     tasks = [asyncio.create_task(_pump(src, kind, queue)) for src, kind in sources]
 
+    # Only the response's own three streams can finish. The channel is open
+    # until the turn is over, so its pump is cancelled below rather than
+    # counted here, and a turn does not hang waiting for a fourth _DONE.
     remaining = len(tasks)
+    tasks.append(asyncio.create_task(_pump(channel.results, "tool_result", queue, signal_done=False)))
     try:
         while remaining:
             event = await queue.get()
@@ -88,6 +112,7 @@ async def multiplex(response):
     finally:
         for task in tasks:
             task.cancel()
+        channel.close_channel()
 
     try:
         usage = response.usage_metadata

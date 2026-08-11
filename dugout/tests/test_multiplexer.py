@@ -1,7 +1,8 @@
 import asyncio
 
-from google.antigravity.types import Text, Thought
+from google.antigravity.types import Text, Thought, ToolResult
 
+import channel
 import session
 
 
@@ -182,3 +183,83 @@ async def test_text_events_carry_the_step_they_belong_to():
     ]))
     steps = [(e["step"], e["data"]) for e in events if e["kind"] == "text"]
     assert steps == [(3, "defender done"), (7, "keeper done")]
+
+
+def test_a_shout_result_belongs_to_the_game_not_antigravity():
+    # The call is Antigravity's, because Antigravity made it. The numbers are
+    # the game's, because its own coach, captain and players chose them.
+    assert session.actor_for_tool_call("shout_to_the_team") == session.ACTOR_AGENT
+    assert session.actor_for_tool_result("shout_to_the_team") == session.ACTOR_GAME
+
+
+def test_a_tuning_result_is_attributed_to_its_subagent():
+    assert (session.actor_for_tool_result("tune_goalkeeper")
+            == "subagent:goalkeeper-tuner")
+
+
+async def test_a_published_result_surfaces_as_a_tool_result_event():
+    async def publish_soon():
+        # multiplex opens the channel, so wait just long enough for that.
+        await asyncio.sleep(0.0001)
+        channel.publish("tune_forward", {"ok": True})
+
+    task = asyncio.create_task(publish_soon())
+    events = await collect(FakeResponse(thoughts=["thinking"]))
+    await task
+    results = [e for e in events if e["kind"] == "tool_result"]
+    assert len(results) == 1
+    assert results[0]["data"].name == "tune_forward"
+    assert results[0]["data"].result == {"ok": True}
+
+
+async def test_a_tune_result_is_attributed_to_its_subagent():
+    async def publish_soon():
+        await asyncio.sleep(0.0001)
+        channel.publish("tune_goalkeeper", {"ok": True})
+
+    task = asyncio.create_task(publish_soon())
+    events = await collect(FakeResponse(thoughts=["thinking"]))
+    await task
+    results = [e for e in events if e["kind"] == "tool_result"]
+    assert results[0]["actor"] == "subagent:goalkeeper-tuner"
+
+
+async def test_a_shout_result_is_attributed_to_the_game():
+    async def publish_soon():
+        await asyncio.sleep(0.0001)
+        channel.publish("shout_to_the_team", {"shouted": "press"})
+
+    task = asyncio.create_task(publish_soon())
+    events = await collect(FakeResponse(thoughts=["thinking"]))
+    await task
+    results = [e for e in events if e["kind"] == "tool_result"]
+    assert results[0]["actor"] == session.ACTOR_GAME
+
+
+async def test_a_turn_with_nothing_published_still_finishes():
+    # The channel's pump is not counted in remaining, so the multiplexer does
+    # not wait for a fourth _DONE that will never arrive.
+    events = await asyncio.wait_for(collect(FakeResponse(thoughts=["t"])), timeout=2)
+    assert events[-1]["kind"] == "usage"
+
+
+async def test_usage_is_still_the_final_event_with_a_published_result():
+    async def publish_soon():
+        await asyncio.sleep(0.0001)
+        channel.publish("tune_forward", {"ok": True})
+
+    task = asyncio.create_task(publish_soon())
+    events = await collect(FakeResponse(thoughts=["t"], chunks=["c"]))
+    await task
+    assert any(e["kind"] == "tool_result" for e in events)
+    assert events[-1]["kind"] == "usage"
+    assert [e["kind"] for e in events].count("usage") == 1
+
+
+async def test_a_tool_result_on_the_chunk_stream_is_not_what_we_read():
+    # The SDK never puts a ToolResult on `chunks`: conversation.receive_chunks
+    # yields Thought, Text and ToolCall only. Anything that appears there is
+    # not a tool result, and must not be mistaken for one.
+    response = FakeResponse(chunks=[ToolResult(name="tune_forward", result={"ok": True})])
+    kinds = [event["kind"] async for event in session.multiplex(response)]
+    assert "tool_result" not in kinds

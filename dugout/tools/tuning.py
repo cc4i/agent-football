@@ -8,7 +8,9 @@ trajectory renders, because the SDK exposes no subagent id.
 import json
 import os
 
+import channel
 from attributes import PLAYER_STATE_DIR, validate_changes
+from deltas import describe_change
 from tools.match import CALLED
 
 MAX_ATTRIBUTES_PER_CALL = 3
@@ -27,10 +29,15 @@ def _tune(role: str, changes: dict, reason: str) -> dict:
     if not violations:
         violations = validate_changes(role, changes)
     if violations:
-        return {"ok": False, "role": role, "violations": violations}
+        refused = {"ok": False, "role": role, "violations": violations}
+        channel.publish(f"tune_{role}", refused)
+        return refused
 
     path = PLAYER_STATE_DIR / f"{role}.json"
     profile = json.loads(path.read_text())
+    # Captured before the update, because this is the only moment the prior
+    # values still exist anywhere.
+    before = dict(profile)
     profile.update(changes)
     tmp = path.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(profile, indent=2))
@@ -38,7 +45,12 @@ def _tune(role: str, changes: dict, reason: str) -> dict:
     # A shout rewrites these same files through the game's own agents, so the
     # quest can only tell the two routes apart by which tool did the writing.
     CALLED.add("tune")
-    return {"ok": True, "role": role, "applied": changes, "reason": reason.strip()}
+    change = describe_change(role, before, changes, reason.strip())
+    result = {"ok": True, "role": role, "applied": changes,
+              "reason": reason.strip(),
+              "changed": [change] if change else []}
+    channel.publish(f"tune_{role}", result)
+    return result
 
 
 def tune_defender(changes: dict, reason: str) -> dict:

@@ -3,6 +3,7 @@ import os
 
 import pytest
 
+import channel
 from tools import tuning
 
 
@@ -72,3 +73,52 @@ def test_failed_write_leaves_original_file_intact(state, monkeypatch):
         tuning.tune_forward({"finishing": 0.9}, "needs a goal")
     profile = json.loads((state / "forward.json").read_text())
     assert profile["finishing"] == 0.5
+
+
+def test_the_result_says_what_each_value_was_before(state):
+    result = tuning.tune_forward({"finishing": 0.9}, "needs a goal")
+    delta = result["changed"][0]["deltas"][0]
+    assert delta["attribute"] == "finishing"
+    assert delta["before"] == 0.5
+    assert delta["after"] == 0.9
+    assert delta["baseline"] == 0.5
+    assert (delta["min"], delta["max"]) == (0.0, 1.0)
+
+
+def test_the_change_names_the_role_the_file_and_the_reason(state):
+    change = tuning.tune_defender({"aggression": 0.9}, "hold the line")["changed"][0]
+    assert change["role"] == "defender"
+    assert change["file"] == "player_state/defender.json"
+    assert change["reason"] == "hold the line"
+
+
+def test_setting_a_value_to_what_it_already_is_moves_nothing(state):
+    result = tuning.tune_forward({"finishing": 0.5}, "no change at all")
+    assert result["ok"] is True
+    assert result["changed"] == []
+
+
+def test_a_refused_change_reports_no_movement(state):
+    result = tuning.tune_forward({"finishing": 2.0}, "score more")
+    assert result["ok"] is False
+    assert "changed" not in result
+
+
+def test_a_successful_tune_publishes_its_result(state, monkeypatch):
+    published = []
+    monkeypatch.setattr(channel, "publish", lambda name, result: published.append((name, result)))
+    result = tuning.tune_midfielder({"aggression": 0.7}, "hold the line")
+    assert len(published) == 1
+    assert published[0][0] == "tune_midfielder"
+    assert published[0][1] == result
+    assert published[0][1]["ok"] is True
+
+
+def test_a_refused_tune_publishes_too(state, monkeypatch):
+    published = []
+    monkeypatch.setattr(channel, "publish", lambda name, result: published.append((name, result)))
+    result = tuning.tune_defender({"finishing": 2.0}, "bad value")
+    assert len(published) == 1
+    assert published[0][0] == "tune_defender"
+    assert published[0][1]["ok"] is False
+    assert "violations" in published[0][1]

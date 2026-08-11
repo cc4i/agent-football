@@ -21,6 +21,7 @@ from session import (
     start_agent,
     stop_agent,
 )
+from deltas import with_markers
 from skills import load_skills
 from stages import begin_session, stage_status
 from tools.avatars import SPRITE_DIR
@@ -82,6 +83,23 @@ def kit_preview(team: str) -> dict:
     return {"team": team,
             "images": [f"/assets/sprites/{n}" for n in live],
             "at": int(newest)}
+
+
+def tuning_panels(result) -> list:
+    """The role panels a tool result carries, ready to draw.
+
+    Empty for everything else. The log has never shown tool results, and
+    printing them all now would bury the trajectory under shell output.
+    """
+    if not isinstance(result, dict):
+        return []
+    if result.get("changed"):
+        return [with_markers(change) for change in result["changed"]]
+    role, violations = result.get("role"), result.get("violations")
+    if role and violations:
+        return [{"role": role, "file": f"player_state/{role}.json",
+                 "reason": None, "deltas": [], "violations": violations}]
+    return []
 
 
 def _frame(kind: str, actor: str, payload, step=None) -> str:
@@ -146,6 +164,13 @@ async def _turn(message: str):
                 payload = {"name": payload.name, "args": payload.args}
                 if payload["name"] == "generate_team_avatars":
                     rebranded.append(payload["args"].get("team", "blue"))
+            elif event["kind"] == "tool_result":
+                # Only the two routes that rewrite the squad have anything to
+                # draw. The rest of the results never reach the client.
+                panels = tuning_panels(getattr(payload, "result", None))
+                if panels:
+                    yield _frame("tuning", event["actor"], panels)
+                continue
             elif event["kind"] == "usage" and payload is not None:
                 payload = {"total": getattr(payload, "total_token_count", None)}
             yield _frame(event["kind"], event["actor"], payload,

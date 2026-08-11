@@ -1,7 +1,10 @@
+import json
 import pytest
 
+import channel
 from tools import shout
 from tools.match import CALLED
+from attributes import ROLES
 
 
 @pytest.fixture(autouse=True)
@@ -50,3 +53,119 @@ async def test_a_half_finished_chain_after_full_time_says_so(monkeypatch):
     assert shout._chain_complete([]) is False
     # The note is built from the same read_status the tool uses.
     assert not shout.read_status()["gameActive"]
+
+
+@pytest.fixture
+def squad(tmp_path, monkeypatch):
+    baseline = {"finishing": 0.5, "shotPower": 0.5}
+    for name in ROLES:
+        (tmp_path / f"{name}.json").write_text(json.dumps(baseline))
+        (tmp_path / f"{name}_baseline.json").write_text(json.dumps(baseline))
+    monkeypatch.setattr(shout, "PLAYER_STATE_DIR", tmp_path)
+    monkeypatch.setattr("attributes.PLAYER_STATE_DIR", tmp_path)
+    return tmp_path
+
+
+def test_the_squad_is_read_from_disk(squad):
+    assert shout._profiles()["forward"]["finishing"] == 0.5
+    assert set(shout._profiles()) == set(ROLES)
+
+
+def test_an_unreadable_profile_is_skipped_not_raised(squad):
+    (squad / "forward.json").write_text("{ broken")
+    profiles = shout._profiles()
+    assert "forward" not in profiles
+    assert "defender" in profiles
+
+
+def test_a_role_the_agents_left_alone_is_not_reported(squad):
+    before = {"forward": {"finishing": 0.5}}
+    assert shout._diff(before, {"forward": {"finishing": 0.5}}) == []
+
+
+def test_every_role_the_agents_moved_comes_back(squad):
+    before = {"forward": {"finishing": 0.5}, "defender": {"finishing": 0.5}}
+    after = {"forward": {"finishing": 0.9}, "defender": {"finishing": 0.5}}
+    changed = shout._diff(before, after)
+    assert [c["role"] for c in changed] == ["forward"]
+    assert changed[0]["deltas"][0]["before"] == 0.5
+    assert changed[0]["deltas"][0]["after"] == 0.9
+
+
+def test_a_shout_carries_no_reason_because_it_gave_none(squad):
+    changed = shout._diff({"forward": {"finishing": 0.5}},
+                          {"forward": {"finishing": 0.9}})
+    assert changed[0]["reason"] is None
+
+
+def test_a_role_whose_baseline_is_unreadable_is_skipped_not_raised(squad):
+    # The game rewrites the *_baseline.json files on a page load, so one can be
+    # caught half written. The same bargain as _profiles: the replies are the
+    # point of the tool and the diff is the extra, and losing the diff must not
+    # lose the replies, which a second shout cannot fetch back.
+    (squad / "forward_baseline.json").write_text("{ half writ")
+    before = {"forward": {"finishing": 0.5}, "defender": {"finishing": 0.5}}
+    after = {"forward": {"finishing": 0.9}, "defender": {"finishing": 0.9}}
+    assert [c["role"] for c in shout._diff(before, after)] == ["defender"]
+
+
+def test_a_role_whose_baseline_is_missing_is_skipped_not_raised(squad):
+    (squad / "forward_baseline.json").unlink()
+    before = {"forward": {"finishing": 0.5}}
+    assert shout._diff(before, {"forward": {"finishing": 0.9}}) == []
+
+
+def test_a_role_unreadable_before_the_shout_is_skipped(squad):
+    # Nothing to measure the move against, so reporting it would invent a
+    # before value the manager never had.
+    assert shout._diff({}, {"forward": {"finishing": 0.9}}) == []
+
+
+async def test_early_error_paths_do_not_publish(monkeypatch):
+    published = []
+    monkeypatch.setattr(channel, "publish", lambda name, result: published.append((name, result)))
+    monkeypatch.setattr(shout, "DEBUG_URL", "http://localhost:9")
+    result = await shout.shout_to_the_team("press high")
+    assert result["error"] == "no_match_window" and published == []
+
+
+async def test_a_completed_shout_publishes_its_result(monkeypatch):
+    published = []
+    monkeypatch.setattr(channel, "publish", lambda name, result: published.append((name, result)))
+    monkeypatch.setattr(shout, "REPLY_TIMEOUT_MS", 0)
+    monkeypatch.setattr(shout, "read_status", lambda: {"gameActive": False})
+
+    class StubButton:
+        async def wait_for(self, state, timeout): pass
+        async def is_enabled(self): return True
+        async def click(self): pass
+
+    class StubPage:
+        url = f"http://{shout.GAME_URL}/match"
+        def locator(self, selector): return StubButton()
+        async def inner_text(self, selector): return "ready"
+        async def fill(self, selector, text): pass
+
+    class StubContext:
+        pages = [StubPage()]
+
+    class StubBrowser:
+        contexts = [StubContext()]
+        async def close(self): pass
+
+    class StubChromium:
+        async def connect_over_cdp(self, url): return StubBrowser()
+
+    class StubPlaywright:
+        chromium = StubChromium()
+        async def __aenter__(self): return self
+        async def __aexit__(self, *args): pass
+
+    def stub_async_playwright():
+        return StubPlaywright()
+
+    monkeypatch.setattr("playwright.async_api.async_playwright", stub_async_playwright)
+
+    result = await shout.shout_to_the_team("press high")
+    assert published == [("shout_to_the_team", result)]
+    assert "note" in result
