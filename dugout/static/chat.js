@@ -146,7 +146,9 @@ function deltaRow(d) {
   values.append(el('s', null, d.before == null ? '-' : fmt(d.before)),
                 document.createTextNode(' → '),
                 el('em', null, fmt(d.after)));
-  line.append(el('u', null, d.attribute), values);
+  const name = el('u', null, d.attribute);
+  name.title = d.attribute;  // the lane is narrow enough to truncate a long one
+  line.append(name, values);
   row.append(line, barNode(d));
   return row;
 }
