@@ -7,6 +7,7 @@ one person can play at once.
 """
 
 import asyncio
+import json
 import os
 from contextlib import asynccontextmanager, contextmanager
 
@@ -14,6 +15,7 @@ from fastapi import (Depends, FastAPI, HTTPException, Request, Response, WebSock
                      WebSocketDisconnect)
 from pydantic import BaseModel, Field, field_validator
 
+import codes
 import db
 import identity
 import rooms
@@ -41,7 +43,8 @@ app = FastAPI(title="Arena", lifespan=lifespan)
 
 class JoinRequest(BaseModel):
     display_name: str = Field(min_length=1, max_length=40)
-    email: str
+    # RFC 5321 caps email addresses at 254 octets.
+    email: str = Field(max_length=254)
 
     @field_validator("email")
     @classmethod
@@ -79,7 +82,8 @@ class ReadyRequest(BaseModel):
 
 
 class StartRequest(BaseModel):
-    host_client_id: str = Field(min_length=1)
+    # Client IDs are opaque, but 200 chars is generous without enabling abuse.
+    host_client_id: str = Field(min_length=1, max_length=200)
 
 
 def current_player(request: Request) -> int:
@@ -115,8 +119,11 @@ async def join(body: JoinRequest, request: Request, response: Response):
 @app.post("/api/rooms")
 async def open_room(body: RoomRequest, request: Request):
     connection = request.app.state.conn
-    with _rules():
-        room = rooms.create_room(connection, body.mode)
+    try:
+        with _rules():
+            room = rooms.create_room(connection, body.mode)
+    except codes.CodesExhausted as problem:
+        raise HTTPException(503, str(problem)) from problem
     return rooms.snapshot(connection, room["id"])
 
 
@@ -223,8 +230,11 @@ async def room_socket(socket: WebSocket, code: str, client_id: str = ""):
     pump = asyncio.create_task(_pump(socket, subscription))
     try:
         while True:
-            _handle_from_host(await socket.receive_json(), connection, match_bus,
-                              room, client_id)
+            try:
+                message = await socket.receive_json()
+            except (ValueError, KeyError):
+                continue
+            _handle_from_host(message, connection, match_bus, room, client_id)
     except WebSocketDisconnect:
         pass
     finally:
@@ -258,13 +268,24 @@ def _handle_from_host(message, connection, match_bus, room, client_id):
     topic = room_topic(room["code"])
     if kind == "host.state":
         match_bus.publish(topic, {**payload, "type": "state"})
-        # The wall wants score and positions, and nothing else. Relay traffic
-        # would be unreadable at tile size.
+        # Server keys go last so a host cannot forge type or another room's code.
         match_bus.publish(WALL, {**payload, "type": "wall.state", "code": room["code"]})
         return
 
     event_kind = message.get("kind", "unknown")
     match_ms = message.get("match_ms")
+    # Reject non-string kinds and non-integer match_ms to avoid SQL binding errors.
+    # 100 chars for kind and 100KB serialized payload are generous but prevent abuse.
+    if not isinstance(event_kind, str) or len(event_kind) > 100:
+        return
+    if match_ms is not None:
+        if not isinstance(match_ms, int) or isinstance(match_ms, bool):
+            return
+        # SQLite INTEGER is 8-byte signed: -2^63 to 2^63-1.
+        if not (-9223372036854775808 <= match_ms <= 9223372036854775807):
+            return
+    if len(json.dumps(payload)) > 102400:
+        return
     seq = rooms.append_event(connection, room["id"], event_kind, payload, match_ms)
     match_bus.publish(topic, {"type": "event", "seq": seq, "kind": event_kind,
                               "match_ms": match_ms, "payload": payload})

@@ -189,3 +189,67 @@ def test_a_host_cannot_relay_into_another_rooms_wall_tile(client, live_room):
         assert frame["code"] != "ZZZZ"
     finally:
         subscription.close()
+
+
+def test_non_json_text_does_not_crash_the_socket(client, live_room):
+    code = live_room()
+    with client.websocket_connect(f"/ws/rooms/{code}") as viewer:
+        viewer.receive_json()
+        with client.websocket_connect(f"/ws/rooms/{code}?client_id=phone-7") as host:
+            host.receive_json()
+            host.send_text("not json at all")
+            host.send_json({"type": "host.state", "payload": {"clock": 5}})
+            frame = viewer.receive_json()
+    assert frame == {"type": "state", "clock": 5}
+
+
+def test_a_binary_frame_does_not_crash_the_socket(client, live_room):
+    code = live_room()
+    with client.websocket_connect(f"/ws/rooms/{code}") as viewer:
+        viewer.receive_json()
+        with client.websocket_connect(f"/ws/rooms/{code}?client_id=phone-7") as host:
+            host.receive_json()
+            host.send_bytes(b"\x00\x01\x02")
+            host.send_json({"type": "host.state", "payload": {"clock": 8}})
+            frame = viewer.receive_json()
+    assert frame == {"type": "state", "clock": 8}
+
+
+def test_host_event_with_dict_match_ms_is_ignored(client, live_room):
+    code = live_room()
+    with client.websocket_connect(f"/ws/rooms/{code}") as viewer:
+        viewer.receive_json()
+        with client.websocket_connect(f"/ws/rooms/{code}?client_id=phone-7") as host:
+            host.receive_json()
+            host.send_json({"type": "host.event", "kind": "goal", "match_ms": {"n": 1}})
+            host.send_json({"type": "host.state", "payload": {"clock": 10}})
+            frame = viewer.receive_json()
+    assert frame == {"type": "state", "clock": 10}
+
+
+def test_host_event_with_oversized_kind_is_ignored(client, live_room):
+    code = live_room()
+    huge_kind = "x" * 10000
+    with client.websocket_connect(f"/ws/rooms/{code}") as viewer:
+        viewer.receive_json()
+        with client.websocket_connect(f"/ws/rooms/{code}?client_id=phone-7") as host:
+            host.receive_json()
+            host.send_json({"type": "host.event", "kind": huge_kind,
+                            "match_ms": 100, "payload": {}})
+            host.send_json({"type": "host.state", "payload": {"clock": 11}})
+            frame = viewer.receive_json()
+    assert frame == {"type": "state", "clock": 11}
+
+
+def test_host_event_with_oversized_payload_is_ignored(client, live_room):
+    code = live_room()
+    huge_payload = {"data": "x" * 200000}
+    with client.websocket_connect(f"/ws/rooms/{code}") as viewer:
+        viewer.receive_json()
+        with client.websocket_connect(f"/ws/rooms/{code}?client_id=phone-7") as host:
+            host.receive_json()
+            host.send_json({"type": "host.event", "kind": "big",
+                            "match_ms": 100, "payload": huge_payload})
+            host.send_json({"type": "host.state", "payload": {"clock": 12}})
+            frame = viewer.receive_json()
+    assert frame == {"type": "state", "clock": 12}
