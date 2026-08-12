@@ -1,5 +1,6 @@
 {
   "label": "high press",
+  "icon": "⚡",
   "blurb": "Win it back in their half. Costly if it breaks.",
   "changes": {
     "pressingIntensity": 0.95,

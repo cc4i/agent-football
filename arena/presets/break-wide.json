@@ -1,0 +1,13 @@
+{
+  "label": "Break wide",
+  "icon": "🔄",
+  "phrase": "Break wide and stretch them.",
+  "changes": {
+    "widthPreference": 0.95,
+    "passRange": 0.85,
+    "supportRunFrequency": 0.9,
+    "counterAttackUrgency": 0.9,
+    "dribbleTendency": 0.7,
+    "speed": 0.9
+  }
+}

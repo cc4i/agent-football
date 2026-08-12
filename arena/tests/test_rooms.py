@@ -114,6 +114,20 @@ def test_one_player_cannot_manage_both_sides(conn, alex):
         rooms.take_seat(conn, room["id"], "red", alex, "counter")
 
 
+def test_a_seated_player_can_be_asked_which_dugout_is_theirs(conn, alex, sam):
+    room = rooms.create_room(conn, "versus")
+    rooms.take_seat(conn, room["id"], "red", alex, "counter")
+    assert rooms.team_of(conn, room["id"], alex) == "red"
+    assert rooms.team_of(conn, room["id"], sam) is None
+
+
+def test_a_dugout_in_one_room_is_not_a_dugout_in_another(conn, alex):
+    mine = rooms.create_room(conn, "solo")
+    theirs = rooms.create_room(conn, "solo")
+    rooms.take_seat(conn, mine["id"], "blue", alex, "counter")
+    assert rooms.team_of(conn, theirs["id"], alex) is None
+
+
 def test_an_unknown_philosophy_is_refused(conn, alex):
     room = rooms.create_room(conn, "solo")
     with pytest.raises(rooms.RoomError, match="philosophy must be"):

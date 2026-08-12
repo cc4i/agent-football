@@ -1,0 +1,13 @@
+{
+  "label": "Sit deep",
+  "icon": "🛡️",
+  "phrase": "Sit deep and stay compact.",
+  "changes": {
+    "defensePositioning": 0.9,
+    "formationDiscipline": 0.9,
+    "interceptionRadius": 0.8,
+    "pressingIntensity": 0.3,
+    "attackPositioning": 0.3,
+    "foulProbability": 0.15
+  }
+}

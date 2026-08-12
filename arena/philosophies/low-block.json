@@ -1,5 +1,6 @@
 {
   "label": "low block",
+  "icon": "🛡️",
   "blurb": "Two banks, no space, nothing given away.",
   "changes": {
     "defensePositioning": 0.95,

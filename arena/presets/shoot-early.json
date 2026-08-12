@@ -1,0 +1,13 @@
+{
+  "label": "Shoot early",
+  "icon": "🎯",
+  "phrase": "Shoot early -- don't wait for the perfect ball.",
+  "changes": {
+    "shotRange": 0.95,
+    "shotPower": 0.95,
+    "attackPositioning": 0.95,
+    "counterAttackUrgency": 0.95,
+    "dribbleTendency": 0.6,
+    "passProbability": 0.3
+  }
+}

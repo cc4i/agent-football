@@ -1,5 +1,6 @@
 {
   "label": "tiki-taka",
+  "icon": "🎯",
   "blurb": "Short, safe, endless. Keep it and they cannot score.",
   "changes": {
     "passProbability": 0.92,

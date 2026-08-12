@@ -27,6 +27,7 @@ import db
 import identity
 import mirror
 import philosophies
+import presets
 import profiles
 import rooms
 from bus import WALL, Bus, room_topic
@@ -147,6 +148,11 @@ class ReadyRequest(BaseModel):
     ready: bool
 
 
+class ShoutRequest(BaseModel):
+    """One tap on a chip. Free text arrives with the agent chain."""
+    preset: str = Field(min_length=1, max_length=40)
+
+
 class ProfilePatchRequest(BaseModel):
     changes: dict = Field(default_factory=dict)
     # Both are shown to the other manager, so they are bounded and never trusted.
@@ -250,6 +256,48 @@ async def read_philosophies():
     return {"philosophies": philosophies.catalogue()}
 
 
+@app.get("/api/presets")
+async def read_presets():
+    """The four chips under the shout bar, for the phone to render."""
+    return {"presets": presets.catalogue()}
+
+
+@app.post("/api/rooms/{code}/shout")
+async def shout(code: str, body: ShoutRequest, request: Request,
+                player_id: int = Depends(current_player)):
+    """Say something to your squad. Presets only until the chain is wired in.
+
+    The words are logged and broadcast first, then what they moved, so the
+    manager sees their own instruction land before the squad reacts to it --
+    and so a late joiner replaying the log sees them in that order too.
+    """
+    connection, room = _profile_room(request, code)
+    team = rooms.team_of(connection, room["id"], player_id)
+    if team is None:
+        raise HTTPException(403, "only somebody in a dugout can shout")
+    if room["status"] != "live":
+        raise HTTPException(409, "there is nobody out there to shout at yet")
+    try:
+        chip = presets.describe(body.preset)
+    except presets.Unknown as problem:
+        raise HTTPException(422, str(problem)) from problem
+
+    player = rooms.get_player(connection, player_id)
+    said = {"team": team, "text": chip["phrase"], "preset": chip["name"],
+            "actor": player["display_name"]}
+    seq = rooms.append_event(connection, room["id"], "shout.sent", said)
+    request.app.state.bus.publish(
+        room_topic(room["code"]),
+        {"type": "event", "seq": seq, "kind": "shout.sent", "match_ms": None,
+         "payload": said},
+    )
+
+    for result in presets.apply(connection, room["id"], team, chip["name"]):
+        _record_patch(request.app, connection, room, team, result,
+                      reason=chip["phrase"], actor="preset", shout_seq=seq)
+    return {"seq": seq, **said}
+
+
 @app.post("/api/rooms/{code}/start")
 async def start(code: str, request: Request, player_id: int = Depends(current_player)):
     """Kick off. Whoever calls this holds physics for the whole match."""
@@ -319,15 +367,20 @@ async def patch_profile(code: str, team: str, role: str, body: ProfilePatchReque
     return {**result, "seq": seq}
 
 
-def _record_patch(fastapi_app, connection, room, team, result, reason, actor):
+def _record_patch(fastapi_app, connection, room, team, result, reason, actor,
+                  shout_seq=None):
     """Log one profile move and tell the room about it. Returns the sequence.
 
-    Both the PATCH route and kick-off go through here, so a stance applied
-    automatically is indistinguishable in the log from one typed by hand --
-    which is what lets scoring read the log without knowing who moved what.
+    The PATCH route, kick-off and the shout chips all go through here, so a
+    stance applied automatically is indistinguishable in the log from one typed
+    by hand -- which is what lets scoring read the log without knowing who
+    moved what. A patch a shout caused says so, because scoring pays for a
+    shout that led to a goal and has to walk from one to the other.
     """
     delta = {"team": team, "role": result["role"], "changed": result["changed"],
              "reason": reason, "actor": actor}
+    if shout_seq is not None:
+        delta["shout_seq"] = shout_seq
     seq = rooms.append_event(connection, room["id"], "profile.patch", delta)
     fastapi_app.state.bus.publish(
         room_topic(room["code"]),

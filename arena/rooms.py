@@ -233,11 +233,17 @@ def seat_owner(conn, room_id, team):
     return row["player_id"] if row else None
 
 
+def team_of(conn, room_id, player_id):
+    """Which dugout this player holds in this room, or None if they hold none."""
+    row = conn.execute(
+        "SELECT team FROM seat WHERE room_id = ? AND player_id = ?", (room_id, player_id)
+    ).fetchone()
+    return row["team"] if row else None
+
+
 def is_seated(conn, room_id, player_id):
     """True if this player holds a dugout in this room."""
-    return conn.execute(
-        "SELECT 1 FROM seat WHERE room_id = ? AND player_id = ?", (room_id, player_id)
-    ).fetchone() is not None
+    return team_of(conn, room_id, player_id) is not None
 
 
 def _room(conn, room_id):
