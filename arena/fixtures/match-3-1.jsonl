@@ -1,0 +1,18 @@
+# Alex Rivera 3 - 1 House side. Solo, ranked, three minutes.
+# `t` is match time in seconds. The first goal lands at 27.4s, inside the
+# 500-point bracket, so step 5 can score this log without a second fixture.
+{"t": 0.0, "type": "event", "kind": "kickoff", "payload": {}}
+{"t": 0.0, "type": "state", "payload": {"score": [0, 0], "clock": 180}}
+{"t": 14.0, "type": "state", "payload": {"score": [0, 0], "clock": 166}}
+{"t": 27.4, "type": "event", "kind": "goal", "payload": {"team": "blue", "scorer": "forward"}}
+{"t": 27.4, "type": "state", "payload": {"score": [1, 0], "clock": 153}}
+{"t": 52.0, "type": "state", "payload": {"score": [1, 0], "clock": 128}}
+{"t": 61.8, "type": "event", "kind": "goal", "payload": {"team": "red", "scorer": "forward"}}
+{"t": 61.8, "type": "state", "payload": {"score": [1, 1], "clock": 118}}
+{"t": 95.0, "type": "state", "payload": {"score": [1, 1], "clock": 85}}
+{"t": 112.3, "type": "event", "kind": "goal", "payload": {"team": "blue", "scorer": "midfielder"}}
+{"t": 112.3, "type": "state", "payload": {"score": [2, 1], "clock": 68}}
+{"t": 148.0, "type": "state", "payload": {"score": [2, 1], "clock": 32}}
+{"t": 166.9, "type": "event", "kind": "goal", "payload": {"team": "blue", "scorer": "forward"}}
+{"t": 166.9, "type": "state", "payload": {"score": [3, 1], "clock": 13}}
+{"t": 180.0, "type": "event", "kind": "full_time", "payload": {"score": [3, 1]}}

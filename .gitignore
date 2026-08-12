@@ -146,3 +146,8 @@ node_modules/
 
 # Auto-generated runtime scripts
 take_the_field.py
+
+# Arena match database, recreated on boot.
+arena/arena.db
+arena/arena.db-wal
+arena/arena.db-shm
