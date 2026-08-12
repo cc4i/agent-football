@@ -163,6 +163,26 @@ def test_starting_a_match_mints_and_returns_a_host_token(client, phones):
     assert second_response.json()["host_token"] != body["host_token"]
 
 
+def test_client_id_is_redacted_from_access_logs():
+    import logging
+    from app import _RedactClientId
+
+    filter = _RedactClientId()
+    record = logging.LogRecord(
+        name="uvicorn.access",
+        level=logging.INFO,
+        pathname="",
+        lineno=0,
+        msg='"%s" %s',
+        args=('GET /ws/rooms/AB23?client_id=secret-token-123 HTTP/1.1', '200'),
+        exc_info=None
+    )
+    assert filter.filter(record)
+    assert 'client_id=secret-token-123' not in record.args[0]
+    assert 'client_id=***' in record.args[0]
+    assert '/ws/rooms/AB23' in record.args[0]
+
+
 def test_the_host_token_does_not_leak_into_the_snapshot_or_broadcast(client, phones):
     phones.join("Alex Rivera", "alex@example.com")
     code = client.post("/api/rooms", json={"mode": "solo"}).json()["code"]

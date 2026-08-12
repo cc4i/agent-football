@@ -7,9 +7,11 @@ one person can play at once.
 """
 
 import asyncio
+import hmac
 import json
 import logging
 import os
+import re
 import secrets
 from contextlib import asynccontextmanager, contextmanager
 
@@ -24,6 +26,27 @@ import rooms
 from bus import WALL, Bus, room_topic
 
 logger = logging.getLogger(__name__)
+
+
+class _RedactClientId(logging.Filter):
+    """Redact client_id from uvicorn access logs.
+
+    The host token became a bearer credential when /start started minting it,
+    but it stayed in the query string where browsers can reach it. Anyone with
+    the arena's stdout or a proxy log could seize physics for any live match.
+    """
+    def filter(self, record):
+        if hasattr(record, 'args') and record.args:
+            # uvicorn access logs use %-formatting with a tuple of args.
+            # The message is typically: '"method path" status_code'
+            if isinstance(record.args, tuple) and len(record.args) >= 1:
+                args = list(record.args)
+                args[0] = re.sub(r'client_id=[^&\s"]+', 'client_id=***', args[0])
+                record.args = tuple(args)
+        if hasattr(record, 'msg'):
+            record.msg = re.sub(r'client_id=[^&\s"]+', 'client_id=***', record.msg)
+        return True
+
 
 # EMAIL_SALT keeps its literal default: if it randomised, every email hash would
 # change on restart and players would lose their history. SESSION_SECRET must never
@@ -43,6 +66,9 @@ async def lifespan(fastapi_app: FastAPI):
     db.init_db(connection)
     fastapi_app.state.conn = connection
     fastapi_app.state.bus = Bus()
+    # Install filter to redact client_id from access logs.
+    access_logger = logging.getLogger("uvicorn.access")
+    access_logger.addFilter(_RedactClientId())
     yield
     connection.close()
 
@@ -271,7 +297,7 @@ def _handle_from_host(message, connection, match_bus, room, client_id):
     # Re-read the room: the host is set at kick-off, which is often after the
     # big screen and the phones already have their sockets open.
     host_client_id = rooms.by_code(connection, room["code"])["host_client_id"]
-    if not client_id or client_id != host_client_id:
+    if not client_id or not host_client_id or not hmac.compare_digest(client_id, host_client_id):
         return
 
     payload = message.get("payload")
