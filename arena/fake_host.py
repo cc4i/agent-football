@@ -20,6 +20,7 @@ import argparse
 import asyncio
 import json
 from pathlib import Path
+from urllib.parse import quote
 
 import websockets
 
@@ -34,6 +35,8 @@ def parse_log(path):
         if not line or line.startswith("#"):
             continue
         frame = json.loads(line)
+        if not isinstance(frame, dict):
+            raise ValueError(f"{path}:{number} must be a JSON object")
         if not isinstance(frame.get("t"), (int, float)):
             raise ValueError(f"{path}:{number} needs a numeric 't'")
         if frame.get("type") not in FRAME_TYPES:
@@ -90,8 +93,10 @@ def main(argv=None):
                         help="1.0 plays in real time; 10 is useful for a smoke test")
     options = parser.parse_args(argv)
 
+    if options.speed <= 0:
+        raise ValueError("speed must be positive")
     frames = parse_log(options.log)
-    url = f"{options.arena}/ws/rooms/{options.room}?client_id={options.client_id}"
+    url = f"{options.arena}/ws/rooms/{options.room}?client_id={quote(options.client_id)}"
     print(f"--> replaying {len(frames)} frames into {options.room} at {options.speed}x")
     asyncio.run(run(url, frames, options.speed))
 

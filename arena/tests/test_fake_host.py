@@ -115,3 +115,10 @@ def test_the_fixture_replays_into_a_live_room(client, live_room):
     assert log[1]["match_ms"] == 27400
     assert last == {"type": "event", "seq": 6, "kind": "full_time",
                     "match_ms": 180000, "payload": {"score": [3, 1]}}
+
+
+def test_non_object_json_raises_value_error(tmp_path):
+    log = tmp_path / "m.jsonl"
+    log.write_text('"hello"\n')
+    with pytest.raises(ValueError):
+        fake_host.parse_log(log)
