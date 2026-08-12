@@ -66,6 +66,17 @@ else:
     logger.warning("ARENA_SECRET unset; sessions will not survive a restart")
 COOKIE = "arena_session"
 
+# The specialist agents run in another process with no phone and no cookie, so
+# they carry a shared secret instead. Unset means they are refused: an unset
+# secret must authenticate nobody rather than everybody.
+SERVICE_TOKEN = os.environ.get("ARENA_SERVICE_TOKEN", "")
+if not SERVICE_TOKEN:
+    logger.warning("ARENA_SERVICE_TOKEN unset; server-side profile writes are refused")
+
+# A role has fewer than fifty attributes. Anything larger is a mistake or an
+# attempt to make the validator do work, and it is cheaper to refuse it here.
+MAX_CHANGES = 64
+
 
 @asynccontextmanager
 async def lifespan(fastapi_app: FastAPI):
@@ -121,6 +132,20 @@ class SeatRequest(BaseModel):
 
 class ReadyRequest(BaseModel):
     ready: bool
+
+
+class ProfilePatchRequest(BaseModel):
+    changes: dict = Field(default_factory=dict)
+    # Both are shown to the other manager, so they are bounded and never trusted.
+    reason: str = Field(default="", max_length=280)
+    actor: str = Field(default="manager", max_length=40)
+
+    @field_validator("changes")
+    @classmethod
+    def not_too_many(cls, value):
+        if len(value) > MAX_CHANGES:
+            raise ValueError(f"a patch may name at most {MAX_CHANGES} attributes")
+        return value
 
 
 async def current_player(request: Request) -> int:
@@ -220,6 +245,36 @@ async def read_profile(code: str, team: str, role: str, request: Request):
     return {"team": team, "role": role, "attributes": found}
 
 
+@app.patch("/api/rooms/{code}/teams/{team}/profiles/{role}")
+async def patch_profile(code: str, team: str, role: str, body: ProfilePatchRequest,
+                        request: Request):
+    """Move one role's attributes, and tell the room it happened.
+
+    Async because it publishes: a sync route runs in a threadpool, and waking
+    a waiting consumer from another thread is not safe.
+    """
+    connection, room = _profile_room(request, code)
+    _known_team(team)
+    if room["status"] not in ("lobby", "live"):
+        raise HTTPException(409, "that match is over")
+    _require_profile_writer(request, connection, room["id"], team)
+
+    try:
+        result = profiles.patch(connection, room["id"], team, role, body.changes)
+    except profiles.Rejected as refusal:
+        raise HTTPException(422, {"problems": refusal.problems}) from refusal
+
+    delta = {"team": team, "role": role, "changed": result["changed"],
+             "reason": body.reason, "actor": body.actor}
+    seq = rooms.append_event(connection, room["id"], "profile.patch", delta)
+    request.app.state.bus.publish(
+        room_topic(room["code"]),
+        {"type": "event", "seq": seq, "kind": "profile.patch", "match_ms": None,
+         "payload": delta},
+    )
+    return {**result, "seq": seq}
+
+
 def _room_or_404(connection, code):
     room = rooms.by_code(connection, code)
     if room is None:
@@ -250,6 +305,23 @@ def _require_own_seat(connection, room_id, team, player_id):
     owner = rooms.seat_owner(connection, room_id, team)
     if owner is None or owner != player_id:
         raise HTTPException(403, f"the {team} dugout is not yours")
+
+
+def _require_profile_writer(request, connection, room_id, team):
+    """A dugout's own manager, or a trusted service caller acting for them.
+
+    The service token is checked first and in constant time, because the
+    agents have no session to fall back on. An empty configured token can
+    never match, so forgetting to set it locks the agents out rather than
+    letting everyone in.
+    """
+    offered = request.headers.get("x-arena-service", "")
+    if SERVICE_TOKEN and offered and hmac.compare_digest(offered, SERVICE_TOKEN):
+        return
+    player_id = identity.verify_token(request.cookies.get(COOKIE), SESSION_SECRET)
+    if player_id is None or rooms.get_player(connection, player_id) is None:
+        raise HTTPException(401, "join first -- your phone has no session")
+    _require_own_seat(connection, room_id, team, player_id)
 
 
 def _require_seated(connection, room_id, player_id):
