@@ -234,6 +234,8 @@ async def room_socket(socket: WebSocket, code: str, client_id: str = ""):
 
 def _handle_from_host(message, connection, match_bus, room, client_id):
     """Apply one up-message, if the sender is the client holding physics."""
+    if not isinstance(message, dict):
+        return
     kind = message.get("type")
     if kind not in ("host.state", "host.event"):
         return
@@ -243,13 +245,17 @@ def _handle_from_host(message, connection, match_bus, room, client_id):
     if not client_id or client_id != host_client_id:
         return
 
-    payload = message.get("payload") or {}
+    payload = message.get("payload")
+    if payload is not None and not isinstance(payload, dict):
+        return
+    if payload is None:
+        payload = {}
     topic = room_topic(room["code"])
     if kind == "host.state":
-        match_bus.publish(topic, {"type": "state", **payload})
+        match_bus.publish(topic, {**payload, "type": "state"})
         # The wall wants score and positions, and nothing else. Relay traffic
         # would be unreadable at tile size.
-        match_bus.publish(WALL, {"type": "wall.state", "code": room["code"], **payload})
+        match_bus.publish(WALL, {**payload, "type": "wall.state", "code": room["code"]})
         return
 
     event_kind = message.get("kind", "unknown")

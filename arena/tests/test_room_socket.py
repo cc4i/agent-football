@@ -129,3 +129,63 @@ def test_a_socket_can_watch_a_room_that_has_not_kicked_off(client, phones):
     code = client.post("/api/rooms", json={"mode": "versus"}).json()["code"]
     with client.websocket_connect(f"/ws/rooms/{code}") as screen:
         assert screen.receive_json()["status"] == "lobby"
+
+
+def test_a_bare_list_sent_up_is_ignored(client, live_room):
+    # A client running ahead of the server must not get hung up on.
+    code = live_room()
+    with client.websocket_connect(f"/ws/rooms/{code}") as viewer:
+        viewer.receive_json()
+        with client.websocket_connect(f"/ws/rooms/{code}?client_id=phone-7") as host:
+            host.receive_json()
+            host.send_json([1, 2, 3])
+            host.send_json({"type": "host.state", "payload": {"clock": 7}})
+            frame = viewer.receive_json()
+    assert frame == {"type": "state", "clock": 7}
+
+
+def test_a_host_state_with_a_list_payload_is_ignored(client, live_room):
+    # Graceful degradation: truthy non-dict payloads don't kill the socket.
+    code = live_room()
+    with client.websocket_connect(f"/ws/rooms/{code}") as viewer:
+        viewer.receive_json()
+        with client.websocket_connect(f"/ws/rooms/{code}?client_id=phone-7") as host:
+            host.receive_json()
+            host.send_json({"type": "host.state", "payload": [1, 2, 3]})
+            host.send_json({"type": "host.state", "payload": {"clock": 9}})
+            frame = viewer.receive_json()
+    assert frame == {"type": "state", "clock": 9}
+
+
+def test_a_host_cannot_forge_the_frame_type(client, live_room):
+    # Server keys must win over anything in the payload.
+    code = live_room()
+    with client.websocket_connect(f"/ws/rooms/{code}") as viewer:
+        viewer.receive_json()
+        with client.websocket_connect(f"/ws/rooms/{code}?client_id=phone-7") as host:
+            host.receive_json()
+            host.send_json({"type": "host.state", "payload": {"type": "room", "clock": 5}})
+            frame = viewer.receive_json()
+    assert frame["type"] == "state"
+    assert frame["clock"] == 5
+
+
+def test_a_host_cannot_relay_into_another_rooms_wall_tile(client, live_room):
+    # The wall is shared across every tenant; room boundaries must hold.
+    code = live_room()
+    bus = client.app.state.bus
+    subscription = bus.subscribe("wall")
+
+    try:
+        with client.websocket_connect(f"/ws/rooms/{code}?client_id=phone-7") as host:
+            host.receive_json()
+            host.send_json({"type": "host.state", "payload": {"code": "ZZZZ", "clock": 1}})
+            host.receive_json()
+
+        # The wall frame is in the queue synchronously after publish.
+        frame = subscription.queue.get_nowait()
+        assert frame["type"] == "wall.state"
+        assert frame["code"] == code
+        assert frame["code"] != "ZZZZ"
+    finally:
+        subscription.close()
