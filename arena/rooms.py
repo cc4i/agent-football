@@ -5,6 +5,7 @@ should be able to read in one sitting: who may sit down, when a match may kick
 off, and which status may follow which. Nothing in this file knows about HTTP.
 """
 
+import json
 import time
 
 import codes
@@ -142,6 +143,84 @@ def finish_match(conn, room_id, status="finished"):
     conn.execute("UPDATE room SET status = ?, finished_at = ? WHERE id = ?",
                  (status, time.time(), room_id))
     conn.commit()
+
+
+def append_event(conn, room_id, kind, payload, match_ms=None):
+    """Add to the room's log and return the sequence number.
+
+    Scoring is recomputed from this log and never from a submitted total, so
+    it is append-only and numbered per room rather than globally.
+    """
+    seq = conn.execute(
+        "SELECT COALESCE(MAX(seq), 0) + 1 AS next FROM event WHERE room_id = ?",
+        (room_id,),
+    ).fetchone()["next"]
+    conn.execute(
+        "INSERT INTO event (room_id, seq, kind, payload_json, match_ms, wall_ts) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (room_id, seq, kind, json.dumps(payload), match_ms, time.time()),
+    )
+    conn.commit()
+    return seq
+
+
+def events(conn, room_id):
+    """The room's whole log, oldest first, payloads decoded."""
+    return [
+        {"seq": row["seq"], "kind": row["kind"], "match_ms": row["match_ms"],
+         "payload": json.loads(row["payload_json"])}
+        for row in conn.execute(
+            "SELECT seq, kind, payload_json, match_ms FROM event "
+            "WHERE room_id = ? ORDER BY seq",
+            (room_id,),
+        )
+    ]
+
+
+def snapshot(conn, room_id):
+    """What a client is told about a room: over HTTP, and on socket connect."""
+    room = _room(conn, room_id)
+    seated = conn.execute(
+        "SELECT s.team, s.ready, s.philosophy, p.display_name, p.email_masked "
+        "FROM seat s JOIN player p ON p.id = s.player_id "
+        "WHERE s.room_id = ? ORDER BY s.team",
+        (room_id,),
+    ).fetchall()
+    taken = {row["team"] for row in seated}
+    return {
+        "code": room["code"],
+        "mode": room["mode"],
+        "status": room["status"],
+        "ranked": bool(room["ranked"]),
+        "seats": {
+            row["team"]: {
+                "name": row["display_name"],
+                "email": row["email_masked"],
+                "philosophy": row["philosophy"],
+                "ready": bool(row["ready"]),
+            }
+            for row in seated
+        },
+        "open_seats": [team for team in required_teams(room["mode"]) if team not in taken],
+    }
+
+
+def live(conn):
+    """One row per live room, with both manager names, for the wall."""
+    return [
+        {"code": row["code"], "mode": row["mode"],
+         "blue": row["blue_name"], "red": row["red_name"]}
+        for row in conn.execute(
+            "SELECT r.code, r.mode,"
+            "       MAX(CASE WHEN s.team = 'blue' THEN p.display_name END) AS blue_name,"
+            "       MAX(CASE WHEN s.team = 'red'  THEN p.display_name END) AS red_name "
+            "FROM room r "
+            "LEFT JOIN seat s ON s.room_id = r.id "
+            "LEFT JOIN player p ON p.id = s.player_id "
+            "WHERE r.status = 'live' "
+            "GROUP BY r.id ORDER BY r.created_at"
+        )
+    ]
 
 
 def _room(conn, room_id):

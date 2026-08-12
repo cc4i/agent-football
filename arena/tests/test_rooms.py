@@ -1,3 +1,4 @@
+import json
 import pytest
 
 import codes
@@ -204,3 +205,84 @@ def test_a_room_that_is_not_there_says_so(conn):
     assert rooms.by_code(conn, "ZZZZ") is None
     with pytest.raises(rooms.RoomError, match="there is no room"):
         rooms.take_seat(conn, 999, "blue", 1, "counter")
+
+
+def test_events_are_numbered_from_one_within_each_room(conn, alex, sam):
+    first = live_solo(conn, alex)
+    second = rooms.create_room(conn, "solo")
+    rooms.take_seat(conn, second["id"], "blue", sam, "counter")
+    rooms.set_ready(conn, second["id"], "blue", True)
+    rooms.start_match(conn, second["id"], "phone-8")
+
+    assert rooms.append_event(conn, first["id"], "kickoff", {}) == 1
+    assert rooms.append_event(conn, first["id"], "goal", {"team": "blue"}) == 2
+    assert rooms.append_event(conn, second["id"], "kickoff", {}) == 1
+
+
+def test_an_event_payload_comes_back_the_way_it_went_in(conn, alex):
+    room = live_solo(conn, alex)
+    rooms.append_event(conn, room["id"], "goal",
+                       {"team": "blue", "scorer": "forward"}, match_ms=27400)
+    assert rooms.events(conn, room["id"]) == [
+        {"seq": 1, "kind": "goal", "match_ms": 27400,
+         "payload": {"team": "blue", "scorer": "forward"}}
+    ]
+
+
+def test_a_room_with_nothing_logged_has_an_empty_log(conn, alex):
+    assert rooms.events(conn, live_solo(conn, alex)["id"]) == []
+
+
+def test_a_lobby_snapshot_names_the_seat_still_open(conn, alex):
+    room = rooms.create_room(conn, "versus")
+    rooms.take_seat(conn, room["id"], "blue", alex, "high press")
+    snapshot = rooms.snapshot(conn, room["id"])
+    assert snapshot["code"] == room["code"]
+    assert snapshot["status"] == "lobby"
+    assert snapshot["ranked"] is True
+    assert snapshot["open_seats"] == ["red"]
+    assert snapshot["seats"]["blue"] == {
+        "name": "Alex Rivera",
+        "email": "a***x@example.com",
+        "philosophy": "high press",
+        "ready": False,
+    }
+
+
+def test_a_full_solo_room_has_no_open_seats(conn, alex):
+    room = rooms.create_room(conn, "solo")
+    rooms.take_seat(conn, room["id"], "blue", alex, "counter")
+    assert rooms.snapshot(conn, room["id"])["open_seats"] == []
+
+
+def test_a_snapshot_never_carries_an_unmasked_address(conn, alex):
+    room = rooms.create_room(conn, "solo")
+    rooms.take_seat(conn, room["id"], "blue", alex, "counter")
+    assert "alex@example.com" not in json.dumps(rooms.snapshot(conn, room["id"]))
+
+
+def test_the_wall_lists_live_rooms_with_both_managers(conn, alex, sam):
+    waiting = rooms.create_room(conn, "solo")
+    room = rooms.create_room(conn, "versus")
+    rooms.take_seat(conn, room["id"], "blue", alex, "high press")
+    rooms.take_seat(conn, room["id"], "red", sam, "low block")
+    rooms.set_ready(conn, room["id"], "blue", True)
+    rooms.set_ready(conn, room["id"], "red", True)
+    rooms.start_match(conn, room["id"], "screen-1")
+
+    assert rooms.live(conn) == [
+        {"code": room["code"], "mode": "versus", "blue": "Alex Rivera", "red": "Sam Okafor"}
+    ]
+    assert waiting["code"] not in [entry["code"] for entry in rooms.live(conn)]
+
+
+def test_a_solo_room_on_the_wall_has_no_red_manager(conn, alex):
+    # Most matches are solo, so "no dugout here" is the common case, not an edge.
+    live_solo(conn, alex)
+    assert rooms.live(conn)[0]["red"] is None
+
+
+def test_a_finished_room_leaves_the_wall(conn, alex):
+    room = live_solo(conn, alex)
+    rooms.finish_match(conn, room["id"])
+    assert rooms.live(conn) == []
