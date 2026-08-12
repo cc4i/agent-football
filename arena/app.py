@@ -279,6 +279,17 @@ def _handle_from_host(message, connection, match_bus, room, client_id):
         return
     if payload is None:
         payload = {}
+
+    # Serialize the payload once to check both encodability and size.
+    # json.dumps accepts lone UTF-16 surrogates, but .encode() raises when
+    # ensure_ascii=False (which is what send_json uses).
+    try:
+        payload_encoded = json.dumps(payload, ensure_ascii=False).encode()
+    except (UnicodeEncodeError, ValueError, TypeError):
+        return
+    if len(payload_encoded) > 102400:
+        return
+
     topic = room_topic(room["code"])
     if kind == "host.state":
         match_bus.publish(topic, {**payload, "type": "state"})
@@ -289,7 +300,6 @@ def _handle_from_host(message, connection, match_bus, room, client_id):
     event_kind = message.get("kind", "unknown")
     match_ms = message.get("match_ms")
     # Reject non-string kinds and non-integer match_ms to avoid SQL binding errors.
-    # 100 chars for kind and 100KB serialized payload are generous but prevent abuse.
     if not isinstance(event_kind, str) or len(event_kind) > 100:
         return
     if match_ms is not None:
@@ -298,8 +308,6 @@ def _handle_from_host(message, connection, match_bus, room, client_id):
         # SQLite INTEGER is 8-byte signed: -2^63 to 2^63-1.
         if not (-9223372036854775808 <= match_ms <= 9223372036854775807):
             return
-    if len(json.dumps(payload)) > 102400:
-        return
     seq = rooms.append_event(connection, room["id"], event_kind, payload, match_ms)
     match_bus.publish(topic, {"type": "event", "seq": seq, "kind": event_kind,
                               "match_ms": match_ms, "payload": payload})

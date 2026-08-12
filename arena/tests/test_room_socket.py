@@ -68,7 +68,7 @@ def test_a_guessed_client_id_cannot_drive_the_match(client, phones):
     code = client.post("/api/rooms", json={"mode": "solo"}).json()["code"]
     client.post(f"/api/rooms/{code}/seats/blue", json={"philosophy": "high press"})
     client.post(f"/api/rooms/{code}/seats/blue/ready", json={"ready": True})
-    client.post(f"/api/rooms/{code}/start")
+    host_token = client.post(f"/api/rooms/{code}/start").json()["host_token"]
 
     with client.websocket_connect(f"/ws/rooms/{code}") as viewer:
         viewer.receive_json()
@@ -77,8 +77,13 @@ def test_a_guessed_client_id_cannot_drive_the_match(client, phones):
             with client.websocket_connect(f"/ws/rooms/{code}?client_id={guess}") as attacker:
                 attacker.receive_json()
                 attacker.send_json({"type": "host.state", "payload": {"clock": 999}})
-        # Nothing should have reached the viewer.
-        # (The socket would timeout if we tried to receive, so we don't.)
+        # Now the real host sends a distinguishing frame.
+        with client.websocket_connect(f"/ws/rooms/{code}?client_id={host_token}") as real_host:
+            real_host.receive_json()
+            real_host.send_json({"type": "host.state", "payload": {"clock": 1}})
+            # The viewer must see the real host's frame, proving the impostors were ignored.
+            frame = viewer.receive_json()
+    assert frame == {"type": "state", "clock": 1}
 
 
 def test_a_socket_with_no_client_id_can_only_watch(client, live_room):
@@ -271,3 +276,52 @@ def test_host_event_with_oversized_payload_is_ignored(client, live_room):
             host.send_json({"type": "host.state", "payload": {"clock": 12}})
             frame = viewer.receive_json()
     assert frame == {"type": "state", "clock": 12}
+
+
+def test_a_lone_surrogate_in_host_state_does_not_kill_the_socket(client, live_room):
+    # UTF-16 surrogates cannot be encoded to UTF-8, but json.dumps accepts them.
+    # The socket must survive and continue delivering frames.
+    code, host_token = live_room()
+    with client.websocket_connect(f"/ws/rooms/{code}") as viewer:
+        viewer.receive_json()
+        with client.websocket_connect(f"/ws/rooms/{code}?client_id={host_token}") as host:
+            host.receive_json()
+            host.send_json({"type": "host.state", "payload": {"x": "\ud800"}})
+            host.send_json({"type": "host.state", "payload": {"clock": 5}})
+            frame = viewer.receive_json()
+    assert frame == {"type": "state", "clock": 5}
+
+
+def test_a_lone_surrogate_in_host_event_does_not_kill_the_socket(client, live_room):
+    code, host_token = live_room()
+    with client.websocket_connect(f"/ws/rooms/{code}") as viewer:
+        viewer.receive_json()
+        with client.websocket_connect(f"/ws/rooms/{code}?client_id={host_token}") as host:
+            host.receive_json()
+            host.send_json({"type": "host.event", "kind": "bad",
+                            "match_ms": 100, "payload": {"x": "\ud800"}})
+            host.send_json({"type": "host.state", "payload": {"clock": 7}})
+            frame = viewer.receive_json()
+    assert frame == {"type": "state", "clock": 7}
+
+
+def test_a_lone_surrogate_in_host_state_does_not_kill_the_wall(client, live_room):
+    # The wall is shared across tenants: a crash here takes down every live match.
+    code, host_token = live_room()
+    bus = client.app.state.bus
+    subscription = bus.subscribe("wall")
+
+    try:
+        with client.websocket_connect(f"/ws/rooms/{code}") as viewer:
+            viewer.receive_json()
+            with client.websocket_connect(f"/ws/rooms/{code}?client_id={host_token}") as host:
+                host.receive_json()
+                host.send_json({"type": "host.state", "payload": {"x": "\ud800"}})
+                host.send_json({"type": "host.state", "payload": {"clock": 8}})
+                # The wall must receive the second frame, proving the pump survived.
+                viewer.receive_json()
+                frame = subscription.queue.get_nowait()
+    finally:
+        subscription.close()
+    assert frame["type"] == "wall.state"
+    assert frame["clock"] == 8
