@@ -1,3 +1,6 @@
+from bus import WALL
+
+
 def test_the_wall_opens_with_every_live_room(client, live_room):
     code = live_room()
     with client.websocket_connect("/ws/wall") as wall:
@@ -65,3 +68,11 @@ def test_two_live_rooms_both_reach_one_wall_connection(client, phones):
             host.send_json({"type": "host.state", "payload": {"score": [0, 2]}})
             frame = wall.receive_json()
     assert frame["code"] == second
+
+
+def test_closing_the_wall_removes_its_subscription_from_the_bus(client):
+    assert client.app.state.bus.subscriber_count(WALL) == 0
+    with client.websocket_connect("/ws/wall") as wall:
+        wall.receive_json()
+        assert client.app.state.bus.subscriber_count(WALL) == 1
+    assert client.app.state.bus.subscriber_count(WALL) == 0
