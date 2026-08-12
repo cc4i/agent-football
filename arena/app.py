@@ -23,6 +23,7 @@ from uvicorn.protocols.utils import ClientDisconnected
 import codes
 import db
 import identity
+import profiles
 import rooms
 from bus import WALL, Bus, room_topic
 
@@ -165,21 +166,14 @@ async def open_room(body: RoomRequest, request: Request):
 
 @app.get("/api/rooms/{code}")
 async def read_room(code: str, request: Request):
-    connection = request.app.state.conn
-    code = code.upper()
-    if not codes.is_valid(code):
-        raise HTTPException(404, f"there is no room {code}")
-    return rooms.snapshot(connection, _room_or_404(connection, code)["id"])
+    connection, room = _profile_room(request, code)
+    return rooms.snapshot(connection, room["id"])
 
 
 @app.post("/api/rooms/{code}/seats/{team}")
 async def sit_down(code: str, team: str, body: SeatRequest, request: Request,
                    player_id: int = Depends(current_player)):
-    connection = request.app.state.conn
-    code = code.upper()
-    if not codes.is_valid(code):
-        raise HTTPException(404, f"there is no room {code}")
-    room = _room_or_404(connection, code)
+    connection, room = _profile_room(request, code)
     with _rules():
         rooms.take_seat(connection, room["id"], team, player_id, body.philosophy)
     return _announce(request.app, room)
@@ -188,11 +182,7 @@ async def sit_down(code: str, team: str, body: SeatRequest, request: Request,
 @app.post("/api/rooms/{code}/seats/{team}/ready")
 async def set_ready(code: str, team: str, body: ReadyRequest, request: Request,
                     player_id: int = Depends(current_player)):
-    connection = request.app.state.conn
-    code = code.upper()
-    if not codes.is_valid(code):
-        raise HTTPException(404, f"there is no room {code}")
-    room = _room_or_404(connection, code)
+    connection, room = _profile_room(request, code)
     _require_own_seat(connection, room["id"], team, player_id)
     with _rules():
         rooms.set_ready(connection, room["id"], team, body.ready)
@@ -202,11 +192,7 @@ async def set_ready(code: str, team: str, body: ReadyRequest, request: Request,
 @app.post("/api/rooms/{code}/start")
 async def start(code: str, request: Request, player_id: int = Depends(current_player)):
     """Kick off. Whoever calls this holds physics for the whole match."""
-    connection = request.app.state.conn
-    code = code.upper()
-    if not codes.is_valid(code):
-        raise HTTPException(404, f"there is no room {code}")
-    room = _room_or_404(connection, code)
+    connection, room = _profile_room(request, code)
     _require_seated(connection, room["id"], player_id)
     host_token = secrets.token_urlsafe(16)
     with _rules():
@@ -216,11 +202,48 @@ async def start(code: str, request: Request, player_id: int = Depends(current_pl
     return {**snapshot, "host_token": host_token}
 
 
+@app.get("/api/rooms/{code}/teams/{team}/profiles")
+async def read_profiles(code: str, team: str, request: Request):
+    """Both managers and the pitch read these, so they need no session."""
+    connection, room = _profile_room(request, code)
+    _known_team(team)
+    return {"team": team, "profiles": profiles.read_all(connection, room["id"], team)}
+
+
+@app.get("/api/rooms/{code}/teams/{team}/profiles/{role}")
+async def read_profile(code: str, team: str, role: str, request: Request):
+    connection, room = _profile_room(request, code)
+    _known_team(team)
+    found = profiles.read_one(connection, room["id"], team, role)
+    if found is None:
+        raise HTTPException(404, f"this room has no {team} {role}")
+    return {"team": team, "role": role, "attributes": found}
+
+
 def _room_or_404(connection, code):
     room = rooms.by_code(connection, code)
     if room is None:
         raise HTTPException(404, f"there is no room {code}")
     return room
+
+
+def _profile_room(request, code):
+    """The connection and the room behind an /api/rooms/{code}/... path.
+
+    Every one of those routes opened with the same three lines; a code that
+    `codes.generate` could never have produced is a 404 rather than a lookup.
+    """
+    connection = request.app.state.conn
+    code = code.upper()
+    if not codes.is_valid(code):
+        raise HTTPException(404, f"there is no room {code}")
+    return connection, _room_or_404(connection, code)
+
+
+def _known_team(team):
+    """Refuse a dugout name before it is used to look anything up."""
+    if team not in rooms.TEAMS:
+        raise HTTPException(404, f"there is no {team} dugout")
 
 
 def _require_own_seat(connection, room_id, team, player_id):
