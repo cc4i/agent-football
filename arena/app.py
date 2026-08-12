@@ -10,6 +10,7 @@ import asyncio
 import json
 import logging
 import os
+import secrets
 from contextlib import asynccontextmanager, contextmanager
 
 from fastapi import (Depends, FastAPI, HTTPException, Request, Response, WebSocket,
@@ -24,10 +25,15 @@ from bus import WALL, Bus, room_topic
 
 logger = logging.getLogger(__name__)
 
-# Dev defaults. Set both in the environment before a real event: the salt fixes
-# every email hash for good, and the secret signs every phone's session.
+# EMAIL_SALT keeps its literal default: if it randomised, every email hash would
+# change on restart and players would lose their history. SESSION_SECRET must never
+# fall back to a public literal, even if that means sessions don't survive a restart.
 EMAIL_SALT = os.environ.get("ARENA_EMAIL_SALT", "arena-dev-salt")
-SESSION_SECRET = os.environ.get("ARENA_SECRET", "arena-dev-secret")
+if "ARENA_SECRET" in os.environ:
+    SESSION_SECRET = os.environ["ARENA_SECRET"]
+else:
+    SESSION_SECRET = secrets.token_urlsafe(32)
+    logger.warning("ARENA_SECRET unset; sessions will not survive a restart")
 COOKIE = "arena_session"
 
 
