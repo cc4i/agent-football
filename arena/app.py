@@ -82,6 +82,10 @@ MAX_CHANGES = 64
 async def lifespan(fastapi_app: FastAPI):
     connection = db.connect(os.environ.get("ARENA_DB", db.DB_PATH))
     db.init_db(connection)
+    # The workshop is where the dugout tunes profiles with nobody in a dugout
+    # seat, so it is opened here rather than by a phone.
+    if rooms.by_code(connection, codes.WORKSHOP) is None:
+        rooms.create_room(connection, "solo", codes.WORKSHOP)
     fastapi_app.state.conn = connection
     fastapi_app.state.bus = Bus()
     # Install filter to redact client_id from access logs.

@@ -29,9 +29,10 @@ def test_generate_gives_up_rather_than_spinning_forever():
         codes.generate(lambda candidate: True)
 
 
-def test_the_workshop_code_is_not_one_generate_could_produce():
-    # The dugout reserves it, so a generated code must never collide with it.
-    assert not codes.is_valid(codes.WORKSHOP)
+def test_the_workshop_code_is_one_a_phone_can_type():
+    # It used to be a lowercase sentinel, which meant no route could reach it.
+    assert codes.is_valid(codes.WORKSHOP)
+    assert codes.WORKSHOP == codes.WORKSHOP.upper()
 
 
 def test_is_valid_rejects_the_wrong_length_and_the_banned_letters():

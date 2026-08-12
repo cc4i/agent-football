@@ -6,9 +6,11 @@ import secrets
 ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"
 LENGTH = 4
 
-# Reserved for the dugout's workshop, which is not a room anybody joins by
-# code. Lower case and eight characters, so `generate` can never collide.
-WORKSHOP = "workshop"
+# The dugout's workshop is a room like any other, so that a profile patch from
+# the shout bar has somewhere to land. It is a real code rather than a
+# sentinel; once the row exists, `generate` cannot hand it out again, because
+# its `taken` predicate reads the table.
+WORKSHOP = "WRKS"
 
 _MAX_TRIES = 200
 

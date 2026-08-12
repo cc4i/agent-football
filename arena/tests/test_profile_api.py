@@ -179,3 +179,26 @@ def test_a_flood_of_attributes_is_refused_before_it_is_validated(client, phones)
     response = client.patch(f"/api/rooms/{code}/teams/blue/profiles/defender",
                             json={"changes": {str(n): 0.5 for n in range(200)}})
     assert response.status_code == 422
+
+
+def test_the_workshop_room_is_open_before_anybody_joins(client):
+    import codes
+    body = client.get(f"/api/rooms/{codes.WORKSHOP}").json()
+    assert body["code"] == codes.WORKSHOP
+    assert body["ranked"] is False
+
+
+def test_the_workshop_room_has_profiles_to_patch(client):
+    import codes
+    body = client.get(f"/api/rooms/{codes.WORKSHOP}/teams/blue/profiles").json()
+    assert set(body["profiles"]) == set(attributes.ROLES)
+
+
+def test_the_workshop_room_is_not_reopened_on_the_next_restart(client, db_path):
+    # The arena will be restarted plenty of times during a tournament.
+    import codes
+    from fastapi.testclient import TestClient
+
+    from app import app as arena_app
+    with TestClient(arena_app) as second:
+        assert second.get(f"/api/rooms/{codes.WORKSHOP}").status_code == 200
