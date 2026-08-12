@@ -350,3 +350,46 @@ def test_a_lone_surrogate_in_host_state_does_not_kill_the_wall(client, live_room
         subscription.close()
     assert frame["type"] == "wall.state"
     assert frame["clock"] == 8
+
+
+def test_the_final_whistle_closes_the_room(client, live_room):
+    # The host is trusted for physics, and when the match ended is physics.
+    code, host_token = live_room()
+    with client.websocket_connect(f"/ws/rooms/{code}?client_id={host_token}") as host:
+        host.receive_json()
+        host.send_json({"type": "host.event", "kind": "full_time",
+                        "match_ms": 180000, "payload": {"score": [2, 1]}})
+        assert host.receive_json()["kind"] == "full_time"
+        closed = host.receive_json()
+    assert closed["type"] == "room"
+    assert closed["status"] == "finished"
+    assert client.get(f"/api/rooms/{code}").json()["status"] == "finished"
+
+
+def test_a_finished_room_leaves_the_wall(client, live_room):
+    code, host_token = live_room()
+    with client.websocket_connect("/ws/wall") as wall:
+        assert [entry["code"] for entry in wall.receive_json()["rooms"]] == [code]
+        with client.websocket_connect(f"/ws/rooms/{code}?client_id={host_token}") as host:
+            host.receive_json()
+            host.send_json({"type": "host.event", "kind": "full_time",
+                            "match_ms": 180000, "payload": {}})
+            emptied = wall.receive_json()
+    assert emptied == {"type": "wall", "rooms": []}
+
+
+def test_nothing_more_is_logged_after_the_final_whistle(client, live_room):
+    code, host_token = live_room()
+    with client.websocket_connect(f"/ws/rooms/{code}?client_id={host_token}") as host:
+        host.receive_json()
+        host.send_json({"type": "host.event", "kind": "full_time",
+                        "match_ms": 180000, "payload": {}})
+        host.receive_json()
+        host.receive_json()
+        after = len(_log(client, code))
+        host.send_json({"type": "host.event", "kind": "goal", "match_ms": 190000,
+                        "payload": {"team": "blue"}})
+        host.send_json({"type": "host.state", "payload": {"clock": 0}})
+    log = _log(client, code)
+    assert len(log) == after
+    assert log[-1]["kind"] == "full_time", "a goal after the whistle would score"

@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#07090e">
+<title>Take the dugout - Futsal WorldCup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700;800&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body class="phone">
+<form class="pscreen" id="join" novalidate>
+  <div class="pbar">
+    <span class="code" id="code">····</span>
+    <span class="eyebrow" id="mode">Loading</span>
+  </div>
+
+  <h1 class="ptitle">Take the dugout</h1>
+  <p class="psub">You manage the squad by talking to them. They decide how to play it.</p>
+
+  <p class="problem" id="problem" hidden></p>
+
+  <div class="field">
+    <label for="name">Name on the board</label>
+    <input id="name" class="input" name="name" autocomplete="name"
+           enterkeyhint="next" maxlength="40" placeholder="Alex Rivera" required>
+  </div>
+
+  <div class="field">
+    <label for="email">Email</label>
+    <input id="email" class="input" name="email" type="email" inputmode="email"
+           autocomplete="email" enterkeyhint="done" maxlength="254"
+           placeholder="alex@example.com" required>
+    <p class="hint">Keeps one place on the board if you play again. Shown masked as
+      <span class="mono">a***x@example.com</span>, deleted after the event.</p>
+  </div>
+
+  <div class="field">
+    <span class="label">Where do you start</span>
+    <div class="pills" id="pills"></div>
+    <p class="hint" id="blurb">Sets the squad's opening attributes. Change anything you like once the whistle goes.</p>
+  </div>
+
+  <button class="btn primary push" id="take" type="submit" disabled>Take the dugout</button>
+</form>
+<script type="module" src="/static/join.js"></script>
+</body>
+</html>

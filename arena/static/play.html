@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#07090e">
+<title>Your dugout - Futsal WorldCup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700;800&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body class="phone">
+<main class="pscreen">
+  <div class="pbar">
+    <span class="code" id="code">····</span>
+    <span class="side-chip idle" id="side">Connecting</span>
+  </div>
+
+  <p class="problem" id="problem" hidden></p>
+
+  <!-- Before the whistle -->
+  <section class="stack" id="lobby" hidden>
+    <h1 class="ptitle" id="lobby-title">Ready when they are</h1>
+    <p class="psub" id="lobby-sub">Kick-off starts the moment both dugouts are ready.</p>
+
+    <div class="banner info">
+      <span>🖥️</span>
+      <div><b>The arena screen runs the pitch</b>Your phone stays on for the dugout and the score.</div>
+    </div>
+
+    <div class="mini-board" id="seats"></div>
+
+    <button class="btn go push" id="go" type="button" disabled>Ready</button>
+  </section>
+
+  <!-- After it -->
+  <section class="stack" id="live" hidden>
+    <div class="ft-badge" id="ft" hidden>Full time</div>
+
+    <div class="pscore">
+      <span class="t"><i class="pdot b"></i><span id="score-blue">0</span></span>
+      <span class="clk" id="clock">03:00</span>
+      <span class="t"><span id="score-red">0</span><i class="pdot r"></i></span>
+    </div>
+
+    <div class="mini" id="mini">
+      <div class="pitch-lines"></div>
+      <span class="mini-tag" id="mini-tag">LIVE</span>
+    </div>
+
+    <div class="prelay">
+      <div class="relay">
+        <div class="relay-hd">
+          <span class="eyebrow">Relay</span>
+          <span class="elapsed" id="elapsed"></span>
+        </div>
+        <div class="relay-scroll" id="relay"></div>
+      </div>
+    </div>
+
+    <div class="composer" id="composer">
+      <div class="chips" id="chips"></div>
+    </div>
+  </section>
+</main>
+<script type="module" src="/static/play.js"></script>
+</body>
+</html>

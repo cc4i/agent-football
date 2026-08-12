@@ -15,10 +15,13 @@ import os
 import re
 import secrets
 from contextlib import asynccontextmanager, contextmanager
+from pathlib import Path
 
 import segno
 from fastapi import (Depends, FastAPI, HTTPException, Request, Response, WebSocket,
                      WebSocketDisconnect)
+from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 from uvicorn.protocols.utils import ClientDisconnected
 
@@ -82,10 +85,21 @@ if not SERVICE_TOKEN:
 # attempt to make the validator do work, and it is cheaper to refuse it here.
 MAX_CHANGES = 64
 
+# How much of a room's log one catch-up read may return. A three-minute match
+# produces tens of events, so this only bites on a room somebody has left open.
+MAX_REPLAY_EVENTS = 500
+
 # What a QR code should encode. A phone on the venue wifi cannot reach the
 # laptop's loopback address, so a real event sets this to the machine's LAN
 # name or its tunnel. The default is right for one person testing alone.
 PUBLIC_URL = os.environ.get("ARENA_PUBLIC_URL", "http://localhost:8003").rstrip("/")
+
+# Where the pitch is served from. The big screen frames it rather than drawing
+# it: physics is 2000 lines of Phaser that already exist and already work, and
+# reimplementing them in the arena to avoid an iframe would be the wrong trade.
+PITCH_URL = os.environ.get("ARENA_PITCH_URL", "http://localhost:5173").rstrip("/")
+
+STATIC = Path(__file__).parent / "static"
 
 
 @asynccontextmanager
@@ -180,6 +194,52 @@ async def health():
     return {"ok": True, "service": "arena"}
 
 
+def _page(name):
+    """One of the arena's pages. They are files, not templates.
+
+    Everything on them is drawn from the API by their own script, so there is
+    nothing to interpolate here and no reason to carry a template engine.
+    """
+    return FileResponse(STATIC / name, media_type="text/html",
+                        headers={"Cache-Control": "no-cache"})
+
+
+@app.get("/")
+async def front_door():
+    """The address somebody types on the venue's laptop is the big screen."""
+    return RedirectResponse("/arena")
+
+
+@app.get("/join/{code}")
+async def join_page(code: str, request: Request):
+    """The form a scanned QR lands on.
+
+    A code that names no room is a 404 rather than a form: a QR photographed at
+    last week's event should say so here, not after somebody has typed their
+    name and email into a page that was never going to work.
+    """
+    _profile_room(request, code)
+    return _page("join.html")
+
+
+@app.get("/play")
+async def play_page():
+    """The phone's dugout. The room comes from its query string."""
+    return _page("play.html")
+
+
+@app.get("/arena")
+async def arena_page():
+    """The big screen: the lobby, and then the match."""
+    return _page("arena.html")
+
+
+@app.get("/api/venue")
+async def read_venue():
+    """Where the other halves of the venue live, for the pages to link to."""
+    return {"pitch_url": PITCH_URL, "public_url": PUBLIC_URL}
+
+
 @app.post("/api/players")
 async def join(body: JoinRequest, request: Request, response: Response):
     """Name plus email in, session cookie out. This is the whole of identity."""
@@ -215,6 +275,21 @@ async def read_room(code: str, request: Request):
     return _snapshot(connection, room["id"])
 
 
+@app.get("/api/rooms/{code}/me")
+async def read_my_seat(code: str, request: Request,
+                       player_id: int = Depends(current_player)):
+    """Which dugout is mine in this room, if any.
+
+    The room snapshot is the same for everyone watching, because it is also
+    what goes out on the bus. Which of those seats is yours is the one thing
+    that differs per phone, so it is asked for separately.
+    """
+    connection, room = _profile_room(request, code)
+    player = rooms.get_player(connection, player_id)
+    return {"name": player["display_name"],
+            "team": rooms.team_of(connection, room["id"], player_id)}
+
+
 @app.post("/api/rooms/{code}/seats/{team}")
 async def sit_down(code: str, team: str, body: SeatRequest, request: Request,
                    player_id: int = Depends(current_player)):
@@ -232,6 +307,19 @@ async def set_ready(code: str, team: str, body: ReadyRequest, request: Request,
     with _rules():
         rooms.set_ready(connection, room["id"], team, body.ready)
     return _announce(request.app, room)
+
+
+@app.get("/api/rooms/{code}/events")
+async def read_events(code: str, request: Request, since: int = 0):
+    """The room's log from `since` onwards, so a reconnect loses nothing.
+
+    A phone that slept through a shout should come back to the same relay
+    everyone else is looking at. The log is gapless and numbered per room, so
+    catching up is a range read rather than a resync protocol.
+    """
+    connection, room = _profile_room(request, code)
+    log = [entry for entry in rooms.events(connection, room["id"]) if entry["seq"] > since]
+    return {"events": log[-MAX_REPLAY_EVENTS:]}
 
 
 @app.get("/api/rooms/{code}/qr.svg")
@@ -593,6 +681,14 @@ def _handle_from_host(message, connection, match_bus, room, client_id):
     match_bus.publish(topic, {"type": "event", "seq": seq, "kind": event_kind,
                               "match_ms": match_ms, "payload": payload})
 
+    if event_kind == "full_time":
+        # The host is trusted for physics and not for scoring, and when the
+        # match ended is physics. Everything the points are computed from is
+        # already in the log above; this only closes the room.
+        rooms.finish_match(connection, room["id"])
+        match_bus.publish(topic, {"type": "room", **_snapshot(connection, room["id"])})
+        match_bus.publish(WALL, {"type": "wall", "rooms": rooms.live(connection)})
+
 
 @app.websocket("/ws/wall")
 async def wall_socket(socket: WebSocket):
@@ -629,3 +725,7 @@ async def _until_closed(socket):
             await socket.receive_text()
     except WebSocketDisconnect:
         return
+
+
+# Mounted last so no page or API path can ever be shadowed by a file on disk.
+app.mount("/static", StaticFiles(directory=STATIC), name="static")

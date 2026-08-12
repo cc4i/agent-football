@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#07090e">
+<title>Arena - Futsal WorldCup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700;800&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body class="big">
+<main class="screen">
+  <div class="screen-bar">
+    <div class="screen-id">
+      <h1>Futsal WorldCup</h1>
+      <span class="where" id="where">Arena</span>
+    </div>
+    <div class="bar-right">
+      <button class="btn ghost slim" id="again" type="button" hidden>New room</button>
+      <span class="role-chip" id="role"><i></i>Hosting</span>
+      <span class="roomcode"><span>Room</span><b id="code">····</b></span>
+    </div>
+  </div>
+
+  <p class="problem" id="problem" hidden></p>
+
+  <!-- Before the whistle: how to get in, and who already is -->
+  <div class="lobby-grid" id="lobby" hidden>
+    <div class="pitch-stack">
+      <div class="lobby-badge"><i></i><span id="badge">Waiting for a manager</span></div>
+      <div class="seats" id="seats"></div>
+    </div>
+
+    <aside class="join-card">
+      <h2>Scan to manage</h2>
+      <p>Your phone becomes the dugout. Talk to the squad; they decide how to play it.</p>
+      <div class="qr" id="qr"></div>
+      <div class="or-code">
+        <span class="eyebrow">Or open</span>
+        <b id="code-2">····</b>
+        <em id="join-url">/join</em>
+      </div>
+    </aside>
+  </div>
+
+  <!-- After it: the pitch, at the size of the room -->
+  <div class="court" id="court" hidden>
+    <iframe class="court-frame" id="pitch" title="The match"
+            allow="autoplay; screen-wake-lock"></iframe>
+  </div>
+</main>
+<script type="module" src="/static/arena.js"></script>
+</body>
+</html>
