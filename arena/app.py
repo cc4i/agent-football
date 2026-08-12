@@ -8,6 +8,7 @@ one person can play at once.
 
 import asyncio
 import hmac
+import io
 import json
 import logging
 import os
@@ -15,6 +16,7 @@ import re
 import secrets
 from contextlib import asynccontextmanager, contextmanager
 
+import segno
 from fastapi import (Depends, FastAPI, HTTPException, Request, Response, WebSocket,
                      WebSocketDisconnect)
 from pydantic import BaseModel, Field, field_validator
@@ -78,6 +80,11 @@ if not SERVICE_TOKEN:
 # A role has fewer than fifty attributes. Anything larger is a mistake or an
 # attempt to make the validator do work, and it is cheaper to refuse it here.
 MAX_CHANGES = 64
+
+# What a QR code should encode. A phone on the venue wifi cannot reach the
+# laptop's loopback address, so a real event sets this to the machine's LAN
+# name or its tunnel. The default is right for one person testing alone.
+PUBLIC_URL = os.environ.get("ARENA_PUBLIC_URL", "http://localhost:8003").rstrip("/")
 
 
 @asynccontextmanager
@@ -192,13 +199,13 @@ async def open_room(body: RoomRequest, request: Request):
             room = rooms.create_room(connection, body.mode)
     except codes.CodesExhausted as problem:
         raise HTTPException(503, str(problem)) from problem
-    return rooms.snapshot(connection, room["id"])
+    return _snapshot(connection, room["id"])
 
 
 @app.get("/api/rooms/{code}")
 async def read_room(code: str, request: Request):
     connection, room = _profile_room(request, code)
-    return rooms.snapshot(connection, room["id"])
+    return _snapshot(connection, room["id"])
 
 
 @app.post("/api/rooms/{code}/seats/{team}")
@@ -218,6 +225,23 @@ async def set_ready(code: str, team: str, body: ReadyRequest, request: Request,
     with _rules():
         rooms.set_ready(connection, room["id"], team, body.ready)
     return _announce(request.app, room)
+
+
+@app.get("/api/rooms/{code}/qr.svg")
+async def room_qr(code: str, request: Request):
+    """This room's join address as a scannable code.
+
+    SVG rather than PNG so the big screen can scale it to the wall without it
+    going soft, and so no image library has to be in the dependency list.
+    """
+    _, room = _profile_room(request, code)
+    drawing = io.BytesIO()
+    # Sized in mm with no class attributes, so the page's own CSS decides how
+    # big it is rather than the encoder.
+    segno.make(join_url(room["code"]), error="m").save(
+        drawing, kind="svg", scale=1, border=2, unit="mm", svgclass=None, lineclass=None)
+    return Response(drawing.getvalue(), media_type="image/svg+xml",
+                    headers={"Cache-Control": "no-store"})
 
 
 @app.get("/api/philosophies")
@@ -367,9 +391,24 @@ def _require_seated(connection, room_id, player_id):
         raise HTTPException(403, "only somebody in this match can start it")
 
 
+def join_url(code):
+    """The address a phone lands on after scanning this room's code."""
+    return f"{PUBLIC_URL}/join/{code}"
+
+
+def _snapshot(connection, room_id):
+    """A room as clients see it, with the address its QR encodes.
+
+    `rooms.snapshot` is deliberately ignorant of HTTP, so the URL is glued on
+    here rather than threading a base address through the data layer.
+    """
+    snapshot = rooms.snapshot(connection, room_id)
+    return {**snapshot, "join_url": join_url(snapshot["code"])}
+
+
 def _announce(fastapi_app, room):
     """Publish the room's new shape to everyone watching it, and return it."""
-    snapshot = rooms.snapshot(fastapi_app.state.conn, room["id"])
+    snapshot = _snapshot(fastapi_app.state.conn, room["id"])
     fastapi_app.state.bus.publish(room_topic(room["code"]), {"type": "room", **snapshot})
     return snapshot
 
@@ -404,7 +443,7 @@ async def room_socket(socket: WebSocket, code: str, client_id: str = ""):
         return
 
     await socket.accept()
-    await socket.send_json({"type": "room", **rooms.snapshot(connection, room["id"])})
+    await socket.send_json({"type": "room", **_snapshot(connection, room["id"])})
 
     subscription = match_bus.subscribe(room_topic(code))
     pump = asyncio.create_task(_pump(socket, subscription))
