@@ -6,10 +6,12 @@ playing, which match they are in, and what happened in it -- so that more than
 one person can play at once.
 """
 
+import asyncio
 import os
 from contextlib import asynccontextmanager, contextmanager
 
-from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from fastapi import (Depends, FastAPI, HTTPException, Request, Response, WebSocket,
+                     WebSocketDisconnect)
 from pydantic import BaseModel, Field, field_validator
 
 import db
@@ -202,3 +204,56 @@ async def _pump(socket, subscription):
     """Forward everything on a subscription to a socket until cancelled."""
     async for message in subscription:
         await socket.send_json(message)
+
+
+@app.websocket("/ws/rooms/{code}")
+async def room_socket(socket: WebSocket, code: str, client_id: str = ""):
+    """One room's feed. Anyone may listen; only the host may drive."""
+    connection = socket.app.state.conn
+    match_bus = socket.app.state.bus
+    room = rooms.by_code(connection, code)
+    if room is None:
+        await socket.close(code=4404, reason=f"there is no room {code}")
+        return
+
+    await socket.accept()
+    await socket.send_json({"type": "room", **rooms.snapshot(connection, room["id"])})
+
+    subscription = match_bus.subscribe(room_topic(code))
+    pump = asyncio.create_task(_pump(socket, subscription))
+    try:
+        while True:
+            _handle_from_host(await socket.receive_json(), connection, match_bus,
+                              room, client_id)
+    except WebSocketDisconnect:
+        pass
+    finally:
+        pump.cancel()
+        subscription.close()
+
+
+def _handle_from_host(message, connection, match_bus, room, client_id):
+    """Apply one up-message, if the sender is the client holding physics."""
+    kind = message.get("type")
+    if kind not in ("host.state", "host.event"):
+        return
+    # Re-read the room: the host is set at kick-off, which is often after the
+    # big screen and the phones already have their sockets open.
+    host_client_id = rooms.by_code(connection, room["code"])["host_client_id"]
+    if not client_id or client_id != host_client_id:
+        return
+
+    payload = message.get("payload") or {}
+    topic = room_topic(room["code"])
+    if kind == "host.state":
+        match_bus.publish(topic, {"type": "state", **payload})
+        # The wall wants score and positions, and nothing else. Relay traffic
+        # would be unreadable at tile size.
+        match_bus.publish(WALL, {"type": "wall.state", "code": room["code"], **payload})
+        return
+
+    event_kind = message.get("kind", "unknown")
+    match_ms = message.get("match_ms")
+    seq = rooms.append_event(connection, room["id"], event_kind, payload, match_ms)
+    match_bus.publish(topic, {"type": "event", "seq": seq, "kind": event_kind,
+                              "match_ms": match_ms, "payload": payload})

@@ -45,3 +45,18 @@ def phones(client):
             client.cookies.update(jar)
 
     return Phones()
+
+
+@pytest.fixture
+def live_room(client, phones):
+    """Open a room, seat Alex, and kick off with `phone-7` holding physics."""
+
+    def _live_room(mode="solo"):
+        phones.join("Alex Rivera", "alex@example.com")
+        code = client.post("/api/rooms", json={"mode": mode}).json()["code"]
+        client.post(f"/api/rooms/{code}/seats/blue", json={"philosophy": "high press"})
+        client.post(f"/api/rooms/{code}/seats/blue/ready", json={"ready": True})
+        client.post(f"/api/rooms/{code}/start", json={"host_client_id": "phone-7"})
+        return code
+
+    return _live_room
