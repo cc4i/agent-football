@@ -55,6 +55,15 @@ export class SoccerGameScene extends Phaser.Scene {
 
     // Out-of-bounds restart guard (throw-in / goal kick in progress)
     this.throwInActive = false;
+
+    // The arena's host feed. main.js sets these when the pitch is driving a
+    // room; in the workshop they stay null and the scene publishes nothing.
+    // Frames are what the match looks like and events are what happened to it:
+    // frames may be dropped, events may not, so they travel separately.
+    this.frameSink = null;
+    this.reporter = null;
+    this.kickOffAt = 0;
+    this.lastFrameAt = 0;
   }
 
   preload() {
@@ -395,10 +404,13 @@ export class SoccerGameScene extends Phaser.Scene {
     this.startTimer();
     this.gameActive = true;
     Sound.playWhistle();
+    this.kickOffAt = this.time.now;
+    this.report('kickoff', {});
   }
 
   update(time, delta) {
     if (!this.gameActive) return;
+    this.publishFrame(time);
 
     // Fallback/Ensure profiles are loaded
     if (!this.blueProfiles || !this.redProfiles) {
@@ -1389,6 +1401,8 @@ export class SoccerGameScene extends Phaser.Scene {
       this.score2++;
       this.scoreText2.setText(this.score2);
     }
+    this.report('goal', { team: scoringPlayer === 1 ? 'blue' : 'red',
+                          score: [this.score1, this.score2] });
 
     const goalText = this.add.text(704, 300, 'GOAL!!!', {
       fontFamily: '"Outfit", "Inter", Arial, sans-serif',
@@ -1490,6 +1504,48 @@ export class SoccerGameScene extends Phaser.Scene {
     this.isResetting = false;
   }
 
+  // How far into the match we are, in real milliseconds. Scoring walks from a
+  // shout to the goals that followed it, so every event carries one of these.
+  matchMs() {
+    return this.kickOffAt ? Math.round(this.time.now - this.kickOffAt) : 0;
+  }
+
+  // Tell the arena something happened. A no-op unless the pitch is hosting.
+  report(kind, payload) {
+    if (this.reporter) this.reporter(kind, payload, this.matchMs());
+  }
+
+  // Ten frames a second is enough for a thumbnail on a phone and a tile on the
+  // wall, and it is two orders of magnitude less traffic than the render loop.
+  publishFrame(time) {
+    if (!this.frameSink || time - this.lastFrameAt < 100) return;
+    this.lastFrameAt = time;
+    this.frameSink(this.frame());
+  }
+
+  /**
+   * The match as eleven points and a scoreline.
+   *
+   * Positions are fractions of the canvas rather than pixels, so the same
+   * frame draws a phone's thumbnail, a tile on the wall and a full-size viewer
+   * without anyone having to know how big this pitch happens to be.
+   */
+  frame() {
+    const width = this.sys.game.config.width;
+    const height = this.sys.game.config.height;
+    const at = (sprite) => [
+      Math.round((sprite.x / width) * 1000) / 1000,
+      Math.round((sprite.y / height) * 1000) / 1000,
+    ];
+    return {
+      score: [this.score1, this.score2],
+      clock: Math.max(0, this.matchTime),
+      ball: at(this.ball),
+      blue: [at(this.gk1), ...this.bluePlayers.map(at)],
+      red: [at(this.gk2), ...this.redPlayers.map(at)],
+    };
+  }
+
   startTimer() {
     this.timerEvent = this.time.addEvent({
       delay: 1000,
@@ -1528,6 +1584,10 @@ export class SoccerGameScene extends Phaser.Scene {
       winColor = '#ef4444';
     }
 
+    // The whistle goes to the arena before the DOM, because it is what closes
+    // the room: the results screen the DOM raises is drawn from that.
+    this.report('full_time', { score: [this.score1, this.score2] });
+
     window.dispatchEvent(new CustomEvent('soccer-game-over', {
       detail: {
         winnerMsg,
@@ -1559,6 +1619,8 @@ export class SoccerGameScene extends Phaser.Scene {
     this.resetPositionsAfterGoal();
     this.startTimer();
     this.gameActive = true;
+    this.kickOffAt = this.time.now;
+    this.report('kickoff', {});
   }
 
   addCoachNameplate(x, y, label, color) {

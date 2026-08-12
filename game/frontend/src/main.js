@@ -17,6 +17,7 @@ import Phaser from 'phaser';
 import { SoccerGameScene, GAME_DURATION_SEC, STATUS_CHECK_MS } from './game';
 import { Sound } from './audio';
 import { createStatusHook } from './status.js';
+import { room, isHost, readProfiles, connect } from './arena.js';
 
 let gameInstance = null;
 let currentProfiles = {};
@@ -80,7 +81,7 @@ document.querySelector('#app').innerHTML = `
 
           <div style="text-align: center; color: var(--text-muted); max-width: 500px; line-height: 1.6; font-size: 0.95rem;">
             <p>Welcome to the Automated Futsal Simulator Sandbox!</p>
-            <p>Both teams play autonomously based on their behavioral attributes. Manually update individual files under the player_state/ folder on disk to tweak attributes, or adjust simulation speed to run experiments.</p>
+            <p>Both teams play autonomously based on their behavioral attributes. Shout at the squad, tune them from the dugout, or adjust simulation speed to run experiments.</p>
           </div>
 
           <div class="menu-actions">
@@ -144,7 +145,7 @@ document.querySelector('#app').innerHTML = `
     <details id="debug-log-panel" class="debug-log-panel">
       <summary class="debug-log-summary">
         <span class="debug-log-title">🛠️ Debug logs</span>
-        <span class="debug-log-hint">player config changes detected while polling player_state/*.json</span>
+        <span class="debug-log-hint">player config changes as the arena reports them</span>
         <button id="debug-log-clear" class="debug-log-clear" type="button">Clear</button>
       </summary>
       <div id="debug-log-body" class="debug-log-body">
@@ -160,12 +161,9 @@ document.querySelector('#app').innerHTML = `
   </div>
 `;
 
-let lastFetchedTexts = {
-  defender: "",
-  midfielder: "",
-  forward: "",
-  goalkeeper: ""
-};
+// A match hides the lab: inside the big screen's frame this page is the pitch
+// and nothing else. The workshop keeps every control it had.
+if (room.inMatch) document.body.classList.add('in-arena');
 
 // ---- Debug logs: track and render per-attribute config changes ----------
 
@@ -239,72 +237,45 @@ function appendDebugLog(role, changes, label) {
   }
 }
 
-// Fetch and load initial profiles from individual JSON files
+// ---- Profiles: read from the arena, moved by the room's socket ----------
+
+// Hand the current profiles to a running scene. It keeps its own copy, so
+// nothing takes effect on the pitch until it is told.
+function applyProfilesToScene() {
+  window.currentProfiles = currentProfiles; // Expose globally for Phaser
+  if (!gameInstance) return;
+  const scene = gameInstance.scene.getScene('SoccerGameScene');
+  if (scene) scene.updateBlueProfiles(currentProfiles);
+}
+
+// This dugout's squad as the arena holds it. Read once at load and again on a
+// rematch; from then on the socket says what moved and why.
 async function loadProfiles() {
   try {
-    const roles = ['defender', 'midfielder', 'forward', 'goalkeeper'];
-    const fetched = await Promise.all(roles.map(async role => {
-      const res = await fetch(`/player_state/${role}.json?t=` + Date.now());
-      const text = await res.text();
-      return { role, text, json: JSON.parse(text) };
-    }));
-
-    // Store last fetched texts and profiles
-    fetched.forEach(({ role, text, json }) => {
-      lastFetchedTexts[role] = text;
-      currentProfiles[role] = json;
+    const squad = await readProfiles();
+    Object.entries(squad).forEach(([role, profile]) => {
+      currentProfiles[role] = profile;
       // Log the initial values so the panel shows the starting config.
-      appendDebugLog(role, diffProfile({}, json), 'initial load');
+      appendDebugLog(role, diffProfile({}, profile), 'initial load');
     });
-
-    window.currentProfiles = currentProfiles; // Expose globally for Phaser
-
-    // If the game scene is already running, update it
-    if (gameInstance) {
-      const scene = gameInstance.scene.getScene('SoccerGameScene');
-      if (scene) {
-        scene.updateBlueProfiles(currentProfiles);
-      }
-    }
+    applyProfilesToScene();
   } catch (err) {
     console.error("Failed to load player profiles:", err);
   }
 }
 
-// Check individual JSON files on disk for changes
-async function checkJSONForChanges() {
-  try {
-    const roles = ['defender', 'midfielder', 'forward', 'goalkeeper'];
-    let changed = false;
-
-    await Promise.all(roles.map(async role => {
-      const res = await fetch(`/player_state/${role}.json?t=` + Date.now());
-      const text = await res.text();
-      if (text !== lastFetchedTexts[role]) {
-        console.log(`Detected changes in player_state/${role}.json on disk. Updating simulation...`);
-        const newProfile = JSON.parse(text);
-        const changes = diffProfile(currentProfiles[role], newProfile);
-        appendDebugLog(role, changes, 'applied');
-        lastFetchedTexts[role] = text;
-        currentProfiles[role] = newProfile;
-        changed = true;
-      }
-    }));
-
-    if (changed) {
-      window.currentProfiles = currentProfiles;
-
-      // If the game scene is already running, update it
-      if (gameInstance) {
-        const scene = gameInstance.scene.getScene('SoccerGameScene');
-        if (scene) {
-          scene.updateBlueProfiles(currentProfiles);
-        }
-      }
-    }
-  } catch (err) {
-    console.error("Failed to fetch player profiles for update check:", err);
-  }
+// One profile.patch off the room socket. It carries only what moved, which is
+// all the simulation and the debug panel need -- and it arrives when it
+// happens, rather than up to two seconds later.
+function applyPatch(payload) {
+  if (payload.team !== room.team) return; // the other dugout's business
+  const before = currentProfiles[payload.role] || {};
+  const after = { ...before, ...(payload.changed || {}) };
+  const changes = diffProfile(before, after);
+  if (!changes.length) return;
+  currentProfiles[payload.role] = after;
+  appendDebugLog(payload.role, changes, payload.actor || 'applied');
+  applyProfilesToScene();
 }
 
 // Debug logs: clear button (stop the click from toggling the <details>)
@@ -344,7 +315,8 @@ rematchBtn.addEventListener('click', () => {
 
   appendTerminalLine("system", `> 🔄 Rematch clicked: Restoring starting baseline profiles...`);
 
-  // Restore profiles to LAB01 starting baseline before restarting
+  // Back to the shipped squad before restarting, so a rematch is a fresh
+  // experiment rather than a continuation of the last one's shouts.
   sendInstructionToAgent("RESTORE_BASELINE", { showHuddle: false }).then(() => {
     loadProfiles(); // Reload the fresh baseline profiles
     if (gameInstance) {
@@ -720,6 +692,12 @@ function startPhaserGame() {
       scene.updateBlueProfiles(currentProfiles);
       const speedVal = parseFloat(document.getElementById('sim-speed-input').value);
       scene.setSimulationSpeed(speedVal);
+      if (isHost()) {
+        // This tab holds the room's physics, so what happens here is what
+        // happened. Everyone else in the room is drawing these frames.
+        scene.frameSink = feed.state;
+        scene.reporter = feed.event;
+      }
     }
   });
 }
@@ -826,10 +804,14 @@ function showNotification(role, action, reason) {
 // Track the last-seen timestamp per role so each request shows exactly once.
 const lastSubTs = { defender: 0, midfielder: 0, forward: 0, goalkeeper: 0 };
 
+// One file per room and dugout, because a knock in one match must not sub a
+// player off in another. football_mcp_server.py writes it and vite serves it.
+const SUBSTITUTIONS_URL = `/player_state/substitutions/${room.code}__${room.team}.json`;
+
 // Seed timestamps from any pre-existing file so stale entries don't toast on load.
 async function primeSubstitutions() {
   try {
-    const res = await fetch('/player_state/substitutions.json?t=' + Date.now());
+    const res = await fetch(`${SUBSTITUTIONS_URL}?t=` + Date.now());
     if (!res.ok) return;
     const data = await res.json();
     ROLES.forEach(role => {
@@ -842,7 +824,7 @@ async function primeSubstitutions() {
 
 async function checkSubstitutions() {
   try {
-    const res = await fetch('/player_state/substitutions.json?t=' + Date.now());
+    const res = await fetch(`${SUBSTITUTIONS_URL}?t=` + Date.now());
     if (!res.ok) return; // file may not exist yet
     const data = await res.json();
     ROLES.forEach(role => {
@@ -858,24 +840,30 @@ async function checkSubstitutions() {
   }
 }
 
-// Load profiles initially on start (and handle baseline backup/restore)
-const isInitialized = sessionStorage.getItem('lab02_initialized');
+// The room's feed. Profile moves arrive on it, and when this pitch holds the
+// host token, frames and events leave on it. Open before anything is loaded so
+// nothing said between the read and the connect is missed.
+const feed = connect({
+  onEvent: (message) => {
+    if (message.kind === 'profile.patch') applyPatch(message.payload);
+  },
+});
 
-if (!isInitialized) {
-  console.log("--> [SYSTEM] First load: backing up LAB01 baseline...");
-  sendInstructionToAgent("BACKUP_BASELINE", { showHuddle: false }).then(() => {
-    sessionStorage.setItem('lab02_initialized', 'true');
-    loadProfiles();
+if (room.inMatch) {
+  // A match starts where the arena says it starts, and nobody is waiting at a
+  // start screen: the big screen already showed the lobby and somebody on a
+  // phone already kicked off.
+  loadProfiles().then(() => {
+    document.getElementById('start-screen').classList.remove('active');
+    startPhaserGame();
   });
 } else {
-  console.log("--> [SYSTEM] Refresh detected: restoring LAB01 baseline...");
-  sendInstructionToAgent("RESTORE_BASELINE", { showHuddle: false }).then(() => {
-    loadProfiles();
-  });
+  // The lab starts every session from the shipped squad, which is what makes
+  // its stages repeatable. The workshop room is long-lived, so this has to be
+  // asked for rather than assumed.
+  console.log("--> [SYSTEM] Workshop: resetting to the shipped baseline...");
+  sendInstructionToAgent("RESTORE_BASELINE", { showHuddle: false }).then(loadProfiles);
 }
-
-// Check for changes on disk every 2 seconds
-setInterval(checkJSONForChanges, 2000);
 
 // Poll for player condition events (injuries / sub requests) and toast them.
 primeSubstitutions().then(() => setInterval(checkSubstitutions, 2000));

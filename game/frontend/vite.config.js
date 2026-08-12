@@ -27,6 +27,21 @@ export default defineConfig({
         target: 'http://localhost:8000',
         changeOrigin: true,
         secure: false
+      },
+      // The arena owns rooms, profiles and the match feed. Proxying rather than
+      // opening CORS on :8003 keeps the pitch same-origin, which is what lets
+      // the big screen frame it and lets the socket carry the host token.
+      // Anchored patterns, so this can never swallow /api-apps above it.
+      '^/api/': {
+        target: 'http://localhost:8003',
+        changeOrigin: true,
+        secure: false
+      },
+      '^/ws/': {
+        target: 'ws://localhost:8003',
+        ws: true,
+        changeOrigin: true,
+        secure: false
       }
     }
   }
