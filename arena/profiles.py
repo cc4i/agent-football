@@ -14,6 +14,14 @@ import time
 import attributes
 
 
+class Rejected(Exception):
+    """A patch the rules refuse. `problems` is fit to show a manager as-is."""
+
+    def __init__(self, problems):
+        super().__init__("; ".join(problems))
+        self.problems = list(problems)
+
+
 def seed(conn, room_id, teams):
     """Give every named dugout a fresh copy of each role's baseline.
 
@@ -49,3 +57,30 @@ def read_one(conn, room_id, team, role):
         (room_id, team, role),
     ).fetchone()
     return json.loads(row["attributes_json"]) if row else None
+
+
+def patch(conn, room_id, team, role, changes):
+    """Apply validated changes to one profile.
+
+    Returns the role, its whole attribute set afterwards, and just the values
+    that moved. Raises Rejected carrying every reason at once, rather than the
+    first: the caller is often a language model, and it can only correct what
+    it is told. A patch with any bad value lands none of its values.
+    """
+    problems = attributes.validate(role, changes)
+    if problems:
+        raise Rejected(problems)
+
+    current = read_one(conn, room_id, team, role)
+    if current is None:
+        raise Rejected([f"this room has no {team} {role}"])
+
+    changed = {key: value for key, value in changes.items() if current.get(key) != value}
+    current.update(changes)
+    conn.execute(
+        "UPDATE profile SET attributes_json = ?, updated_at = ? "
+        "WHERE room_id = ? AND team = ? AND role = ?",
+        (json.dumps(current), time.time(), room_id, team, role),
+    )
+    conn.commit()
+    return {"role": role, "attributes": current, "changed": changed}
