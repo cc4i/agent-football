@@ -18,3 +18,9 @@ dependencies = [
 # game/ for the agent app), so there is nothing to build or install.
 [tool.uv]
 package = false
+
+[dependency-groups]
+dev = ["pytest"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

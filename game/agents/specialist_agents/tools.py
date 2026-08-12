@@ -17,7 +17,9 @@ import os
 import shutil
 import sys
 
-from . import profile_guard
+from google.adk.tools import ToolContext
+
+from . import arena_client
 from google.adk.tools.mcp_tool import McpToolset
 from google.adk.tools.mcp_tool.mcp_session_manager import StdioConnectionParams
 from mcp import StdioServerParameters
@@ -192,38 +194,32 @@ def initialize_profiles():
 # Ensure the profiles exist as soon as this module is imported
 initialize_profiles()
 
-def update_profile(role: str, changes: dict) -> str:
-    """
-    Tool for agents to update the JSON profile for a specific role.
+def update_profile(role: str, changes: dict, tool_context: ToolContext) -> str:
+    """Move one player's attributes in this match's dugout.
 
-    Args:
-        role: The player role ('defender', 'midfielder', 'forward', 'goalkeeper').
-        changes: A dictionary of attributes to update (e.g. {"attackPositioning": 0.9, "aggression": 0.8}).
-    """
-    problems = profile_guard.validate(PLAYER_STATE_DIR, role, changes)
-    if problems:
-        # Hand the reasons back so the agent can correct itself, rather than
-        # writing a nonsense attribute the simulation will then act on.
-        return "Rejected: " + "; ".join(problems)
+    `changes` maps attribute names to new values. The arena validates every one
+    of them and refuses the whole write if any is out of range, so a refusal
+    comes back naming every problem at once and can be corrected in one go.
 
-    file_path = os.path.join(PLAYER_STATE_DIR, f"{role}.json")
+    The room and dugout come from the session rather than from a constant,
+    because more than one match runs at a time.
+    """
+    room = tool_context.state.get("room_code") or arena_client.DEFAULT_ROOM
+    team = tool_context.state.get("team") or arena_client.DEFAULT_TEAM
     try:
-        if not os.path.exists(file_path):
-            return f"Error: Profile file for role '{role}' not found."
+        result = arena_client.patch_profile(
+            room, team, role, changes,
+            actor=tool_context.state.get("actor") or "coach",
+            reason=tool_context.state.get("reason") or "",
+        )
+    except arena_client.ArenaError as refusal:
+        return f"Rejected: {refusal}"
 
-        with open(file_path, 'r') as f:
-            profile = json.load(f)
-
-        profile.update(changes)
-
-        with open(file_path, 'w') as f:
-            json.dump(profile, f, indent=2)
-
-        print(f"--> [SYSTEM] Updated {role.upper()} profile with: {changes}")
-        return f"Success: {role} tactics updated."
-
-    except Exception as e:
-        return f"File error: {str(e)}"
+    if not result["changed"]:
+        return f"No change: the {team} {role} already had those values."
+    moved = ", ".join(f"{key}={value}"
+                      for key, value in sorted(result["changed"].items()))
+    return f"Updated the {team} {role} in room {room}: {moved}"
 
 
 # Change the flag below from False to True to enable the real FastMCP server subprocess:
