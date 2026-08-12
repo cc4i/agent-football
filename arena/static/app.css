@@ -60,6 +60,12 @@ body.phone{display:flex;justify-content:center}
   display:flex;flex-direction:column;
   padding:calc(14px + env(safe-area-inset-top)) 16px calc(16px + env(safe-area-inset-bottom));
 }
+/* The dugout is a frame with one scrolling panel in it. Let the page itself
+   grow instead and a long relay pushes the shout chips off the bottom of the
+   screen, where nobody can reach them. The join form is the other way round:
+   it has to be able to run past a short screen. */
+body.phone.fixed{height:100vh;height:100dvh;overflow:hidden}
+body.phone.fixed .pscreen{height:100%;min-height:0}
 
 .pbar{
   display:flex;align-items:center;justify-content:space-between;gap:10px;
@@ -98,7 +104,8 @@ body.phone{display:flex;justify-content:center}
 .pill{
   background:rgba(255,255,255,.03);border:1px solid var(--line);color:var(--mute);
   font-size:.74rem;font-weight:600;padding:9px 6px;border-radius:8px;
-  text-align:center;cursor:pointer;font-family:inherit;
+  display:flex;align-items:center;justify-content:center;gap:6px;
+  cursor:pointer;font-family:inherit;
 }
 .pill.on{background:var(--blue-dim);border-color:var(--blue);color:#fff}
 
@@ -181,7 +188,16 @@ body.phone{display:flex;justify-content:center}
 }
 .relay-hd .eyebrow{color:var(--violet)}
 .relay-hd .elapsed{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:.7rem;color:var(--faint)}
-.relay-scroll{overflow-y:auto;min-height:0;flex:1;-webkit-overflow-scrolling:touch}
+.relay-scroll{
+  overflow-y:auto;min-height:0;flex:1;-webkit-overflow-scrolling:touch;
+  scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.16) transparent;
+}
+/* An empty panel this tall reads as something broken rather than as a match
+   nobody has said anything in yet. */
+.relay-scroll:empty::before{
+  content:"Nothing said yet. Make a call below and the squad answers here.";
+  display:block;color:var(--faint);font-size:.75rem;line-height:1.55;
+}
 
 .said{
   display:flex;gap:10px;align-items:flex-start;
@@ -242,9 +258,14 @@ body.phone{display:flex;justify-content:center}
 .chip{
   background:var(--blue-dim);border:1px solid var(--blue-line);color:#93c5fd;
   padding:10px 9px;border-radius:8px;font-size:.78rem;font-weight:600;
-  text-align:left;cursor:pointer;line-height:1.3;font-family:inherit;
+  display:flex;align-items:center;gap:7px;
+  cursor:pointer;line-height:1.3;font-family:inherit;text-align:left;
 }
 .chip:disabled{opacity:.5;cursor:not-allowed}
+
+/* An emoji and 'Outfit' set a word space at very different widths, so the gap
+   between the two belongs to the layout rather than to the string. */
+.ico{flex:none;font-size:.9em;line-height:1}
 .queued{
   display:flex;align-items:center;gap:7px;margin-bottom:8px;
   background:rgba(255,204,0,.07);border:1px solid rgba(255,204,0,.3);
@@ -271,6 +292,7 @@ body.phone{display:flex;justify-content:center}
 }
 .mrow{display:flex;justify-content:space-between;gap:8px;padding:6px 8px;font-size:.76rem;color:var(--mute);border-bottom:1px solid var(--line-2)}
 .mrow:last-child{border-bottom:none}
+.mrow span{display:flex;align-items:center;gap:7px;min-width:0}
 .mrow b{font-family:'IBM Plex Mono',ui-monospace,monospace;color:var(--ink);font-weight:600}
 .mrow.you{background:var(--blue-dim);border-radius:5px;color:#fff;font-weight:600}
 .mrow.you b{color:var(--gold)}
@@ -333,9 +355,12 @@ body.big{padding:24px}
 .lobby-badge i{width:8px;height:8px;border-radius:50%;background:var(--gold);animation:blip 1.6s ease-in-out infinite}
 @keyframes blip{0%,100%{opacity:1}50%{opacity:.25}}
 
-.seats{position:relative;z-index:3;display:flex;align-items:center;gap:22px;margin-top:26px}
+/* Stretched, not centred: one dugout carries a ready line and the other may
+   not, and two cards of different heights read as a layout mistake. */
+.seats{position:relative;z-index:3;display:flex;align-items:stretch;gap:22px;margin-top:26px}
 .seat{
   width:212px;border-radius:12px;padding:16px;text-align:center;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
   background:rgba(3,6,14,.85);border:1px solid var(--line);
 }
 .seat.filled.b{border-color:var(--blue-line);background:linear-gradient(180deg,var(--blue-dim),rgba(3,6,14,.9))}
@@ -352,7 +377,10 @@ body.big{padding:24px}
   font-size:.66rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--emerald);
 }
 .seat .ready.waiting{color:var(--faint)}
-.vs-mark{font-family:'Outfit',system-ui,sans-serif;font-weight:800;font-size:1.5rem;color:var(--faint);letter-spacing:.06em}
+.vs-mark{
+  align-self:center;font-family:'Outfit',system-ui,sans-serif;font-weight:800;
+  font-size:1.5rem;color:var(--faint);letter-spacing:.06em;
+}
 
 .lobby-grid{display:grid;grid-template-columns:1fr 320px;gap:20px;align-items:stretch;flex:1;min-height:0}
 .pitch-stack{display:flex;flex-direction:column;align-items:center;justify-content:center}

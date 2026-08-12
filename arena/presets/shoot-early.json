@@ -1,7 +1,7 @@
 {
   "label": "Shoot early",
   "icon": "🎯",
-  "phrase": "Shoot early -- don't wait for the perfect ball.",
+  "phrase": "Shoot early - don't wait for the perfect ball.",
   "changes": {
     "shotRange": 0.95,
     "shotPower": 0.95,

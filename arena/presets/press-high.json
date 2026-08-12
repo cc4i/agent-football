@@ -1,7 +1,7 @@
 {
   "label": "Press high",
   "icon": "⚡",
-  "phrase": "Press high -- win it back in their half.",
+  "phrase": "Press high - win it back in their half.",
   "changes": {
     "pressingIntensity": 0.95,
     "interceptionRadius": 0.8,

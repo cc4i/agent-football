@@ -38,7 +38,5 @@
   "foulFrequency": 0.1,
   "tackleIntensity": 0.6,
   "dropDeepPreference": 0.2,
-  "defensiveSupport": 0.4,
-  "defensivePositioning": 0.5,
-  "posositionalDiscipline": 0.5
+  "defensiveSupport": 0.4
 }

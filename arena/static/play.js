@@ -7,6 +7,7 @@
  */
 
 import { get, post, Refused } from "/static/api.js";
+import { icon } from "/static/dom.js";
 import { openRoom } from "/static/socket.js";
 
 const CODE = (new URLSearchParams(location.search).get("room") || "").toUpperCase();
@@ -80,10 +81,13 @@ async function catchUp() {
 function draw(snapshot) {
   room = snapshot;
   const seat = snapshot.seats[mine];
-  el("side").textContent = `${SIDE_LABEL[mine]}${seat && seat.ready ? " · ready" : ""}`;
+  const started = snapshot.status !== "lobby";
+  // "Ready" only means something while there is still something to be ready
+  // for; once the whistle has gone the chip says what is happening instead.
+  const note = started ? "" : (seat && seat.ready ? " · ready" : "");
+  el("side").textContent = `${SIDE_LABEL[mine]}${note}`;
   el("side").className = `side-chip ${mine === "blue" ? "b" : "r"}`;
 
-  const started = snapshot.status !== "lobby";
   lobby.hidden = started;
   live.hidden = !started;
   el("ft").hidden = snapshot.status === "live";
@@ -105,11 +109,12 @@ function drawLobby(snapshot) {
       const row = document.createElement("div");
       row.className = `mrow${team === mine ? " you" : ""}`;
       const who = document.createElement("span");
-      who.textContent = seat
-        ? `${team === "blue" ? "🔵" : "🔴"} ${seat.name}${team === mine ? " (you)" : ""}`
-        : `${team === "blue" ? "🔵" : "🔴"} Open`;
+      who.append(
+        icon(team === "blue" ? "🔵" : "🔴"),
+        seat ? `${seat.name}${team === mine ? " (you)" : ""}` : "Open",
+      );
       const state = document.createElement("b");
-      state.textContent = seat ? (seat.ready ? "Ready" : "Joining…") : "Waiting";
+      state.textContent = seat ? (seat.ready ? "Ready" : "Not ready") : "Waiting";
       row.append(who, state);
       return row;
     }));
@@ -119,14 +124,20 @@ function drawLobby(snapshot) {
     && Object.values(snapshot.seats).every((entry) => entry.ready);
 
   if (!seat || !seat.ready) {
+    // Solo has nobody to wait for, so the heading must not claim there is.
+    el("lobby-title").textContent = snapshot.mode === "solo"
+      ? "Ready when you are"
+      : "Ready when they are";
     go.textContent = "I'm ready";
     go.disabled = false;
     go.dataset.does = "ready";
   } else if (everyone) {
+    el("lobby-title").textContent = "Kick off when you like";
     go.textContent = "Kick off";
     go.disabled = false;
     go.dataset.does = "start";
   } else {
+    el("lobby-title").textContent = "Waiting on the other dugout";
     go.textContent = "Waiting for the other dugout";
     go.disabled = true;
     go.dataset.does = "";
@@ -153,12 +164,14 @@ go.addEventListener("click", async () => {
 /* ── The match ──────────────────────────────────────────────────────── */
 
 function paint(frame) {
-  if (Array.isArray(frame.score)) {
-    el("score-blue").textContent = frame.score[0];
-    el("score-red").textContent = frame.score[1];
-  }
+  if (Array.isArray(frame.score)) showScore(frame.score);
   if (typeof frame.clock === "number") el("clock").textContent = mmss(frame.clock);
   place(frame);
+}
+
+function showScore([blue, red]) {
+  el("score-blue").textContent = blue;
+  el("score-red").textContent = red;
 }
 
 function mmss(seconds) {
@@ -196,6 +209,11 @@ const clamp = (value) => Math.min(1, Math.max(0, Number(value) || 0));
 
 function record(message) {
   if (message.seq) lastSeq = Math.max(lastSeq, message.seq);
+  // Frames stop the moment the match does. A phone that reloads at full time
+  // has nothing left to paint from, so the scoreline comes out of the log.
+  const payload = message.payload || {};
+  if (Array.isArray(payload.score)) showScore(payload.score);
+  if (message.kind === "full_time") el("clock").textContent = mmss(0);
   if (message.kind === "shout.sent") return drawShout(message);
   if (message.kind === "profile.patch") return drawPatch(message);
   if (message.kind === "goal") return drawGoal(message);
@@ -251,11 +269,9 @@ function drawGoal(message) {
   const banner = document.createElement("div");
   banner.className = "banner warn";
   const team = message.payload && message.payload.team;
-  const icon = document.createElement("span");
-  icon.textContent = "⚽";
   const words = document.createElement("div");
   words.textContent = team === mine ? "You scored." : "They scored.";
-  banner.append(icon, words);
+  banner.append(icon("⚽"), words);
   relay.prepend(banner);
 }
 
@@ -270,7 +286,7 @@ function drawChips(presets) {
     const chip = document.createElement("button");
     chip.type = "button";
     chip.className = "chip";
-    chip.textContent = `${preset.icon} ${preset.label}`;
+    chip.append(icon(preset.icon), preset.label);
     chip.addEventListener("click", () => shout(preset.name));
     return chip;
   }));

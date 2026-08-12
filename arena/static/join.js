@@ -7,6 +7,7 @@
  */
 
 import { get, post, Refused } from "/static/api.js";
+import { icon } from "/static/dom.js";
 
 const CODE = decodeURIComponent(location.pathname.split("/").pop() || "").toUpperCase();
 const SIDE = { blue: "blue", red: "red" };
@@ -44,7 +45,7 @@ function drawStances(stances) {
     const pill = document.createElement("button");
     pill.type = "button";
     pill.className = "pill";
-    pill.textContent = `${entry.icon} ${entry.label}`;
+    pill.append(icon(entry.icon), entry.label);
     pill.addEventListener("click", () => {
       stance = entry.name;
       blurb.textContent = entry.blurb;

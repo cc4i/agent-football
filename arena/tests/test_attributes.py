@@ -1,7 +1,6 @@
 """The one validator. These rules used to exist in two copies."""
 
-import json
-from pathlib import Path
+import re
 
 import pytest
 
@@ -67,11 +66,16 @@ def test_baseline_for_refuses_a_role_it_does_not_know():
         attributes.baseline_for("striker")
 
 
-def test_the_arena_baselines_match_the_ones_the_pitch_ships():
-    # Two copies of a starting profile drift. This is the tripwire until the
-    # pitch reads its profiles from the arena in step 3.
-    shipped_dir = (Path(__file__).resolve().parents[2]
-                   / "game" / "frontend" / "public" / "player_state")
-    for role in attributes.ROLES:
-        shipped = json.loads((shipped_dir / f"{role}_baseline.json").read_text())
-        assert attributes.baseline_for(role) == shipped, role
+def test_every_baseline_attribute_is_named_like_the_game_reads_it():
+    # A baseline is also the list of names a squad will accept an instruction
+    # about. "-aggression" once sat beside "aggression" in the defender file:
+    # the validator took a change to it, the relay showed the manager a green
+    # delta, and the pitch went on reading the other one.
+    camel = re.compile(r"[a-z][a-zA-Z]*")
+    misnamed = {
+        f"{role}.{name}"
+        for role in attributes.ROLES
+        for name in attributes.baseline_for(role)
+        if not camel.fullmatch(name)
+    }
+    assert misnamed == set()

@@ -26,7 +26,5 @@
   "tackleAggression": 0.8,
   "foulRate": 0.5,
   "kickPower": 0.8,
-  "passAccuracy": 0.8,
-  "shorRange": 0.2,
-  "-aggression": 0.8
+  "passAccuracy": 0.8
 }

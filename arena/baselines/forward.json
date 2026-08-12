@@ -28,7 +28,5 @@
   "shortPassing": 0.7,
   "defensiveContribution": 0.2,
   "fastPassing": 0.5,
-  "formDiscipline": 0.3,
-  "defensivePositioning": 0.4,
   "fastBreakUrgency": 0.9
 }
