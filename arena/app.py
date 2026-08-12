@@ -229,6 +229,10 @@ async def room_socket(socket: WebSocket, code: str, client_id: str = ""):
         pass
     finally:
         pump.cancel()
+        # Retrieve the pump's exception if it finished before being cancelled.
+        # An unretrieved exception surfaces as asyncio noise at collection time.
+        if pump.done():
+            pump.exception()
         subscription.close()
 
 
@@ -276,10 +280,15 @@ async def wall_socket(socket: WebSocket):
     tasks = [asyncio.create_task(_pump(socket, subscription)),
              asyncio.create_task(_until_closed(socket))]
     try:
-        await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+        done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
     finally:
-        for task in tasks:
+        for task in pending:
             task.cancel()
+        # Retrieve exceptions from completed tasks. Cancelling an already-finished
+        # task does not retrieve its exception; an unretrieved one surfaces as
+        # asyncio noise at collection time.
+        for task in done:
+            task.exception()
         subscription.close()
 
 
