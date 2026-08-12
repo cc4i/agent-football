@@ -202,3 +202,51 @@ def test_the_workshop_room_is_not_reopened_on_the_next_restart(client, db_path):
     from app import app as arena_app
     with TestClient(arena_app) as second:
         assert second.get(f"/api/rooms/{codes.WORKSHOP}").status_code == 200
+
+
+def test_a_workshop_patch_reaches_the_pitchs_json_file(client, tmp_path, monkeypatch):
+    # Temporary: main.js still polls these files. Deleted in step 3.
+    import json
+
+    import codes
+    monkeypatch.setenv("ARENA_MIRROR_DIR", str(tmp_path))
+    monkeypatch.setattr("app.SERVICE_TOKEN", "s3cret")
+    client.patch(f"/api/rooms/{codes.WORKSHOP}/teams/blue/profiles/defender",
+                 json={"changes": {"aggression": 0.2}},
+                 headers={"X-Arena-Service": "s3cret"})
+    written = json.loads((tmp_path / "defender.json").read_text())
+    assert written["aggression"] == 0.2
+
+
+def test_a_real_match_never_writes_over_the_pitchs_files(client, phones, tmp_path,
+                                                         monkeypatch):
+    # One shared file cannot serve two tenants, so only the workshop uses it.
+    monkeypatch.setenv("ARENA_MIRROR_DIR", str(tmp_path))
+    code = open_room(client, phones)
+    client.post(f"/api/rooms/{code}/seats/blue", json={"philosophy": "high press"})
+    client.patch(f"/api/rooms/{code}/teams/blue/profiles/defender",
+                 json={"changes": {"aggression": 0.2}})
+    assert not (tmp_path / "defender.json").exists()
+
+
+def test_the_mirror_is_off_unless_it_is_asked_for(client, monkeypatch, tmp_path):
+    import codes
+    monkeypatch.delenv("ARENA_MIRROR_DIR", raising=False)
+    monkeypatch.setattr("app.SERVICE_TOKEN", "s3cret")
+    response = client.patch(f"/api/rooms/{codes.WORKSHOP}/teams/blue/profiles/defender",
+                            json={"changes": {"aggression": 0.2}},
+                            headers={"X-Arena-Service": "s3cret"})
+    assert response.status_code == 200
+    # Not "the directory is empty": the test database lives here too. The
+    # mirror only ever writes {role}.json, so none of those is the assertion.
+    assert [path.name for path in tmp_path.iterdir() if path.suffix == ".json"] == []
+
+
+def test_an_unwritable_mirror_does_not_fail_the_patch(client, monkeypatch):
+    import codes
+    monkeypatch.setenv("ARENA_MIRROR_DIR", "/proc/nowhere/at/all")
+    monkeypatch.setattr("app.SERVICE_TOKEN", "s3cret")
+    response = client.patch(f"/api/rooms/{codes.WORKSHOP}/teams/blue/profiles/defender",
+                            json={"changes": {"aggression": 0.2}},
+                            headers={"X-Arena-Service": "s3cret"})
+    assert response.status_code == 200

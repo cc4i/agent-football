@@ -23,6 +23,7 @@ from uvicorn.protocols.utils import ClientDisconnected
 import codes
 import db
 import identity
+import mirror
 import profiles
 import rooms
 from bus import WALL, Bus, room_topic
@@ -268,7 +269,12 @@ async def patch_profile(code: str, team: str, role: str, body: ProfilePatchReque
     except profiles.Rejected as refusal:
         raise HTTPException(422, {"problems": refusal.problems}) from refusal
 
-    delta = {"team": team, "role": role, "changed": result["changed"],
+    if room["code"] == codes.WORKSHOP:
+        # Temporary, and only here: the pitch still polls one file per role,
+        # which cannot serve two rooms at once. Deleted in step 3.
+        mirror.write(role, result["attributes"])
+
+    delta ={"team": team, "role": role, "changed": result["changed"],
              "reason": body.reason, "actor": body.actor}
     seq = rooms.append_event(connection, room["id"], "profile.patch", delta)
     request.app.state.bus.publish(
