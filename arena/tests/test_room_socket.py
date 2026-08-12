@@ -65,10 +65,11 @@ def test_a_client_that_is_not_the_host_cannot_move_the_ball(client, live_room):
 
 def test_a_guessed_client_id_cannot_drive_the_match(client, phones):
     phones.join("Alex Rivera", "alex@example.com")
-    code = client.post("/api/rooms", json={"mode": "solo"}).json()["code"]
+    opened = client.post("/api/rooms", json={"mode": "solo"}).json()
+    code, host_token = opened["code"], opened["host_token"]
     client.post(f"/api/rooms/{code}/seats/blue", json={"philosophy": "high press"})
     client.post(f"/api/rooms/{code}/seats/blue/ready", json={"ready": True})
-    host_token = client.post(f"/api/rooms/{code}/start").json()["host_token"]
+    client.post(f"/api/rooms/{code}/start")
 
     with client.websocket_connect(f"/ws/rooms/{code}") as viewer:
         viewer.receive_json()

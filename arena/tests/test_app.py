@@ -1,3 +1,6 @@
+import rooms
+
+
 def test_health_says_which_service_answered(client):
     assert client.get("/health").json() == {"ok": True, "service": "arena"}
 
@@ -145,22 +148,30 @@ def test_starting_a_room_that_does_not_exist_is_a_404(client, phones):
     assert client.post("/api/rooms/ZZZZ/start").status_code == 404
 
 
-def test_starting_a_match_mints_and_returns_a_host_token(client, phones):
+def test_opening_a_room_hands_its_creator_the_physics(client):
+    body = client.post("/api/rooms", json={"mode": "solo"}).json()
+    assert len(body["host_token"]) > 10
+
+
+def test_every_room_gets_its_own_host_token(client):
+    first = client.post("/api/rooms", json={"mode": "solo"}).json()["host_token"]
+    second = client.post("/api/rooms", json={"mode": "solo"}).json()["host_token"]
+    assert first != second
+
+
+def test_kicking_off_does_not_hand_physics_to_whoever_asked(client, phones):
+    # The screen that opened the room is rendering the pitch. A manager tapping
+    # kick-off on their phone must not be able to take it from them.
     phones.join("Alex Rivera", "alex@example.com")
-    code = client.post("/api/rooms", json={"mode": "solo"}).json()["code"]
+    opened = client.post("/api/rooms", json={"mode": "solo"}).json()
+    code = opened["code"]
     client.post(f"/api/rooms/{code}/seats/blue", json={"philosophy": "high press"})
     client.post(f"/api/rooms/{code}/seats/blue/ready", json={"ready": True})
 
-    response = client.post(f"/api/rooms/{code}/start")
-    body = response.json()
-    assert "host_token" in body
-    assert len(body["host_token"]) > 10
-    # Each start mints a different token.
-    second_code = client.post("/api/rooms", json={"mode": "solo"}).json()["code"]
-    client.post(f"/api/rooms/{second_code}/seats/blue", json={"philosophy": "counter"})
-    client.post(f"/api/rooms/{second_code}/seats/blue/ready", json={"ready": True})
-    second_response = client.post(f"/api/rooms/{second_code}/start")
-    assert second_response.json()["host_token"] != body["host_token"]
+    body = client.post(f"/api/rooms/{code}/start").json()
+    assert "host_token" not in body
+    connection = client.app.state.conn
+    assert rooms.by_code(connection, code)["host_client_id"] == opened["host_token"]
 
 
 def test_client_id_is_redacted_from_access_logs():
@@ -185,29 +196,27 @@ def test_client_id_is_redacted_from_access_logs():
 
 def test_the_host_token_does_not_leak_into_the_snapshot_or_broadcast(client, phones):
     phones.join("Alex Rivera", "alex@example.com")
-    code = client.post("/api/rooms", json={"mode": "solo"}).json()["code"]
+    opened = client.post("/api/rooms", json={"mode": "solo"}).json()
+    code, host_token = opened["code"], opened["host_token"]
     client.post(f"/api/rooms/{code}/seats/blue", json={"philosophy": "high press"})
     client.post(f"/api/rooms/{code}/seats/blue/ready", json={"ready": True})
 
     # Hold a room socket open so we can see the broadcast when /start is called.
     with client.websocket_connect(f"/ws/rooms/{code}") as socket:
         opening = socket.receive_json()
-        assert "host_token" not in str(opening)
+        assert host_token not in str(opening)
+        assert "host_client_id" not in str(opening)
 
         start_response = client.post(f"/api/rooms/{code}/start")
-        host_token = start_response.json()["host_token"]
-
-        # The snapshot from /start must not contain the token.
-        assert "host_token" in start_response.json()
+        assert host_token not in str(start_response.json())
         assert "host_client_id" not in start_response.json()
 
         # The broadcast frame must not leak the token.
         broadcast = socket.receive_json()
-        assert "host_token" not in str(broadcast)
         assert host_token not in str(broadcast)
         assert "host_client_id" not in str(broadcast)
 
     # Reading the room must not leak it.
     read_response = client.get(f"/api/rooms/{code}")
-    assert "host_token" not in read_response.json()
+    assert host_token not in str(read_response.json())
     assert "host_client_id" not in read_response.json()

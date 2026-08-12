@@ -52,12 +52,12 @@ def test_the_wall_does_not_carry_events_only_frames(client, live_room):
 def test_two_live_rooms_both_reach_one_wall_connection(client, phones):
     def start(name, email):
         phones.join(name, email)
-        code = client.post("/api/rooms", json={"mode": "solo"}).json()["code"]
+        opened = client.post("/api/rooms", json={"mode": "solo"}).json()
+        code = opened["code"]
         client.post(f"/api/rooms/{code}/seats/blue", json={"philosophy": "counter"})
         client.post(f"/api/rooms/{code}/seats/blue/ready", json={"ready": True})
-        response = client.post(f"/api/rooms/{code}/start")
-        host_token = response.json()["host_token"]
-        return code, host_token
+        client.post(f"/api/rooms/{code}/start")
+        return code, opened["host_token"]
 
     first_code, _ = start("Alex Rivera", "alex@example.com")
     second_code, second_token = start("Priya Nair", "priya@example.com")

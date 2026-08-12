@@ -53,11 +53,11 @@ def live_room(client, phones):
 
     def _live_room(mode="solo"):
         phones.join("Alex Rivera", "alex@example.com")
-        code = client.post("/api/rooms", json={"mode": mode}).json()["code"]
+        opened = client.post("/api/rooms", json={"mode": mode}).json()
+        code = opened["code"]
         client.post(f"/api/rooms/{code}/seats/blue", json={"philosophy": "high press"})
         client.post(f"/api/rooms/{code}/seats/blue/ready", json={"ready": True})
-        response = client.post(f"/api/rooms/{code}/start")
-        host_token = response.json()["host_token"]
-        return code, host_token
+        client.post(f"/api/rooms/{code}/start")
+        return code, opened["host_token"]
 
     return _live_room

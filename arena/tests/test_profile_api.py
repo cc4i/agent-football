@@ -54,10 +54,10 @@ def test_a_role_cannot_walk_out_of_the_room(client, phones):
 
 
 def seat_and_start(client, phones, code, team="blue"):
-    """Sit the current phone in a dugout and kick off. Returns the host token."""
+    """Sit the current phone in a dugout and kick off."""
     client.post(f"/api/rooms/{code}/seats/{team}", json={"philosophy": "high press"})
     client.post(f"/api/rooms/{code}/seats/{team}/ready", json={"ready": True})
-    return client.post(f"/api/rooms/{code}/start").json()["host_token"]
+    client.post(f"/api/rooms/{code}/start")
 
 
 def test_the_manager_in_that_dugout_may_move_its_profiles(client, phones):

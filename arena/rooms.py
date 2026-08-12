@@ -6,6 +6,7 @@ off, and which status may follow which. Nothing in this file knows about HTTP.
 """
 
 import json
+import secrets
 import time
 
 import codes
@@ -70,10 +71,15 @@ def create_room(conn, mode, code=None):
     elif by_code(conn, code) is not None:
         raise RoomError(f"room {code} already exists")
 
+    # Physics belongs to whoever opened the room: the big screen at a venue, the
+    # phone when somebody plays alone. The token is minted here rather than at
+    # kick-off because that is what makes the rule true -- the creator is the
+    # only client it is ever handed to, and no player can take it from them.
     conn.execute(
-        "INSERT INTO room (code, mode, status, ranked, created_at) "
-        "VALUES (?, ?, 'lobby', ?, ?)",
-        (code, mode, 0 if code == codes.WORKSHOP else 1, time.time()),
+        "INSERT INTO room (code, mode, status, ranked, host_client_id, created_at) "
+        "VALUES (?, ?, 'lobby', ?, ?, ?)",
+        (code, mode, 0 if code == codes.WORKSHOP else 1,
+         secrets.token_urlsafe(16), time.time()),
     )
     conn.commit()
     room = by_code(conn, code)
@@ -129,14 +135,13 @@ def can_kick_off(conn, room_id):
     return set(required_teams(room["mode"])) <= ready
 
 
-def start_match(conn, room_id, host_client_id):
-    """Hand physics to exactly one client and go live."""
-    if not host_client_id:
+def start_match(conn, room_id):
+    """Go live. Physics already belongs to whoever opened the room."""
+    if not _room(conn, room_id)["host_client_id"]:
         raise RoomError("a match needs a host")
     if not can_kick_off(conn, room_id):
         raise RoomError("not every dugout is ready")
-    conn.execute("UPDATE room SET status = 'live', host_client_id = ? WHERE id = ?",
-                 (host_client_id, room_id))
+    conn.execute("UPDATE room SET status = 'live' WHERE id = ?", (room_id,))
     conn.commit()
 
 

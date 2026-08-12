@@ -18,11 +18,11 @@ def sam(conn):
 
 
 def live_solo(conn, player_id):
-    """A solo room already kicked off, with `phone-7` holding physics."""
+    """A solo room already kicked off, physics held by whoever opened it."""
     room = rooms.create_room(conn, "solo")
     rooms.take_seat(conn, room["id"], "blue", player_id, "high press")
     rooms.set_ready(conn, room["id"], "blue", True)
-    rooms.start_match(conn, room["id"], "phone-7")
+    rooms.start_match(conn, room["id"])
     return room
 
 
@@ -44,7 +44,7 @@ def test_a_new_room_opens_in_the_lobby_with_a_typable_code(conn):
     room = rooms.create_room(conn, "solo")
     assert room["status"] == "lobby"
     assert room["mode"] == "solo"
-    assert room["host_client_id"] is None
+    assert room["host_client_id"], "the creator holds physics from the start"
     assert room["ranked"] == 1
     assert codes.is_valid(room["code"])
 
@@ -166,11 +166,18 @@ def test_marking_an_empty_dugout_ready_is_an_error(conn):
         rooms.set_ready(conn, room["id"], "red", True)
 
 
-def test_starting_a_match_records_the_host(conn, alex):
+def test_starting_a_match_leaves_physics_where_it_was(conn, alex):
     room = live_solo(conn, alex)
     started = rooms.by_code(conn, room["code"])
     assert started["status"] == "live"
-    assert started["host_client_id"] == "phone-7"
+    assert started["host_client_id"] == room["host_client_id"]
+
+
+def test_two_rooms_never_share_a_host_token(conn):
+    # A shared token would let either room's host drive the other one.
+    first = rooms.create_room(conn, "solo")
+    second = rooms.create_room(conn, "solo")
+    assert first["host_client_id"] != second["host_client_id"]
 
 
 def test_a_match_cannot_start_before_everyone_is_ready(conn, alex):
@@ -178,21 +185,22 @@ def test_a_match_cannot_start_before_everyone_is_ready(conn, alex):
     rooms.take_seat(conn, room["id"], "blue", alex, "counter")
     rooms.set_ready(conn, room["id"], "blue", True)
     with pytest.raises(rooms.RoomError, match="not every dugout is ready"):
-        rooms.start_match(conn, room["id"], "phone-7")
+        rooms.start_match(conn, room["id"])
 
 
 def test_a_match_cannot_start_without_somebody_holding_physics(conn, alex):
     room = rooms.create_room(conn, "solo")
     rooms.take_seat(conn, room["id"], "blue", alex, "counter")
     rooms.set_ready(conn, room["id"], "blue", True)
+    conn.execute("UPDATE room SET host_client_id = NULL WHERE id = ?", (room["id"],))
     with pytest.raises(rooms.RoomError, match="needs a host"):
-        rooms.start_match(conn, room["id"], "")
+        rooms.start_match(conn, room["id"])
 
 
 def test_a_live_match_cannot_kick_off_a_second_time(conn, alex):
     room = live_solo(conn, alex)
     with pytest.raises(rooms.RoomError, match="not every dugout is ready"):
-        rooms.start_match(conn, room["id"], "phone-9")
+        rooms.start_match(conn, room["id"])
 
 
 def test_nobody_can_sit_down_after_kick_off(conn, alex, sam):
@@ -234,7 +242,7 @@ def test_events_are_numbered_from_one_within_each_room(conn, alex, sam):
     second = rooms.create_room(conn, "solo")
     rooms.take_seat(conn, second["id"], "blue", sam, "counter")
     rooms.set_ready(conn, second["id"], "blue", True)
-    rooms.start_match(conn, second["id"], "phone-8")
+    rooms.start_match(conn, second["id"])
 
     assert rooms.append_event(conn, first["id"], "kickoff", {}) == 1
     assert rooms.append_event(conn, first["id"], "goal", {"team": "blue"}) == 2
@@ -290,7 +298,7 @@ def test_the_wall_lists_live_rooms_with_both_managers(conn, alex, sam):
     rooms.take_seat(conn, room["id"], "red", sam, "low block")
     rooms.set_ready(conn, room["id"], "blue", True)
     rooms.set_ready(conn, room["id"], "red", True)
-    rooms.start_match(conn, room["id"], "screen-1")
+    rooms.start_match(conn, room["id"])
 
     assert rooms.live(conn) == [
         {"code": room["code"], "mode": "versus", "blue": "Alex Rivera", "red": "Sam Okafor"}

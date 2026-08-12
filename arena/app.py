@@ -199,13 +199,14 @@ async def join(body: JoinRequest, request: Request, response: Response):
 
 @app.post("/api/rooms")
 async def open_room(body: RoomRequest, request: Request):
+    """Open a room. This response is the only place its host token appears."""
     connection = request.app.state.conn
     try:
         with _rules():
             room = rooms.create_room(connection, body.mode)
     except codes.CodesExhausted as problem:
         raise HTTPException(503, str(problem)) from problem
-    return _snapshot(connection, room["id"])
+    return {**_snapshot(connection, room["id"]), "host_token": room["host_client_id"]}
 
 
 @app.get("/api/rooms/{code}")
@@ -300,12 +301,16 @@ async def shout(code: str, body: ShoutRequest, request: Request,
 
 @app.post("/api/rooms/{code}/start")
 async def start(code: str, request: Request, player_id: int = Depends(current_player)):
-    """Kick off. Whoever calls this holds physics for the whole match."""
+    """Kick off. Any manager in the match may call it; physics does not move.
+
+    Whoever opened the room has held the host token since they opened it, so
+    starting a match tells the room to go, rather than handing the caller
+    control of a pitch they may not even be rendering.
+    """
     connection, room = _profile_room(request, code)
     _require_seated(connection, room["id"], player_id)
-    host_token = secrets.token_urlsafe(16)
     with _rules():
-        rooms.start_match(connection, room["id"], host_token)
+        rooms.start_match(connection, room["id"])
 
     # Stances land before the room is announced live. A client that sees "live"
     # and then asks for profiles must never be able to read them mid-application.
@@ -316,7 +321,7 @@ async def start(code: str, request: Request, player_id: int = Depends(current_pl
 
     snapshot = _announce(request.app, room)
     request.app.state.bus.publish(WALL, {"type": "wall", "rooms": rooms.live(connection)})
-    return {**snapshot, "host_token": host_token}
+    return snapshot
 
 
 @app.get("/api/rooms/{code}/teams/{team}/profiles")
@@ -540,10 +545,16 @@ def _handle_from_host(message, connection, match_bus, room, client_id):
     kind = message.get("type")
     if kind not in ("host.state", "host.event"):
         return
-    # Re-read the room: the host is set at kick-off, which is often after the
-    # big screen and the phones already have their sockets open.
-    host_client_id = rooms.by_code(connection, room["code"])["host_client_id"]
+    # Re-read the room: sockets are usually open well before the whistle, and
+    # both the host token and the status are checked against it as it is now.
+    current = rooms.by_code(connection, room["code"])
+    host_client_id = current["host_client_id"]
     if not client_id or not host_client_id or not hmac.compare_digest(client_id, host_client_id):
+        return
+    # Holding the token is no longer proof the match has started, since the
+    # creator has held it since they opened the room. Nothing reaches the log
+    # or the wall until a manager has actually kicked off.
+    if current["status"] != "live":
         return
 
     payload = message.get("payload")
