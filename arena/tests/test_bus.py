@@ -53,7 +53,8 @@ async def test_closing_a_subscription_stops_delivery():
     subscription.close()
     assert bus.subscriber_count(WALL) == 0
     bus.publish(WALL, {"type": "wall"})
-    assert subscription.queue.empty()
+    # The queue has the close sentinel, but nothing else.
+    assert subscription.queue.qsize() == 1
 
 
 async def test_a_topic_with_no_subscribers_left_is_forgotten():
@@ -66,3 +67,17 @@ async def test_a_topic_with_no_subscribers_left_is_forgotten():
 async def test_the_room_topic_is_scoped_by_code():
     assert room_topic("K7F2") == "room:K7F2"
     assert room_topic("K7F2") != WALL
+
+
+async def test_close_wakes_a_blocked_reader():
+    bus = Bus()
+    subscription = bus.subscribe(WALL)
+
+    async def reader():
+        with pytest.raises(StopAsyncIteration):
+            await anext(subscription)
+
+    reader_task = asyncio.create_task(reader())
+    await asyncio.sleep(0.01)
+    subscription.close()
+    await asyncio.wait_for(reader_task, timeout=0.1)

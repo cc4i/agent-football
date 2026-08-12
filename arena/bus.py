@@ -9,6 +9,8 @@ import asyncio
 
 WALL = "wall"
 
+_CLOSED = object()
+
 
 def room_topic(code):
     return f"room:{code}"
@@ -33,12 +35,20 @@ class Subscription:
 
     def close(self):
         self._bus.unsubscribe(self)
+        try:
+            self.queue.put_nowait(_CLOSED)
+        except asyncio.QueueFull:
+            self.queue.get_nowait()
+            self.queue.put_nowait(_CLOSED)
 
     def __aiter__(self):
         return self
 
     async def __anext__(self):
-        return await self.queue.get()
+        message = await self.queue.get()
+        if message is _CLOSED:
+            raise StopAsyncIteration
+        return message
 
     def __enter__(self):
         return self
