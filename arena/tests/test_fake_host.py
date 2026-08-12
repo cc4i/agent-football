@@ -110,10 +110,12 @@ def test_the_fixture_replays_into_a_live_room(client, live_room):
 
     connection = client.app.state.conn
     log = rooms.events(connection, rooms.by_code(connection, code)["id"])
-    assert [entry["kind"] for entry in log] == [
+    # Kick-off's own stance patches sit at the head of every room's log.
+    played = [entry for entry in log if entry["kind"] != "profile.patch"]
+    assert [entry["kind"] for entry in played] == [
         "kickoff", "goal", "goal", "goal", "goal", "full_time"]
-    assert log[1]["match_ms"] == 27400
-    assert last == {"type": "event", "seq": 6, "kind": "full_time",
+    assert played[1]["match_ms"] == 27400
+    assert last == {"type": "event", "seq": log[-1]["seq"], "kind": "full_time",
                     "match_ms": 180000, "payload": {"score": [3, 1]}}
 
 

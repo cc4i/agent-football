@@ -1,0 +1,12 @@
+{
+  "label": "low block",
+  "blurb": "Two banks, no space, nothing given away.",
+  "changes": {
+    "defensePositioning": 0.95,
+    "pressingIntensity": 0.25,
+    "attackPositioning": 0.25,
+    "formationDiscipline": 0.95,
+    "interceptionRadius": 0.85,
+    "aggression": 0.5
+  }
+}

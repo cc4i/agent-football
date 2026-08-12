@@ -1,0 +1,12 @@
+{
+  "label": "counter",
+  "blurb": "Let them come, then go long and go fast.",
+  "changes": {
+    "counterAttackUrgency": 0.98,
+    "pressingIntensity": 0.3,
+    "passRange": 0.9,
+    "supportRunFrequency": 0.9,
+    "defensePositioning": 0.7,
+    "speed": 0.9
+  }
+}

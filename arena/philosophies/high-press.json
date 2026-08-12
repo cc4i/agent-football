@@ -1,0 +1,12 @@
+{
+  "label": "high press",
+  "blurb": "Win it back in their half. Costly if it breaks.",
+  "changes": {
+    "pressingIntensity": 0.95,
+    "aggression": 0.9,
+    "attackPositioning": 0.85,
+    "defensePositioning": 0.35,
+    "counterAttackUrgency": 0.9,
+    "supportRunFrequency": 0.9
+  }
+}

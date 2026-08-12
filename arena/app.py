@@ -24,6 +24,7 @@ import codes
 import db
 import identity
 import mirror
+import philosophies
 import profiles
 import rooms
 from bus import WALL, Bus, room_topic
@@ -219,6 +220,12 @@ async def set_ready(code: str, team: str, body: ReadyRequest, request: Request,
     return _announce(request.app, room)
 
 
+@app.get("/api/philosophies")
+async def read_philosophies():
+    """The four opening stances, for the join form to render."""
+    return {"philosophies": philosophies.catalogue()}
+
+
 @app.post("/api/rooms/{code}/start")
 async def start(code: str, request: Request, player_id: int = Depends(current_player)):
     """Kick off. Whoever calls this holds physics for the whole match."""
@@ -227,6 +234,14 @@ async def start(code: str, request: Request, player_id: int = Depends(current_pl
     host_token = secrets.token_urlsafe(16)
     with _rules():
         rooms.start_match(connection, room["id"], host_token)
+
+    # Stances land before the room is announced live. A client that sees "live"
+    # and then asks for profiles must never be able to read them mid-application.
+    for team, seat in rooms.snapshot(connection, room["id"])["seats"].items():
+        for result in philosophies.apply(connection, room["id"], team, seat["philosophy"]):
+            _record_patch(request.app, connection, room, team, result,
+                          reason=seat["philosophy"], actor="kick-off")
+
     snapshot = _announce(request.app, room)
     request.app.state.bus.publish(WALL, {"type": "wall", "rooms": rooms.live(connection)})
     return {**snapshot, "host_token": host_token}
@@ -271,18 +286,31 @@ async def patch_profile(code: str, team: str, role: str, body: ProfilePatchReque
 
     if room["code"] == codes.WORKSHOP:
         # Temporary, and only here: the pitch still polls one file per role,
-        # which cannot serve two rooms at once. Deleted in step 3.
+        # which cannot serve two rooms at once. Deleted later in step 3, once
+        # the pitch reads its profiles from this service.
         mirror.write(role, result["attributes"])
 
-    delta ={"team": team, "role": role, "changed": result["changed"],
-             "reason": body.reason, "actor": body.actor}
+    seq = _record_patch(request.app, connection, room, team, result,
+                        reason=body.reason, actor=body.actor)
+    return {**result, "seq": seq}
+
+
+def _record_patch(fastapi_app, connection, room, team, result, reason, actor):
+    """Log one profile move and tell the room about it. Returns the sequence.
+
+    Both the PATCH route and kick-off go through here, so a stance applied
+    automatically is indistinguishable in the log from one typed by hand --
+    which is what lets scoring read the log without knowing who moved what.
+    """
+    delta = {"team": team, "role": result["role"], "changed": result["changed"],
+             "reason": reason, "actor": actor}
     seq = rooms.append_event(connection, room["id"], "profile.patch", delta)
-    request.app.state.bus.publish(
+    fastapi_app.state.bus.publish(
         room_topic(room["code"]),
         {"type": "event", "seq": seq, "kind": "profile.patch", "match_ms": None,
          "payload": delta},
     )
-    return {**result, "seq": seq}
+    return seq
 
 
 def _room_or_404(connection, code):

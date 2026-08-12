@@ -8,6 +8,7 @@ dependencies = [
     "uvicorn==0.48.0",
     "websockets==17.0.1",
     "pydantic==2.13.4",
+    "segno==1.6.6",
 ]
 
 # app.py imports `rooms`, `bus` and `db` as top-level modules from this
@@ -20,8 +21,12 @@ dev = [
     "pytest==8.4.2",
     "pytest-asyncio==1.2.0",
     "httpx==0.28.1",
+    "pytest-timeout==2.4.0",
 ]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+# A socket test whose frame never arrives blocks on receive_json forever. Without
+# this the suite hangs instead of failing, which is the worse of the two.
+timeout = 30

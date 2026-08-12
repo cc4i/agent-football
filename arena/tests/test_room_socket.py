@@ -100,14 +100,23 @@ def test_a_socket_with_no_client_id_can_only_watch(client, live_room):
     assert frame == {"type": "state", "clock": 12}
 
 
+def _log(client, code):
+    connection = client.app.state.conn
+    return rooms.events(connection, rooms.by_code(connection, code)["id"])
+
+
 def test_a_host_event_comes_back_numbered(client, live_room):
     code, host_token = live_room()
+    # Kick-off logs the dugout's opening stance, so the first host event of the
+    # match is not seq 1. What matters is that it continues the room's sequence.
+    already = len(_log(client, code))
     with client.websocket_connect(f"/ws/rooms/{code}?client_id={host_token}") as host:
         host.receive_json()
         host.send_json({"type": "host.event", "kind": "goal", "match_ms": 27400,
                         "payload": {"team": "blue", "scorer": "forward"}})
         event = host.receive_json()
-    assert event == {"type": "event", "seq": 1, "kind": "goal", "match_ms": 27400,
+    assert event == {"type": "event", "seq": already + 1, "kind": "goal",
+                     "match_ms": 27400,
                      "payload": {"team": "blue", "scorer": "forward"}}
 
 
@@ -120,22 +129,22 @@ def test_host_events_are_written_to_the_log_in_order(client, live_room):
                             "match_ms": match_ms, "payload": {}})
             host.receive_json()
 
-    connection = client.app.state.conn
-    log = rooms.events(connection, rooms.by_code(connection, code)["id"])
-    assert [(entry["seq"], entry["kind"]) for entry in log] == [
-        (1, "kickoff"), (2, "goal"), (3, "full_time")]
+    played = [entry for entry in _log(client, code) if entry["kind"] != "profile.patch"]
+    assert [entry["kind"] for entry in played] == ["kickoff", "goal", "full_time"]
+    seqs = [entry["seq"] for entry in played]
+    assert seqs == list(range(seqs[0], seqs[0] + 3)), "the log has a gap"
 
 
 def test_a_state_frame_is_not_written_to_the_log(client, live_room):
     # Positions at 10 Hz would swamp the log, and scoring never reads them.
     code, host_token = live_room()
+    before = _log(client, code)
     with client.websocket_connect(f"/ws/rooms/{code}?client_id={host_token}") as host:
         host.receive_json()
         host.send_json({"type": "host.state", "payload": {"clock": 12}})
         host.receive_json()
 
-    connection = client.app.state.conn
-    assert rooms.events(connection, rooms.by_code(connection, code)["id"]) == []
+    assert _log(client, code) == before
 
 
 def test_a_message_the_protocol_does_not_know_is_ignored(client, live_room):
