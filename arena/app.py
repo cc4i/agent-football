@@ -8,6 +8,7 @@ one person can play at once.
 
 import asyncio
 import json
+import logging
 import os
 from contextlib import asynccontextmanager, contextmanager
 
@@ -20,6 +21,8 @@ import db
 import identity
 import rooms
 from bus import WALL, Bus, room_topic
+
+logger = logging.getLogger(__name__)
 
 # Dev defaults. Set both in the environment before a real event: the salt fixes
 # every email hash for good, and the secret signs every phone's session.
@@ -130,6 +133,9 @@ async def open_room(body: RoomRequest, request: Request):
 @app.get("/api/rooms/{code}")
 async def read_room(code: str, request: Request):
     connection = request.app.state.conn
+    code = code.upper()
+    if not codes.is_valid(code):
+        raise HTTPException(404, f"there is no room {code}")
     return rooms.snapshot(connection, _room_or_404(connection, code)["id"])
 
 
@@ -137,6 +143,9 @@ async def read_room(code: str, request: Request):
 async def sit_down(code: str, team: str, body: SeatRequest, request: Request,
                    player_id: int = Depends(current_player)):
     connection = request.app.state.conn
+    code = code.upper()
+    if not codes.is_valid(code):
+        raise HTTPException(404, f"there is no room {code}")
     room = _room_or_404(connection, code)
     with _rules():
         rooms.take_seat(connection, room["id"], team, player_id, body.philosophy)
@@ -147,6 +156,9 @@ async def sit_down(code: str, team: str, body: SeatRequest, request: Request,
 async def set_ready(code: str, team: str, body: ReadyRequest, request: Request,
                     player_id: int = Depends(current_player)):
     connection = request.app.state.conn
+    code = code.upper()
+    if not codes.is_valid(code):
+        raise HTTPException(404, f"there is no room {code}")
     room = _room_or_404(connection, code)
     _require_own_seat(connection, room["id"], team, player_id)
     with _rules():
@@ -159,6 +171,9 @@ async def start(code: str, body: StartRequest, request: Request,
                 player_id: int = Depends(current_player)):
     """Kick off. Whoever calls this holds physics for the whole match."""
     connection = request.app.state.conn
+    code = code.upper()
+    if not codes.is_valid(code):
+        raise HTTPException(404, f"there is no room {code}")
     room = _room_or_404(connection, code)
     _require_seated(connection, room["id"], player_id)
     with _rules():
@@ -213,6 +228,10 @@ async def room_socket(socket: WebSocket, code: str, client_id: str = ""):
     """One room's feed. Anyone may listen; only the host may drive."""
     connection = socket.app.state.conn
     match_bus = socket.app.state.bus
+    code = code.upper()
+    if not codes.is_valid(code):
+        await socket.close(code=4404, reason=f"there is no room {code}")
+        return
     room = rooms.by_code(connection, code)
     if room is None:
         await socket.close(code=4404, reason=f"there is no room {code}")
@@ -234,11 +253,10 @@ async def room_socket(socket: WebSocket, code: str, client_id: str = ""):
         pass
     finally:
         pump.cancel()
-        # Retrieve the pump's exception if it finished before being cancelled.
-        # .exception() raises on a cancelled task, so guard it. An unretrieved
-        # exception surfaces as asyncio noise at collection time.
         if pump.done() and not pump.cancelled():
-            pump.exception()
+            exc = pump.exception()
+            if exc:
+                logger.exception("room socket pump died", exc_info=exc)
         subscription.close()
 
 
@@ -302,12 +320,11 @@ async def wall_socket(socket: WebSocket):
     finally:
         for task in pending:
             task.cancel()
-        # Retrieve exceptions from completed tasks. .exception() raises on a
-        # cancelled task, so guard it. An unretrieved exception surfaces as asyncio
-        # noise at collection time. Cleanup must survive its own cancellation.
         for task in done:
             if not task.cancelled():
-                task.exception()
+                exc = task.exception()
+                if exc:
+                    logger.exception("wall socket task died", exc_info=exc)
         subscription.close()
 
 

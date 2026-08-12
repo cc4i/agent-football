@@ -311,3 +311,13 @@ def test_host_client_id_over_limit_is_refused(client, phones):
     huge_id = "x" * 10000
     response = client.post(f"/api/rooms/{code}/start", json={"host_client_id": huge_id})
     assert response.status_code == 422
+
+
+def test_room_codes_are_matched_case_insensitively(client, phones):
+    phones.join("Alex Rivera", "alex@example.com")
+    code = client.post("/api/rooms", json={"mode": "solo"}).json()["code"]
+    lowercase = code.lower()
+    assert lowercase != code
+    response = client.get(f"/api/rooms/{lowercase}")
+    assert response.status_code == 200
+    assert response.json()["code"] == code

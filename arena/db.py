@@ -63,7 +63,7 @@ def connect(path=DB_PATH):
     """Open the arena database, creating the file if it is not there yet."""
     connection = sqlite3.connect(path, check_same_thread=False)
     connection.row_factory = sqlite3.Row
-    # WAL lets the wall socket read while a match is writing events.
+    # WAL mode for when a second connection is added; single-threaded for now.
     connection.execute("PRAGMA journal_mode=WAL")
     connection.execute("PRAGMA foreign_keys=ON")
     return connection
