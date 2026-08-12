@@ -263,3 +263,34 @@ def _handle_from_host(message, connection, match_bus, room, client_id):
     seq = rooms.append_event(connection, room["id"], event_kind, payload, match_ms)
     match_bus.publish(topic, {"type": "event", "seq": seq, "kind": event_kind,
                               "match_ms": match_ms, "payload": payload})
+
+
+@app.websocket("/ws/wall")
+async def wall_socket(socket: WebSocket):
+    """Every live room at a glance. One connection for the filmstrip, not six."""
+    match_bus = socket.app.state.bus
+    await socket.accept()
+    await socket.send_json({"type": "wall", "rooms": rooms.live(socket.app.state.conn)})
+
+    subscription = match_bus.subscribe(WALL, maxsize=128)
+    tasks = [asyncio.create_task(_pump(socket, subscription)),
+             asyncio.create_task(_until_closed(socket))]
+    try:
+        await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+    finally:
+        for task in tasks:
+            task.cancel()
+        subscription.close()
+
+
+async def _until_closed(socket):
+    """The wall never sends anything up. This is only here to notice a hang-up.
+
+    Without something reading, a closed browser tab is not discovered until the
+    next send fails, which on a quiet venue could be a long time.
+    """
+    try:
+        while True:
+            await socket.receive_text()
+    except WebSocketDisconnect:
+        return
