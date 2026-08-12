@@ -305,6 +305,21 @@ def test_a_lone_surrogate_in_host_event_does_not_kill_the_socket(client, live_ro
     assert frame == {"type": "state", "clock": 7}
 
 
+def test_a_lone_surrogate_in_an_event_kind_does_not_kill_the_socket(client, live_room):
+    # `kind` reaches SQLite as a bind parameter and the viewers as a frame, so it
+    # needs the same encodability check the payload gets.
+    code, host_token = live_room()
+    with client.websocket_connect(f"/ws/rooms/{code}") as viewer:
+        viewer.receive_json()
+        with client.websocket_connect(f"/ws/rooms/{code}?client_id={host_token}") as host:
+            host.receive_json()
+            host.send_json({"type": "host.event", "kind": "\ud800",
+                            "match_ms": 100, "payload": {}})
+            host.send_json({"type": "host.state", "payload": {"clock": 9}})
+            frame = viewer.receive_json()
+    assert frame == {"type": "state", "clock": 9}
+
+
 def test_a_lone_surrogate_in_host_state_does_not_kill_the_wall(client, live_room):
     # The wall is shared across tenants: a crash here takes down every live match.
     code, host_token = live_room()

@@ -28,6 +28,11 @@ from bus import WALL, Bus, room_topic
 
 logger = logging.getLogger(__name__)
 
+# A state frame carries a score, a clock and twelve positions; an event frame
+# carries less. Six figures is generous for both and still small enough that a
+# host cannot flood the wall's queues with one message.
+MAX_PAYLOAD_BYTES = 102400
+
 
 class _RedactClientId(logging.Filter):
     """Redact client_id from uvicorn access logs.
@@ -290,6 +295,19 @@ async def room_socket(socket: WebSocket, code: str, client_id: str = ""):
         subscription.close()
 
 
+def _wire_bytes(value):
+    """Serialise for the wire, or None if it cannot go out.
+
+    A lone UTF-16 surrogate survives json.dumps but not the UTF-8 encode that
+    send_json and the SQLite bind both perform. Left unchecked, one such frame
+    kills the pump -- and on the shared wall topic, every tenant's tile with it.
+    """
+    try:
+        return json.dumps(value, ensure_ascii=False).encode()
+    except (UnicodeEncodeError, ValueError, TypeError):
+        return None
+
+
 def _handle_from_host(message, connection, match_bus, room, client_id):
     """Apply one up-message, if the sender is the client holding physics."""
     if not isinstance(message, dict):
@@ -309,14 +327,8 @@ def _handle_from_host(message, connection, match_bus, room, client_id):
     if payload is None:
         payload = {}
 
-    # Serialize the payload once to check both encodability and size.
-    # json.dumps accepts lone UTF-16 surrogates, but .encode() raises when
-    # ensure_ascii=False (which is what send_json uses).
-    try:
-        payload_encoded = json.dumps(payload, ensure_ascii=False).encode()
-    except (UnicodeEncodeError, ValueError, TypeError):
-        return
-    if len(payload_encoded) > 102400:
+    payload_encoded = _wire_bytes(payload)
+    if payload_encoded is None or len(payload_encoded) > MAX_PAYLOAD_BYTES:
         return
 
     topic = room_topic(room["code"])
@@ -330,6 +342,10 @@ def _handle_from_host(message, connection, match_bus, room, client_id):
     match_ms = message.get("match_ms")
     # Reject non-string kinds and non-integer match_ms to avoid SQL binding errors.
     if not isinstance(event_kind, str) or len(event_kind) > 100:
+        return
+    # `kind` is bound into SQL and echoed to every viewer, so it needs the same
+    # encodability check the payload gets.
+    if _wire_bytes(event_kind) is None:
         return
     if match_ms is not None:
         if not isinstance(match_ms, int) or isinstance(match_ms, bool):
