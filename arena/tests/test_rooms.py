@@ -55,6 +55,14 @@ def test_the_workshop_room_is_never_ranked(conn):
     assert room["ranked"] == 0
 
 
+def test_opening_a_room_gives_it_profiles(conn):
+    room = rooms.create_room(conn, "versus")
+    seeded = conn.execute(
+        "SELECT COUNT(*) AS n FROM profile WHERE room_id = ?", (room["id"],)
+    ).fetchone()["n"]
+    assert seeded == 8  # four roles, two dugouts
+
+
 def test_the_workshop_room_cannot_be_opened_twice(conn):
     rooms.create_room(conn, "solo", code=codes.WORKSHOP)
     with pytest.raises(rooms.RoomError, match="already exists"):

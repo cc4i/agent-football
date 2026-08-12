@@ -10,6 +10,7 @@ import time
 
 import codes
 import identity
+import profiles
 
 MODES = ("solo", "versus")
 STATUSES = ("lobby", "live", "finished", "abandoned")
@@ -75,7 +76,11 @@ def create_room(conn, mode, code=None):
         (code, mode, 0 if code == codes.WORKSHOP else 1, time.time()),
     )
     conn.commit()
-    return by_code(conn, code)
+    room = by_code(conn, code)
+    # Both dugouts, even in a solo room: seeding is cheap, and a room that
+    # opened solo can still gain a red manager later.
+    profiles.seed(conn, room["id"], TEAMS)
+    return room
 
 
 def take_seat(conn, room_id, team, player_id, philosophy):

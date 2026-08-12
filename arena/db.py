@@ -55,6 +55,18 @@ CREATE TABLE IF NOT EXISTS event (
     UNIQUE (room_id, seq)
 );
 
+-- One row per room, team and role, seeded from the shipped baselines when the
+-- room opens. Seeding up front means a patch is always an update, so nothing
+-- has to decide at write time whether a dugout exists yet.
+CREATE TABLE IF NOT EXISTS profile (
+    room_id         INTEGER NOT NULL REFERENCES room(id),
+    team            TEXT    NOT NULL,
+    role            TEXT    NOT NULL,
+    attributes_json TEXT    NOT NULL,
+    updated_at      REAL    NOT NULL,
+    PRIMARY KEY (room_id, team, role)
+);
+
 CREATE INDEX IF NOT EXISTS room_by_status ON room (status);
 """
 
