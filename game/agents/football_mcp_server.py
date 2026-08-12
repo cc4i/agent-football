@@ -23,8 +23,8 @@ Exposed tools:
   - report_injury(role, severity)     -> log an injury for a role
   - request_substitution(role, reason)-> log a substitution request for a role
 
-Both tools append an entry to:
-  frontend/public/player_state/substitutions.json
+Both tools append an entry to one file per room and dugout:
+  frontend/public/player_state/substitutions/{ROOM}__{team}.json
 
 The frontend already serves and polls that directory, so the browser picks the
 entry up on its next poll and shows a top-right notification toast. There is no
@@ -40,39 +40,81 @@ from mcp.server.fastmcp import FastMCP
 # Resolve paths relative to this file (matches the convention in agent.py).
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PLAYER_STATE_DIR = os.path.join(BASE_DIR, "../frontend/public/player_state")
-SUBSTITUTIONS_FILE = os.path.join(PLAYER_STATE_DIR, "substitutions.json")
 
 VALID_ROLES = {"defender", "midfielder", "forward", "goalkeeper"}
+VALID_TEAMS = ("blue", "red")
+
+# Duplicated from specialist_agents.arena_client because this module is also
+# launched as a standalone script, which puts a relative import out of reach.
+DEFAULT_ROOM = "WRKS"
+DEFAULT_TEAM = "blue"
 
 mcp = FastMCP("football-condition")
 
 
-def _write_entry(role: str, entry: dict) -> None:
-    """Atomically merge a single role entry into substitutions.json."""
-    os.makedirs(PLAYER_STATE_DIR, exist_ok=True)
+def substitutions_path(room: str, team: str) -> str:
+    """Where this dugout's injuries live.
 
-    data = {}
-    if os.path.exists(SUBSTITUTIONS_FILE):
-        try:
-            with open(SUBSTITUTIONS_FILE, "r") as f:
-                data = json.load(f)
-        except (json.JSONDecodeError, OSError):
-            data = {}
+    One file for the whole venue meant a knock in one match subbed a player off
+    in another. Room and team come from a language model, so an unrecognised
+    one falls back to the workshop rather than becoming part of a path.
+    """
+    if not room.isalnum() or len(room) > 8:
+        room = DEFAULT_ROOM
+    if team not in VALID_TEAMS:
+        team = DEFAULT_TEAM
+    return os.path.join(PLAYER_STATE_DIR, "substitutions", f"{room.upper()}__{team}.json")
 
-    data[role] = entry
 
-    with open(SUBSTITUTIONS_FILE, "w") as f:
-        json.dump(data, f, indent=2)
+def pitch_substitutions_path() -> str:
+    """The single file main.js still polls.
+
+    Read from PLAYER_STATE_DIR on every call rather than frozen at import, so
+    redirecting that directory redirects this too. Deleted in step 3, when the
+    pitch gains a room socket.
+    """
+    return os.path.join(PLAYER_STATE_DIR, "substitutions.json")
+
+
+def _targets(room: str, team: str) -> list:
+    """This dugout's file, plus the one the pitch still polls."""
+    paths = [substitutions_path(room, team)]
+    if room == DEFAULT_ROOM and team == DEFAULT_TEAM:
+        paths.append(pitch_substitutions_path())
+    return paths
+
+
+def _write_entry(role: str, entry: dict,
+                 room: str = DEFAULT_ROOM, team: str = DEFAULT_TEAM) -> None:
+    """Merge one entry into this dugout's file."""
+    for path in _targets(room, team):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+
+        data = {}
+        if os.path.exists(path):
+            try:
+                with open(path, "r") as f:
+                    data = json.load(f)
+            except (json.JSONDecodeError, OSError):
+                data = {}
+
+        data[role] = entry
+
+        with open(path, "w") as f:
+            json.dump(data, f, indent=2)
 
 
 @mcp.tool()
-def report_injury(role: str, severity: str = "knock") -> str:
+def report_injury(role: str, severity: str = "knock",
+                  room: str = DEFAULT_ROOM, team: str = DEFAULT_TEAM) -> str:
     """Report an injury for a player role so the coaching staff is notified.
 
     Args:
         role: One of 'defender', 'midfielder', 'forward', 'goalkeeper'.
         severity: Short description of how bad it is (e.g. 'knock', 'strain',
             'serious'). Defaults to 'knock'.
+        room: The match this player is in. Defaults to the workshop.
+        team: The dugout this player sits in, 'blue' or 'red'.
     """
     role = (role or "").strip().lower()
     if role not in VALID_ROLES:
@@ -84,19 +126,22 @@ def report_injury(role: str, severity: str = "knock") -> str:
         "reason": f"{severity} injury",
         "ts": time.time(),
     }
-    _write_entry(role, entry)
+    _write_entry(role, entry, room, team)
     print(f"--> [MCP] {role.upper()} reported an injury ({severity}).")
     return f"Logged: {role} reported a {severity} injury. Medical staff notified."
 
 
 @mcp.tool()
-def request_substitution(role: str, reason: str = "tired") -> str:
+def request_substitution(role: str, reason: str = "tired",
+                         room: str = DEFAULT_ROOM, team: str = DEFAULT_TEAM) -> str:
     """Request a substitution for a player role (e.g. when too tired).
 
     Args:
         role: One of 'defender', 'midfielder', 'forward', 'goalkeeper'.
         reason: Short reason for the request (e.g. 'tired', 'tactical').
             Defaults to 'tired'.
+        room: The match this player is in. Defaults to the workshop.
+        team: The dugout this player sits in, 'blue' or 'red'.
     """
     role = (role or "").strip().lower()
     if role not in VALID_ROLES:
@@ -107,7 +152,7 @@ def request_substitution(role: str, reason: str = "tired") -> str:
         "reason": reason,
         "ts": time.time(),
     }
-    _write_entry(role, entry)
+    _write_entry(role, entry, room, team)
     print(f"--> [MCP] {role.upper()} requested a substitution ({reason}).")
     return f"Logged: {role} requested a substitution ({reason}). Bench notified."
 
