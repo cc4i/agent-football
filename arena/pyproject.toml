@@ -1,0 +1,27 @@
+[project]
+name = "futsal-worldcup-arena"
+version = "0.1.0"
+description = "Rooms, seats, players and the live match bus for multi-tenant futsal."
+requires-python = ">=3.14"
+dependencies = [
+    "fastapi==0.136.3",
+    "uvicorn==0.48.0",
+    "websockets==17.0.1",
+    "pydantic==2.13.4",
+]
+
+# app.py imports `rooms`, `bus` and `db` as top-level modules from this
+# directory, so there is nothing to build or install.
+[tool.uv]
+package = false
+
+[dependency-groups]
+dev = [
+    "pytest==8.4.2",
+    "pytest-asyncio==1.2.0",
+    "httpx==0.28.1",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
