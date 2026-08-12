@@ -10,7 +10,7 @@ dependencies = [
     "pillow",
     "python-dotenv==1.2.2",
     "pydantic",
-    "google-antigravity==0.1.9",
+    "google-antigravity==0.1.10",
     "playwright",
 ]
 

@@ -143,3 +143,6 @@ Thumbs.db
 node_modules/
 # Local agent harness state, including git worktrees.
 .claude/
+
+# Auto-generated runtime scripts
+take_the_field.py

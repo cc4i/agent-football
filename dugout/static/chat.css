@@ -31,9 +31,9 @@ body::before{
   display:flex;align-items:center;gap:20px;padding:0 22px;height:60px;flex:0 0 60px;
   background:var(--turf-800);border-bottom:1px solid var(--rule);
 }
-.mark{display:flex;align-items:baseline;gap:10px;flex:0 0 auto}
+.mark{display:flex;align-items:center;gap:10px;flex:0 0 auto}
+.mark .gcp-logo{width:22px;height:22px;flex-shrink:0;display:block}
 .mark b{font-family:var(--sheet);font-weight:700;font-size:22px;letter-spacing:.16em;text-transform:uppercase}
-.mark span{font-family:var(--sheet);font-weight:500;font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:var(--chalk-3)}
 .vr{width:1px;height:28px;background:var(--rule);flex:0 0 auto}
 
 /* the agent is a first-class citizen of the header */

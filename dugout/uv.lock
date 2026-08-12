@@ -1,9 +1,6 @@
 version = 1
 revision = 3
 requires-python = ">=3.14"
-resolution-markers = [
-    "python_version < '0'",
-]
 
 [[package]]
 name = "absl-py"
@@ -276,7 +273,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "fastapi", specifier = "==0.136.3" },
-    { name = "google-antigravity", specifier = "==0.1.9" },
+    { name = "google-antigravity", specifier = "==0.1.10" },
     { name = "google-genai", specifier = "==1.75.0" },
     { name = "pillow" },
     { name = "playwright" },
@@ -293,7 +290,7 @@ dev = [
 
 [[package]]
 name = "google-antigravity"
-version = "0.1.9"
+version = "0.1.10"
 source = { registry = "https://us-python.pkg.dev/artifact-foundry-prod/ah-3p-staging-python/simple/" }
 dependencies = [
     { name = "absl-py" },
@@ -305,11 +302,11 @@ dependencies = [
     { name = "websockets" },
 ]
 wheels = [
-    { url = "https://us-python.pkg.dev/artifact-foundry-prod/ah-3p-staging-python/google-antigravity/google_antigravity-0.1.9-py3-none-macosx_11_0_arm64.whl", hash = "sha256:1845624015760803a5c1334667aa072db19bcd0dfd409801ce54b83fc1f4b9fa" },
-    { url = "https://us-python.pkg.dev/artifact-foundry-prod/ah-3p-staging-python/google-antigravity/google_antigravity-0.1.9-py3-none-manylinux_2_17_aarch64.whl", hash = "sha256:d0f63db305d0fb42953af0c9ba74838a74a1ca9473e433a060f0d34439c160fa" },
-    { url = "https://us-python.pkg.dev/artifact-foundry-prod/ah-3p-staging-python/google-antigravity/google_antigravity-0.1.9-py3-none-manylinux_2_17_x86_64.whl", hash = "sha256:a38fcd0b32fc7bd4de5cfa03dd9a439cd3cc2fbd92c8403c4488b09fc410d36a" },
-    { url = "https://us-python.pkg.dev/artifact-foundry-prod/ah-3p-staging-python/google-antigravity/google_antigravity-0.1.9-py3-none-win_amd64.whl", hash = "sha256:7bf25f3d347df17a8117fb1b9a6b99b1c10c185895eb803d9fc4ae1bb9b04e48" },
-    { url = "https://us-python.pkg.dev/artifact-foundry-prod/ah-3p-staging-python/google-antigravity/google_antigravity-0.1.9-py3-none-win_arm64.whl", hash = "sha256:b80cd46718e196dbf42547c7c1ce73b41bb9c2ec12a2d67455736fafeedc8db2" },
+    { url = "https://us-python.pkg.dev/artifact-foundry-prod/ah-3p-staging-python/google-antigravity/google_antigravity-0.1.10-py3-none-macosx_11_0_arm64.whl", hash = "sha256:e1e009a8a0b93d8a94aa49738a5074d2599700afc686ca421f5b913c33e5bae7" },
+    { url = "https://us-python.pkg.dev/artifact-foundry-prod/ah-3p-staging-python/google-antigravity/google_antigravity-0.1.10-py3-none-manylinux_2_17_aarch64.whl", hash = "sha256:50dc44d2b22789e83c71020ffc26a95165dd6bb1162aabd68e35c22afc88bc8e" },
+    { url = "https://us-python.pkg.dev/artifact-foundry-prod/ah-3p-staging-python/google-antigravity/google_antigravity-0.1.10-py3-none-manylinux_2_17_x86_64.whl", hash = "sha256:de1c66ce0a0ac6da4514fedd2aeb067aa68c0b47f2b380f4773643ccd6850e2a" },
+    { url = "https://us-python.pkg.dev/artifact-foundry-prod/ah-3p-staging-python/google-antigravity/google_antigravity-0.1.10-py3-none-win_amd64.whl", hash = "sha256:0940242a1067d82d19d21e89cb3215f01079cc09687b0ff92654be09d744a093" },
+    { url = "https://us-python.pkg.dev/artifact-foundry-prod/ah-3p-staging-python/google-antigravity/google_antigravity-0.1.10-py3-none-win_arm64.whl", hash = "sha256:be2b34d19f33ea9da4df9bb947477837614d8e35643e9383134ddfd454c3a543" },
 ]
 
 [[package]]

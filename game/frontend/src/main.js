@@ -29,28 +29,42 @@ const MAX_DEBUG_ENTRIES = 200;
 // Inject the premium automated dashboard HTML structure
 document.querySelector('#app').innerHTML = `
   <div class="game-wrapper">
-    <!-- Title Header -->
+    <!-- Title Header with Top-Right Simulation Speed -->
     <header class="game-header">
-      <h1 class="neon-text">Futsal WorldCup</h1>
-      <p class="sub-title">Gemini-powered Agentic Futsal</p>
-    </header>
-
-    <!-- Simulation Speed Control -->
-    <div class="sim-speed-bar">
-      <div class="slider-header">
-        <span class="slider-label" style="color: var(--gold-accent); font-weight: 800;">Simulation Speed</span>
-        <span class="slider-val" id="val-sim-speed" style="color: #ffffff; font-weight: 800;">1.00x</span>
+      <div class="header-titles">
+        <h1 class="neon-text">Futsal WorldCup</h1>
+        <p class="sub-title">
+          <svg class="gemini-icon" viewBox="0 0 24 24" width="16" height="16" aria-label="Gemini">
+            <defs>
+              <linearGradient id="gemini-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="#4E95FF" />
+                <stop offset="50%" stop-color="#9A7BFF" />
+                <stop offset="100%" stop-color="#FF758F" />
+              </linearGradient>
+            </defs>
+            <path fill="url(#gemini-grad)" d="M11.04 19.32Q12 21.51 12 24q0-2.49.93-4.68.96-2.19 2.58-3.81t3.81-2.55Q21.51 12 24 12q-2.49 0-4.68-.93a12.3 12.3 0 0 1-3.81-2.58 12.3 12.3 0 0 1-2.58-3.81Q12 2.49 12 0q0 2.49-.96 4.68-.93 2.19-2.55 3.81a12.3 12.3 0 0 1-3.81 2.58Q2.49 12 0 12q2.49 0 4.68.96 2.19.93 3.81 2.55t2.55 3.81"/>
+          </svg>
+          <span>Powered by Gemini</span>
+        </p>
       </div>
-      <input 
-        type="range" 
-        class="slider-input" 
-        id="sim-speed-input" 
-        min="0.5" 
-        max="3" 
-        step="0.25" 
-        value="1" 
-      />
-    </div>
+
+      <!-- Simulation Speed Control (Top Right) -->
+      <div class="sim-speed-bar">
+        <div class="slider-header">
+          <span class="slider-label">Speed</span>
+          <span class="slider-val" id="val-sim-speed">1.00x</span>
+        </div>
+        <input 
+          type="range" 
+          class="slider-input" 
+          id="sim-speed-input" 
+          min="0.5" 
+          max="3" 
+          step="0.25" 
+          value="1" 
+        />
+      </div>
+    </header>
 
     <!-- Phaser Game Canvas Container -->
     <main class="game-container">

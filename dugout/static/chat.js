@@ -285,7 +285,7 @@ async function checkHealth() {
   const { agent, game, match } = await (await fetch('/health')).json();
   document.body.classList.toggle('is-blocked', !agent.ok);
   if (!agent.ok) document.querySelector('.blocked p').textContent = agent.detail;
-  document.querySelector('#agy-status').textContent = agent.ok ? '0.1.9 · ready' : '0.1.9 · offline';
+  document.querySelector('#agy-status').textContent = agent.ok ? `${agent.version || '0.1.10'} · ready` : `${agent.version || '0.1.10'} · offline`;
   for (const [name, up] of Object.entries(game)) {
     document.querySelector(`.svc[data-service="${name}"]`)
       ?.classList.toggle('down', !up);
