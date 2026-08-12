@@ -304,11 +304,17 @@ def test_email_over_254_chars_is_refused(client):
 
 
 
-def test_room_codes_are_matched_case_insensitively(client, phones):
+def test_room_codes_are_matched_case_insensitively(client, phones, monkeypatch):
     phones.join("Alex Rivera", "alex@example.com")
+    # Use a fixed code with letters to test case-insensitive lookup reliably.
+    import codes
+    def fixed_code(taken):
+        return "AB23"
+    monkeypatch.setattr(codes, "generate", fixed_code)
     code = client.post("/api/rooms", json={"mode": "solo"}).json()["code"]
+    assert code == "AB23"
     lowercase = code.lower()
-    assert lowercase != code
+    assert lowercase == "ab23"
     response = client.get(f"/api/rooms/{lowercase}")
     assert response.status_code == 200
     assert response.json()["code"] == code

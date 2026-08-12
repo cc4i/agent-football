@@ -169,18 +169,25 @@ def test_the_host_token_does_not_leak_into_the_snapshot_or_broadcast(client, pho
     client.post(f"/api/rooms/{code}/seats/blue", json={"philosophy": "high press"})
     client.post(f"/api/rooms/{code}/seats/blue/ready", json={"ready": True})
 
-    start_response = client.post(f"/api/rooms/{code}/start")
-    host_token = start_response.json()["host_token"]
+    # Hold a room socket open so we can see the broadcast when /start is called.
+    with client.websocket_connect(f"/ws/rooms/{code}") as socket:
+        opening = socket.receive_json()
+        assert "host_token" not in str(opening)
 
-    # The snapshot from /start must not contain the token.
-    assert "host_token" in start_response.json()
-    assert "host_client_id" not in start_response.json()
+        start_response = client.post(f"/api/rooms/{code}/start")
+        host_token = start_response.json()["host_token"]
+
+        # The snapshot from /start must not contain the token.
+        assert "host_token" in start_response.json()
+        assert "host_client_id" not in start_response.json()
+
+        # The broadcast frame must not leak the token.
+        broadcast = socket.receive_json()
+        assert "host_token" not in str(broadcast)
+        assert host_token not in str(broadcast)
+        assert "host_client_id" not in str(broadcast)
+
     # Reading the room must not leak it.
     read_response = client.get(f"/api/rooms/{code}")
     assert "host_token" not in read_response.json()
     assert "host_client_id" not in read_response.json()
-    # The opening socket frame must not leak it.
-    with client.websocket_connect(f"/ws/rooms/{code}") as socket:
-        opening = socket.receive_json()
-        assert "host_token" not in str(opening)
-        assert host_token not in str(opening)
