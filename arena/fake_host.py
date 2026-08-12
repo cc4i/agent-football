@@ -3,11 +3,11 @@
 The arena, the board and the wall can then be built, tested and demoed without
 a browser running physics:
 
-    curl -X POST http://127.0.0.1:8003/api/rooms/K7F2/start | jq -r .host_token
     uv run python fake_host.py --room K7F2 --client-id <token> --log fixtures/match-3-1.jsonl
 
 The room must already be live, and `--client-id` must be the `host_token`
-returned by `POST /api/rooms/{code}/start`.
+returned by `POST /api/rooms/{code}/start`. To obtain a host token, you must
+first join, take a seat, mark ready, and call /start with a session cookie.
 
 The log is JSON Lines, one frame per line, `#` for a comment:
 

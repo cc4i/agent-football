@@ -18,6 +18,7 @@ from contextlib import asynccontextmanager, contextmanager
 from fastapi import (Depends, FastAPI, HTTPException, Request, Response, WebSocket,
                      WebSocketDisconnect)
 from pydantic import BaseModel, Field, field_validator
+from uvicorn.protocols.utils import ClientDisconnected
 
 import codes
 import db
@@ -282,7 +283,9 @@ async def room_socket(socket: WebSocket, code: str, client_id: str = ""):
         pump.cancel()
         if pump.done() and not pump.cancelled():
             exc = pump.exception()
-            if exc:
+            # Disconnects are expected: a tab closes mid-send, or the network drops.
+            # Only log genuinely unexpected exceptions.
+            if exc and not isinstance(exc, (WebSocketDisconnect, ClientDisconnected)):
                 logger.exception("room socket pump died", exc_info=exc)
         subscription.close()
 
