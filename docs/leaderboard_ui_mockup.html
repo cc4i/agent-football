@@ -1,0 +1,995 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Futsal WorldCup - Mobile Controller & Leaderboard UI Mockups</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700;800&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-dark: #07090e;
+      --card-bg: rgba(15, 23, 42, 0.85);
+      --card-border: rgba(59, 130, 246, 0.25);
+      --neon-blue: #3b82f6;
+      --neon-red: #ef4444;
+      --neon-amber: #f59e0b;
+      --neon-emerald: #10b981;
+      --neon-purple: #9a7bff;
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg-dark);
+      color: var(--text-main);
+      font-family: 'Inter', sans-serif;
+      padding: 30px 20px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-height: 100vh;
+    }
+
+    .header-section {
+      text-align: center;
+      max-width: 900px;
+      margin-bottom: 30px;
+    }
+    .header-section h1 {
+      font-family: 'Outfit', sans-serif;
+      font-size: 2.8rem;
+      font-weight: 800;
+      background: linear-gradient(135deg, #3b82f6 0%, #a855f7 50%, #ef4444 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      margin-bottom: 8px;
+    }
+    .header-section p {
+      color: var(--text-muted);
+      font-size: 1.05rem;
+    }
+
+    /* Tab switcher */
+    .tab-bar {
+      display: flex;
+      gap: 12px;
+      background: rgba(30, 41, 59, 0.6);
+      padding: 6px;
+      border-radius: 12px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      margin-bottom: 35px;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+    .tab-btn {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      font-family: 'Outfit', sans-serif;
+      font-size: 1rem;
+      font-weight: 700;
+      padding: 10px 22px;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+    .tab-btn.active {
+      background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+      color: #fff;
+      box-shadow: 0 4px 14px rgba(59, 130, 246, 0.4);
+    }
+
+    .view-panel {
+      display: none;
+      width: 100%;
+      max-width: 1200px;
+      animation: fadeIn 0.3s ease;
+    }
+    .view-panel.active { display: block; }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* ============================================================
+       VIEW 1: Big Screen Start Lobby with QR Code
+       ============================================================ */
+    .desktop-mockup {
+      background: #020617;
+      border: 2px solid var(--card-border);
+      border-radius: 16px;
+      padding: 24px;
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.9);
+      position: relative;
+      overflow: hidden;
+    }
+    .desktop-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+      padding-bottom: 16px;
+      margin-bottom: 24px;
+    }
+    .desktop-title h2 {
+      font-family: 'Outfit', sans-serif;
+      font-size: 2rem;
+      font-weight: 800;
+      background: linear-gradient(135deg, #3b82f6, #ef4444);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .desktop-title span {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      letter-spacing: 2px;
+      text-transform: uppercase;
+    }
+
+    .pitch-lobby-grid {
+      display: grid;
+      grid-template-columns: 1fr 340px;
+      gap: 24px;
+      align-items: center;
+    }
+    .pitch-placeholder {
+      height: 380px;
+      background: radial-gradient(circle at center, #0f382a 0%, #061c14 100%);
+      border: 2px solid rgba(16, 185, 129, 0.3);
+      border-radius: 12px;
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      box-shadow: inset 0 0 40px rgba(0, 0, 0, 0.8);
+    }
+    .pitch-lines {
+      position: absolute;
+      inset: 20px;
+      border: 2px dashed rgba(255, 255, 255, 0.2);
+      border-radius: 8px;
+      pointer-events: none;
+    }
+    .pitch-center-circle {
+      width: 100px;
+      height: 100px;
+      border: 2px solid rgba(255, 255, 255, 0.2);
+      border-radius: 50%;
+      position: absolute;
+    }
+    .lobby-badge {
+      background: rgba(0, 0, 0, 0.7);
+      border: 1px solid var(--neon-amber);
+      color: var(--neon-amber);
+      padding: 8px 18px;
+      border-radius: 20px;
+      font-family: 'Outfit', sans-serif;
+      font-weight: 700;
+      font-size: 1rem;
+      letter-spacing: 1px;
+      z-index: 2;
+      animation: pulse 2s infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.85; transform: scale(1.03); }
+    }
+
+    /* QR Code Card */
+    .qr-card {
+      background: var(--card-bg);
+      border: 2px solid var(--neon-blue);
+      border-radius: 16px;
+      padding: 24px;
+      text-align: center;
+      box-shadow: 0 10px 30px rgba(59, 130, 246, 0.25);
+    }
+    .qr-card h3 {
+      font-family: 'Outfit', sans-serif;
+      font-size: 1.3rem;
+      color: #fff;
+      margin-bottom: 6px;
+    }
+    .qr-card p {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      margin-bottom: 16px;
+    }
+    .qr-box {
+      width: 190px;
+      height: 190px;
+      margin: 0 auto 16px;
+      background: #ffffff;
+      padding: 10px;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
+    }
+    .qr-url-pill {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 0.75rem;
+      color: var(--neon-blue);
+      background: rgba(59, 130, 246, 0.1);
+      border: 1px solid rgba(59, 130, 246, 0.3);
+      padding: 6px 12px;
+      border-radius: 6px;
+      word-break: break-all;
+    }
+
+    /* ============================================================
+       VIEW 2: Mobile Phone Mockup Trio (Onboarding, Controller, End)
+       ============================================================ */
+    .phones-container {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 30px;
+      justify-content: center;
+    }
+    .phone-wrapper {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    .phone-tag {
+      font-family: 'Outfit', sans-serif;
+      font-weight: 700;
+      font-size: 1.1rem;
+      color: var(--neon-blue);
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .phone-frame {
+      width: 330px;
+      height: 660px;
+      background: #090d16;
+      border: 8px solid #1e293b;
+      border-radius: 36px;
+      box-shadow: 0 25px 60px rgba(0, 0, 0, 0.9), 0 0 0 2px rgba(59, 130, 246, 0.3);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      position: relative;
+    }
+    .phone-notch {
+      width: 120px;
+      height: 18px;
+      background: #1e293b;
+      border-radius: 0 0 12px 12px;
+      margin: 0 auto;
+      z-index: 10;
+    }
+    .phone-screen {
+      flex: 1;
+      padding: 16px 18px;
+      display: flex;
+      flex-direction: column;
+      overflow-y: auto;
+    }
+
+    /* Mobile Screen 1: Onboarding */
+    .phone-title {
+      font-family: 'Outfit', sans-serif;
+      font-size: 1.4rem;
+      font-weight: 800;
+      color: #fff;
+      text-align: center;
+      margin-top: 10px;
+    }
+    .phone-subtitle {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      text-align: center;
+      margin-bottom: 20px;
+    }
+    .form-group {
+      margin-bottom: 14px;
+    }
+    .form-group label {
+      display: block;
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: var(--text-muted);
+      margin-bottom: 6px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .form-input {
+      width: 100%;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: 8px;
+      padding: 10px 14px;
+      color: #fff;
+      font-size: 0.9rem;
+      outline: none;
+    }
+    .form-input:focus {
+      border-color: var(--neon-blue);
+      box-shadow: 0 0 10px rgba(59, 130, 246, 0.4);
+    }
+    .tactic-pills {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+    .tactic-pill {
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      color: var(--text-muted);
+      font-size: 0.75rem;
+      padding: 8px;
+      border-radius: 6px;
+      text-align: center;
+      cursor: pointer;
+      font-weight: 600;
+    }
+    .tactic-pill.selected {
+      background: rgba(59, 130, 246, 0.2);
+      border-color: var(--neon-blue);
+      color: #fff;
+    }
+    .btn-kickoff {
+      margin-top: auto;
+      background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+      color: #fff;
+      border: none;
+      border-radius: 10px;
+      padding: 14px;
+      font-family: 'Outfit', sans-serif;
+      font-size: 1.1rem;
+      font-weight: 800;
+      cursor: pointer;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      box-shadow: 0 6px 20px rgba(59, 130, 246, 0.4);
+    }
+
+    /* Mobile Screen 2: Live Controller */
+    .live-scoreboard {
+      background: rgba(30, 41, 59, 0.7);
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      padding: 10px 14px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 14px;
+    }
+    .team-score {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-family: 'Outfit', sans-serif;
+      font-weight: 800;
+      font-size: 1.2rem;
+    }
+    .team-dot { width: 10px; height: 10px; border-radius: 50%; }
+    .team-dot.blue { background: #3b82f6; box-shadow: 0 0 8px #3b82f6; }
+    .team-dot.red { background: #ef4444; box-shadow: 0 0 8px #ef4444; }
+    .match-clock {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 1rem;
+      font-weight: 700;
+      color: var(--neon-amber);
+    }
+
+    .shout-box {
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      padding: 12px;
+      margin-bottom: 14px;
+    }
+    .shout-box label {
+      font-size: 0.75rem;
+      font-weight: 700;
+      color: var(--neon-blue);
+      text-transform: uppercase;
+      margin-bottom: 6px;
+      display: block;
+    }
+    .shout-input-row {
+      display: flex;
+      gap: 6px;
+    }
+    .shout-input-row input {
+      flex: 1;
+      background: rgba(0, 0, 0, 0.4);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 6px;
+      padding: 8px 10px;
+      color: #fff;
+      font-size: 0.82rem;
+    }
+    .shout-input-row button {
+      background: #ef4444;
+      border: none;
+      color: #fff;
+      padding: 8px 14px;
+      border-radius: 6px;
+      font-weight: 700;
+      font-size: 0.82rem;
+      cursor: pointer;
+    }
+
+    .quick-chips-title {
+      font-size: 0.72rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      font-weight: 700;
+      margin-bottom: 6px;
+    }
+    .quick-chips {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+      margin-bottom: 14px;
+    }
+    .quick-chip {
+      background: rgba(59, 130, 246, 0.1);
+      border: 1px solid rgba(59, 130, 246, 0.3);
+      color: #93c5fd;
+      padding: 8px;
+      border-radius: 8px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      cursor: pointer;
+      text-align: left;
+      transition: all 0.15s ease;
+    }
+    .quick-chip:hover {
+      background: rgba(59, 130, 246, 0.25);
+      border-color: #60a5fa;
+      color: #fff;
+    }
+
+    .agent-feedback-card {
+      margin-top: auto;
+      background: rgba(16, 185, 129, 0.08);
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      border-radius: 10px;
+      padding: 10px;
+    }
+    .agent-feedback-header {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.75rem;
+      font-weight: 700;
+      color: var(--neon-emerald);
+      margin-bottom: 4px;
+    }
+    .agent-feedback-text {
+      font-size: 0.75rem;
+      color: #e2e8f0;
+      line-height: 1.35;
+      font-family: 'IBM Plex Mono', monospace;
+    }
+
+    /* Mobile Screen 3: Post-Match & Leaderboard */
+    .match-end-badge {
+      background: rgba(59, 130, 246, 0.2);
+      border: 1px solid var(--neon-blue);
+      color: var(--neon-blue);
+      font-family: 'Outfit', sans-serif;
+      font-weight: 800;
+      font-size: 0.85rem;
+      padding: 4px 12px;
+      border-radius: 20px;
+      text-align: center;
+      align-self: center;
+      margin-bottom: 8px;
+    }
+    .score-summary-card {
+      background: linear-gradient(135deg, rgba(30, 58, 138, 0.5), rgba(15, 23, 42, 0.8));
+      border: 2px solid var(--neon-amber);
+      border-radius: 14px;
+      padding: 14px;
+      text-align: center;
+      margin-bottom: 14px;
+      box-shadow: 0 6px 20px rgba(245, 158, 11, 0.2);
+    }
+    .score-summary-card .pts {
+      font-family: 'Outfit', sans-serif;
+      font-size: 2.2rem;
+      font-weight: 800;
+      color: var(--neon-amber);
+      line-height: 1;
+      margin: 4px 0;
+    }
+    .score-summary-card .rank {
+      font-size: 0.85rem;
+      color: #93c5fd;
+      font-weight: 700;
+    }
+    .score-breakdown-mini {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+      margin-top: 10px;
+      font-size: 0.7rem;
+      text-align: left;
+    }
+    .score-breakdown-mini div {
+      background: rgba(0, 0, 0, 0.3);
+      padding: 4px 8px;
+      border-radius: 4px;
+      color: var(--text-muted);
+    }
+    .score-breakdown-mini span { color: #fff; font-weight: 700; float: right; }
+
+    .mini-leaderboard {
+      background: rgba(0, 0, 0, 0.4);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 10px;
+      padding: 8px;
+      margin-bottom: 14px;
+    }
+    .mini-lb-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 5px 8px;
+      font-size: 0.75rem;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    }
+    .mini-lb-row:last-child { border-bottom: none; }
+    .mini-lb-row.highlight {
+      background: rgba(59, 130, 246, 0.25);
+      border-radius: 4px;
+      font-weight: 700;
+      color: #fff;
+    }
+
+    /* ============================================================
+       VIEW 3: Big Screen Tournament Leaderboard Podium
+       ============================================================ */
+    .podium-container {
+      display: flex;
+      justify-content: center;
+      align-items: flex-end;
+      gap: 18px;
+      margin: 20px 0 35px;
+    }
+    .podium-card {
+      width: 220px;
+      background: var(--card-bg);
+      border-radius: 16px 16px 8px 8px;
+      padding: 18px 14px;
+      text-align: center;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      position: relative;
+    }
+    .podium-card.gold {
+      height: 270px;
+      border: 2px solid #fbbf24;
+      background: linear-gradient(180deg, rgba(251, 191, 36, 0.25) 0%, rgba(15, 23, 42, 0.95) 100%);
+      box-shadow: 0 0 30px rgba(251, 191, 36, 0.35);
+      order: 2;
+    }
+    .podium-card.silver {
+      height: 230px;
+      border: 2px solid #94a3b8;
+      background: linear-gradient(180deg, rgba(148, 163, 184, 0.2) 0%, rgba(15, 23, 42, 0.95) 100%);
+      order: 1;
+    }
+    .podium-card.bronze {
+      height: 200px;
+      border: 2px solid #b45309;
+      background: linear-gradient(180deg, rgba(180, 83, 9, 0.2) 0%, rgba(15, 23, 42, 0.95) 100%);
+      order: 3;
+    }
+    .podium-badge {
+      font-size: 2.2rem;
+      margin-bottom: 6px;
+    }
+    .podium-name {
+      font-family: 'Outfit', sans-serif;
+      font-size: 1.25rem;
+      font-weight: 800;
+      color: #fff;
+    }
+    .podium-tactic {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin-bottom: 12px;
+    }
+    .podium-score {
+      margin-top: auto;
+      font-family: 'Outfit', sans-serif;
+      font-size: 1.6rem;
+      font-weight: 800;
+      color: var(--neon-amber);
+    }
+    .podium-stats {
+      font-size: 0.75rem;
+      color: #cbd5e1;
+    }
+
+    /* Leaderboard Table */
+    .lb-table {
+      width: 100%;
+      border-collapse: collapse;
+      background: var(--card-bg);
+      border-radius: 12px;
+      overflow: hidden;
+      border: 1px solid var(--card-border);
+    }
+    .lb-table th {
+      background: rgba(30, 41, 59, 0.8);
+      font-family: 'Outfit', sans-serif;
+      font-size: 0.85rem;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: var(--text-muted);
+      padding: 12px 18px;
+      text-align: left;
+    }
+    .lb-table td {
+      padding: 12px 18px;
+      border-top: 1px solid rgba(255, 255, 255, 0.06);
+      font-size: 0.9rem;
+    }
+    .lb-table tr:hover {
+      background: rgba(59, 130, 246, 0.08);
+    }
+    .rank-num {
+      font-family: 'Outfit', sans-serif;
+      font-weight: 800;
+      font-size: 1.1rem;
+      color: var(--neon-blue);
+      width: 40px;
+    }
+    .player-cell b {
+      display: block;
+      color: #fff;
+      font-size: 0.95rem;
+    }
+    .player-cell span {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+    }
+    .score-cell {
+      font-family: 'Outfit', sans-serif;
+      font-weight: 800;
+      font-size: 1.2rem;
+      color: var(--neon-amber);
+      text-align: right;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="header-section">
+    <h1>Futsal WorldCup: UI & UX Visual Mockups</h1>
+    <p>Visual demonstration of the Big Screen QR Lobby, Mobile Phone Live Controller, and Tournament Leaderboard Podium.</p>
+  </div>
+
+  <!-- Tab Switcher -->
+  <div class="tab-bar">
+    <button class="tab-btn active" onclick="switchTab('screen-mobile')">📱 1. Mobile Controller Trio</button>
+    <button class="tab-btn" onclick="switchTab('screen-lobby')">🖥️ 2. Big Screen Start Lobby (QR)</button>
+    <button class="tab-btn" onclick="switchTab('screen-podium')">🏆 3. Tournament Leaderboard Podium</button>
+  </div>
+
+  <!-- VIEW 1: Mobile Phone Mockups -->
+  <div id="screen-mobile" class="view-panel active">
+    <div class="phones-container">
+      
+      <!-- Phone 1: Onboarding -->
+      <div class="phone-wrapper">
+        <div class="phone-tag">Step 1: Scan & Join</div>
+        <div class="phone-frame">
+          <div class="phone-notch"></div>
+          <div class="phone-screen">
+            <div class="phone-title">Coach Registration</div>
+            <div class="phone-subtitle">Enter your profile to take charge of the AI Squad</div>
+
+            <div class="form-group">
+              <label>Coach Name</label>
+              <input type="text" class="form-input" value="Coach Alex" placeholder="Your name">
+            </div>
+
+            <div class="form-group">
+              <label>Email (for Leaderboard)</label>
+              <input type="email" class="form-input" value="alex@example.com" placeholder="email@domain.com">
+            </div>
+
+            <div class="form-group">
+              <label>Tactical Philosophy</label>
+              <div class="tactic-pills">
+                <div class="tactic-pill selected">⚡ High Press</div>
+                <div class="tactic-pill">🎯 Tiki-Taka</div>
+                <div class="tactic-pill">🔄 Counter Attack</div>
+                <div class="tactic-pill">🛡️ Park The Bus</div>
+              </div>
+            </div>
+
+            <button class="btn-kickoff">🚀 Kick Off Match!</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Phone 2: Live In-Game Controller -->
+      <div class="phone-wrapper">
+        <div class="phone-tag">Step 2: Live Tactical Controller</div>
+        <div class="phone-frame">
+          <div class="phone-notch"></div>
+          <div class="phone-screen">
+            <!-- Scoreboard -->
+            <div class="live-scoreboard">
+              <div class="team-score">
+                <div class="team-dot blue"></div>
+                <span>BLUE 2</span>
+              </div>
+              <div class="match-clock">01:42</div>
+              <div class="team-score">
+                <span>1 RED</span>
+                <div class="team-dot red"></div>
+              </div>
+            </div>
+
+            <!-- Custom Shout Input -->
+            <div class="shout-box">
+              <label>📣 Shout to Team Captain (A2A)</label>
+              <div class="shout-input-row">
+                <input type="text" placeholder="e.g. Pass to forward & shoot!" value="High press & shoot on sight!">
+                <button>Send</button>
+              </div>
+            </div>
+
+            <!-- Quick Action Chips -->
+            <div class="quick-chips-title">⚡ 1-Tap Tactical Presets</div>
+            <div class="quick-chips">
+              <button class="quick-chip">⚡ High Press & Attack</button>
+              <button class="quick-chip">🛡️ Tight Defense / Clear</button>
+              <button class="quick-chip">🔄 Counter Attack Wide</button>
+              <button class="quick-chip">🎯 Long Range Shots</button>
+            </div>
+
+            <!-- Live Agent Feedback -->
+            <div class="agent-feedback-card">
+              <div class="agent-feedback-header">
+                <span>🤖 Captain (A2A Response)</span>
+              </div>
+              <div class="agent-feedback-text">
+                "Copy coach! Pressing forward line and increasing shooting urgency to 0.95."
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Phone 3: Match Results & Score -->
+      <div class="phone-wrapper">
+        <div class="phone-tag">Step 3: Score & Rankings</div>
+        <div class="phone-frame">
+          <div class="phone-notch"></div>
+          <div class="phone-screen">
+            <div class="match-end-badge">FULL TIME · VICTORY!</div>
+
+            <div class="score-summary-card">
+              <div style="font-size: 0.75rem; color: #cbd5e1; text-transform: uppercase;">Match Performance Score</div>
+              <div class="pts">2,850</div>
+              <div class="rank">🏆 Rank #1 on Global Leaderboard</div>
+
+              <div class="score-breakdown-mini">
+                <div>Win Base: <span>+1,000</span></div>
+                <div>Goals (3x): <span>+900</span></div>
+                <div>Quick Strike: <span>+500</span></div>
+                <div>Clean Sheet: <span>+300</span></div>
+                <div>Shouts (3x): <span>+150</span></div>
+                <div>Conceded (0x): <span>-0</span></div>
+              </div>
+            </div>
+
+            <div class="quick-chips-title">Top 3 Leaderboard</div>
+            <div class="mini-leaderboard">
+              <div class="mini-lb-row highlight">
+                <span>🥇 1. Coach Alex (You)</span>
+                <span>2,850 pts</span>
+              </div>
+              <div class="mini-lb-row">
+                <span>🥈 2. Pep Guardiola</span>
+                <span>2,700 pts</span>
+              </div>
+              <div class="mini-lb-row">
+                <span>🥉 3. Jürgen Klopp</span>
+                <span>2,450 pts</span>
+              </div>
+            </div>
+
+            <button class="btn-kickoff" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%);">🔄 Play Again</button>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- VIEW 2: Big Screen Start Lobby -->
+  <div id="screen-lobby" class="view-panel">
+    <div class="desktop-mockup">
+      <div class="desktop-header">
+        <div class="desktop-title">
+          <h2>Futsal WorldCup</h2>
+          <span>Powered by Gemini · Agentic Arena</span>
+        </div>
+        <div style="color: var(--neon-amber); font-weight: 700; font-size: 0.9rem;">
+          ⚙️ Speed: 1.00x
+        </div>
+      </div>
+
+      <div class="pitch-lobby-grid">
+        <!-- Pitch Field -->
+        <div class="pitch-placeholder">
+          <div class="pitch-lines"></div>
+          <div class="pitch-center-circle"></div>
+          <div class="lobby-badge">📱 WAITING FOR COACH TO JOIN VIA QR CODE...</div>
+          <div style="margin-top: 14px; font-size: 0.85rem; color: #94a3b8; z-index: 2;">
+            Players on pitch: Forward, Midfielder, Defender, Goalkeeper
+          </div>
+        </div>
+
+        <!-- QR Code Card -->
+        <div class="qr-card">
+          <h3>Scan to Coach</h3>
+          <p>Scan with your phone camera to control the AI squad in real-time!</p>
+          
+          <div class="qr-box">
+            <!-- Simulated QR SVG -->
+            <svg viewBox="0 0 100 100" width="100%" height="100%">
+              <rect width="100" height="100" fill="#ffffff" />
+              <!-- Corners -->
+              <rect x="10" y="10" width="25" height="25" fill="#000000" />
+              <rect x="15" y="15" width="15" height="15" fill="#ffffff" />
+              <rect x="18" y="18" width="9" height="9" fill="#000000" />
+
+              <rect x="65" y="10" width="25" height="25" fill="#000000" />
+              <rect x="70" y="15" width="15" height="15" fill="#ffffff" />
+              <rect x="73" y="18" width="9" height="9" fill="#000000" />
+
+              <rect x="10" y="65" width="25" height="25" fill="#000000" />
+              <rect x="15" y="70" width="15" height="15" fill="#ffffff" />
+              <rect x="18" y="73" width="9" height="9" fill="#000000" />
+
+              <!-- Data bits -->
+              <rect x="42" y="15" width="6" height="6" fill="#000000" />
+              <rect x="52" y="22" width="6" height="6" fill="#000000" />
+              <rect x="42" y="32" width="6" height="6" fill="#000000" />
+              <rect x="48" y="42" width="10" height="10" fill="#3b82f6" />
+              <rect x="20" y="45" width="6" height="6" fill="#000000" />
+              <rect x="75" y="48" width="6" height="6" fill="#000000" />
+              <rect x="42" y="65" width="6" height="6" fill="#000000" />
+              <rect x="55" y="75" width="6" height="6" fill="#000000" />
+              <rect x="70" y="68" width="6" height="6" fill="#000000" />
+              <rect x="80" y="80" width="6" height="6" fill="#000000" />
+            </svg>
+          </div>
+
+          <div class="qr-url-pill">http://192.168.1.15:5173/mobile.html</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- VIEW 3: Big Screen Tournament Podium -->
+  <div id="screen-podium" class="view-panel">
+    <div class="desktop-mockup">
+      <div style="text-align: center; margin-bottom: 20px;">
+        <h2 style="font-family: 'Outfit'; font-size: 2.4rem; font-weight: 800; color: #fff;">🏆 Tournament Leaderboard</h2>
+        <p style="color: var(--text-muted); font-size: 0.95rem;">Ranked by Goals, Speed to Score, Clean Sheets & Tactical Coaching</p>
+      </div>
+
+      <!-- Top 3 Podium -->
+      <div class="podium-container">
+        
+        <!-- Silver (Rank 2) -->
+        <div class="podium-card silver">
+          <div class="podium-badge">🥈</div>
+          <div class="podium-name">Pep Guardiola</div>
+          <div class="podium-tactic">Tiki-Taka High Press</div>
+          <div class="podium-score">2,700 PTS</div>
+          <div class="podium-stats">4 Goals · 0 Conceded</div>
+        </div>
+
+        <!-- Gold (Rank 1) -->
+        <div class="podium-card gold">
+          <div class="podium-badge">🥇</div>
+          <div class="podium-name">Coach Alex (You)</div>
+          <div class="podium-tactic">Gegenpressing Blitz</div>
+          <div class="podium-score">2,850 PTS</div>
+          <div class="podium-stats">5 Goals · Strike in 18s</div>
+        </div>
+
+        <!-- Bronze (Rank 3) -->
+        <div class="podium-card bronze">
+          <div class="podium-badge">🥉</div>
+          <div class="podium-name">Jürgen Klopp</div>
+          <div class="podium-tactic">Heavy Metal Attack</div>
+          <div class="podium-score">2,450 PTS</div>
+          <div class="podium-stats">3 Goals · 1 Conceded</div>
+        </div>
+
+      </div>
+
+      <!-- Full Table -->
+      <table class="lb-table">
+        <thead>
+          <tr>
+            <th>Rank</th>
+            <th>Coach</th>
+            <th>Tactical Style</th>
+            <th>Goals (Diff)</th>
+            <th>Quick Strike</th>
+            <th style="text-align: right;">Total Score</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr style="background: rgba(59, 130, 246, 0.15); font-weight: 700;">
+            <td class="rank-num" style="color: #fbbf24;">#1</td>
+            <td class="player-cell"><b>Coach Alex (You)</b><span>a***x@example.com</span></td>
+            <td>Gegenpressing Blitz</td>
+            <td>5 - 0 (+5)</td>
+            <td>18s</td>
+            <td class="score-cell">2,850</td>
+          </tr>
+          <tr>
+            <td class="rank-num">#2</td>
+            <td class="player-cell"><b>Pep Guardiola</b><span>p***a@mancity.com</span></td>
+            <td>Tiki-Taka High Press</td>
+            <td>4 - 0 (+4)</td>
+            <td>25s</td>
+            <td class="score-cell">2,700</td>
+          </tr>
+          <tr>
+            <td class="rank-num">#3</td>
+            <td class="player-cell"><b>Jürgen Klopp</b><span>k***p@reds.com</span></td>
+            <td>Heavy Metal Attack</td>
+            <td>3 - 1 (+2)</td>
+            <td>42s</td>
+            <td class="score-cell">2,450</td>
+          </tr>
+          <tr>
+            <td class="rank-num">#4</td>
+            <td class="player-cell"><b>Carlo Ancelotti</b><span>c***o@madrid.com</span></td>
+            <td>Counter Attack</td>
+            <td>3 - 0 (+3)</td>
+            <td>55s</td>
+            <td class="score-cell">2,300</td>
+          </tr>
+          <tr>
+            <td class="rank-num">#5</td>
+            <td class="player-cell"><b>José Mourinho</b><span>j***e@specialone.com</span></td>
+            <td>Park The Bus</td>
+            <td>2 - 0 (+2)</td>
+            <td>88s</td>
+            <td class="score-cell">1,950</td>
+          </tr>
+        </tbody>
+      </table>
+
+    </div>
+  </div>
+
+  <script>
+    function switchTab(tabId) {
+      document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+      document.querySelectorAll('.view-panel').forEach(panel => panel.classList.remove('active'));
+      
+      event.target.classList.add('active');
+      document.getElementById(tabId).classList.add('active');
+    }
+  </script>
+</body>
+</html>
