@@ -37,17 +37,38 @@ def patch_profile(room, team, role, changes, actor, reason):
     than trusted -- the arena checks them too, but a path is not the place to
     find that out.
     """
+    path = "/api/rooms/{}/teams/{}/profiles/{}".format(
+        *(_quoted(room, team, role)))
+    return _send(path, "PATCH",
+                 {"changes": changes, "actor": actor, "reason": reason})
+
+
+def reset_profiles(room, team):
+    """Put a whole dugout back to the shipped squad.
+
+    The workshop's lab starts every session from a known squad, which is what
+    makes its stages repeatable. That reset belongs to whoever owns the
+    profiles, so it goes through the arena like every other write.
+    """
+    path = "/api/rooms/{}/teams/{}/profiles/reset".format(*_quoted(room, team))
+    return _send(path, "POST", {})
+
+
+def _quoted(*parts):
+    return [urllib.parse.quote(part, safe="") for part in parts]
+
+
+def _send(path, method, body):
+    """One authenticated call to the arena, or an ArenaError a manager can read."""
     token = os.environ.get("ARENA_SERVICE_TOKEN", "")
     if not token:
         raise ArenaError(
             "ARENA_SERVICE_TOKEN is unset, so the arena refuses writes from the agents")
 
-    path = "/api/rooms/{}/teams/{}/profiles/{}".format(
-        *(urllib.parse.quote(part, safe="") for part in (room, team, role)))
     request = urllib.request.Request(
         base_url() + path,
-        data=json.dumps({"changes": changes, "actor": actor, "reason": reason}).encode(),
-        method="PATCH",
+        data=json.dumps(body).encode(),
+        method=method,
         headers={"Content-Type": "application/json", "X-Arena-Service": token},
     )
     try:

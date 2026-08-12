@@ -28,7 +28,6 @@ from uvicorn.protocols.utils import ClientDisconnected
 import codes
 import db
 import identity
-import mirror
 import philosophies
 import presets
 import profiles
@@ -430,6 +429,27 @@ async def read_profile(code: str, team: str, role: str, request: Request):
     return {"team": team, "role": role, "attributes": found}
 
 
+@app.post("/api/rooms/{code}/teams/{team}/profiles/reset")
+async def reset_profiles(code: str, team: str, request: Request):
+    """Put this dugout back to the shipped squad.
+
+    The workshop's lab does this on every reload, which is what makes its five
+    stages repeatable. It is the same authority as a patch, because it is a
+    patch -- every role, back to where it started -- and it reaches the log as
+    exactly that.
+    """
+    connection, room = _profile_room(request, code)
+    _known_team(team)
+    if room["status"] not in ("lobby", "live"):
+        raise HTTPException(409, "that match is over")
+    _require_profile_writer(request, connection, room["id"], team)
+
+    for result in profiles.reset(connection, room["id"], team):
+        _record_patch(request.app, connection, room, team, result,
+                      reason="back to the shipped squad", actor="reset")
+    return {"team": team, "profiles": profiles.read_all(connection, room["id"], team)}
+
+
 @app.patch("/api/rooms/{code}/teams/{team}/profiles/{role}")
 async def patch_profile(code: str, team: str, role: str, body: ProfilePatchRequest,
                         request: Request):
@@ -448,12 +468,6 @@ async def patch_profile(code: str, team: str, role: str, body: ProfilePatchReque
         result = profiles.patch(connection, room["id"], team, role, body.changes)
     except profiles.Rejected as refusal:
         raise HTTPException(422, {"problems": refusal.problems}) from refusal
-
-    if room["code"] == codes.WORKSHOP:
-        # Temporary, and only here: the pitch still polls one file per role,
-        # which cannot serve two rooms at once. Deleted later in step 3, once
-        # the pitch reads its profiles from this service.
-        mirror.write(role, result["attributes"])
 
     seq = _record_patch(request.app, connection, room, team, result,
                         reason=body.reason, actor=body.actor)

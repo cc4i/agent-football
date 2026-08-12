@@ -59,6 +59,35 @@ def read_one(conn, room_id, team, role):
     return json.loads(row["attributes_json"]) if row else None
 
 
+def reset(conn, room_id, team):
+    """Put a whole dugout back to the shipped baseline.
+
+    Returns one `patch`-shaped result per role that actually moved, so a reset
+    reaches the log as the changes it made rather than as an opaque event a
+    late arrival cannot replay. A patch can only ever set attributes the
+    baseline names, so writing the baseline back is the whole of it.
+    """
+    now = time.time()
+    results = []
+    for role in attributes.ROLES:
+        current = read_one(conn, room_id, team, role)
+        if current is None:
+            continue
+        baseline = attributes.baseline_for(role)
+        changed = {key: value for key, value in baseline.items()
+                   if current.get(key) != value}
+        if not changed:
+            continue
+        conn.execute(
+            "UPDATE profile SET attributes_json = ?, updated_at = ? "
+            "WHERE room_id = ? AND team = ? AND role = ?",
+            (json.dumps(baseline), now, room_id, team, role),
+        )
+        results.append({"role": role, "attributes": baseline, "changed": changed})
+    conn.commit()
+    return results
+
+
 def patch(conn, room_id, team, role, changes):
     """Apply validated changes to one profile.
 

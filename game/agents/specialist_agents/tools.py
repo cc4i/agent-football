@@ -12,9 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import json
 import os
-import shutil
 import sys
 
 from google.adk.tools import ToolContext
@@ -27,172 +25,7 @@ from mcp import StdioServerParameters
 # Resolve paths relative to this file.
 # BASE_DIR is game/agents/specialist_agents/
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-PLAYER_STATE_DIR = os.path.abspath(os.path.join(BASE_DIR, "../../frontend/public/player_state"))
 MCP_SERVER_PATH = os.path.abspath(os.path.join(BASE_DIR, "../football_mcp_server.py"))
-
-def initialize_profiles():
-    """Bootstraps the individual JSON files if they don't exist."""
-    os.makedirs(PLAYER_STATE_DIR, exist_ok=True)
-
-    default_profiles = {
-        "defender": {
-            "speed": 0.8,
-            "tackleRadius": 0.8,
-            "tackleCooldown": 0.2,
-            "passProbability": 0.85,
-            "passRange": 0.7,
-            "shotPower": 0.8,
-            "shotRange": 0.7,
-            "aggression": 0.8,
-            "defensePositioning": 0.8,
-            "attackPositioning": 0.8,
-            "decisionDelay": 150,
-            "pressingIntensity": 0.9,
-            "formationDiscipline": 0.4,
-            "passRiskTolerance": 0.7,
-            "dribbleTendency": 0.6,
-            "recoverySpeedMultiplier": 1.1,
-            "supportRunFrequency": 0.8,
-            "widthPreference": 0.6,
-            "interceptionRadius": 0.8,
-            "foulProbability": 0.3,
-            "counterAttackUrgency": 0.9,
-            "lineHeight": 0.8,
-            "clearance": 0.3,
-            "longPassing": 0.7,
-            "tackleAggression": 0.8,
-            "foulRate": 0.7,
-            "kickPower": 0.9,
-            "passAccuracy": 0.85
-        },
-        "midfielder": {
-            "speed": 0.85,
-            "tackleRadius": 0.8,
-            "tackleCooldown": 0.3,
-            "passProbability": 0.9,
-            "passRange": 0.65,
-            "shotPower": 0.8,
-            "shotRange": 0.75,
-            "aggression": 0.8,
-            "defensePositioning": 0.3,
-            "attackPositioning": 0.85,
-            "decisionDelay": 0.1,
-            "pressingIntensity": 0.5,
-            "formationDiscipline": 0.9,
-            "passRiskTolerance": 0.75,
-            "dribbleTendency": 0.65,
-            "recoverySpeedMultiplier": 1.3,
-            "supportRunFrequency": 0.85,
-            "widthPreference": 0.5,
-            "interceptionRadius": 0.8,
-            "foulProbability": 0.2,
-            "counterAttackUrgency": 0.85,
-            "dropDeepFrequency": 0.3,
-            "defensiveFocus": 0.3,
-            "defensiveCover": 0.8,
-            "shootingUrgency": 0.8,
-            "forwardPassProbability": 0.8,
-            "defensiveWorkRate": 0.8,
-            "forwardRuns": 0.85,
-            "defensiveContribution": 0.35,
-            "creativeFreedom": 0.75,
-            "positionalDiscipline": 0.9,
-            "shooting": 0.8,
-            "clearanceFrequency": 0.2,
-            "longPassProbability": 0.7,
-            "interceptionFrequency": 0.8,
-            "defensiveCoverage": 0.8,
-            "foulFrequency": 0.9,
-            "tackleIntensity": 0.8,
-            "dropDeepPreference": 0.3,
-            "defensiveSupport": 0.75
-        },
-        "forward": {
-            "speed": 0.95,
-            "tackleRadius": 0.7,
-            "tackleCooldown": 0.2,
-            "passProbability": 0.2,
-            "passRange": 0.85,
-            "shotPower": 0.95,
-            "shotRange": 0.85,
-            "aggression": 0.85,
-            "defensePositioning": 0.1,
-            "attackPositioning": 0.98,
-            "decisionDelay": 0.05,
-            "pressingIntensity": 0.4,
-            "formationDiscipline": 0.3,
-            "passRiskTolerance": 0.8,
-            "dribbleTendency": 0.8,
-            "recoverySpeedMultiplier": 0.9,
-            "supportRunFrequency": 0.95,
-            "widthPreference": 0.5,
-            "interceptionRadius": 30,
-            "foulProbability": 0.1,
-            "counterAttackUrgency": 0.95,
-            "defensiveAwareness": 0.1,
-            "acceleration": 0.95,
-            "pace": 0.95,
-            "finishing": 0.98,
-            "defensiveWorkRate": 0.1,
-            "shortPassing": 0.85,
-            "defensiveContribution": 0.1
-        },
-        "goalkeeper": {
-            "speed": 0.9,
-            "tackleRadius": 0.9,
-            "tackleCooldown": 0.1,
-            "passProbability": 0.9,
-            "passRange": 0.5,
-            "shotPower": 0.95,
-            "shotRange": 0.9,
-            "aggression": 0.8,
-            "defensePositioning": 0.9,
-            "attackPositioning": 0.9,
-            "decisionDelay": 200,
-            "diveChance": 0.8,
-            "trackingSpeed": 0.9,
-            "pressingIntensity": 0.9,
-            "formationDiscipline": 0.9,
-            "passRiskTolerance": 0.8,
-            "dribbleTendency": 0.7,
-            "recoverySpeedMultiplier": 1.0,
-            "supportRunFrequency": 0.8,
-            "widthPreference": 0.5,
-            "interceptionRadius": 0.9,
-            "foulProbability": 0.05,
-            "counterAttackUrgency": 0.9,
-            "positioning": 0.9,
-            "rushOut": 0.8,
-            "stayOnLine": 0.2,
-            "sweepAggression": 0.9,
-            "linePositioning": 0.2,
-            "sweeperTendency": 0.9,
-            "distributionAccuracy": 0.9,
-            "sweepingAggression": 0.9,
-            "runOutChance": 0.8,
-            "discipline": 0.9,
-            "joinAttack": 0.8,
-            "clearance": 0.95,
-            "kickLength": 0.9,
-            "sweeperKeeper": 0.9,
-            "foulTendency": 0.5,
-            "kickPower": 0.9,
-            "distributionRange": 0.6,
-            "sweeperStyle": 0.95,
-            "positioningRange": 0.8,
-            "rushingOut": 0.8
-        }
-    }
-
-    for role, data in default_profiles.items():
-        file_path = os.path.join(PLAYER_STATE_DIR, f"{role}.json")
-        if not os.path.exists(file_path):
-            print(f"Creating default {file_path}...")
-            with open(file_path, 'w') as f:
-                json.dump(data, f, indent=2)
-
-# Ensure the profiles exist as soon as this module is imported
-initialize_profiles()
 
 def update_profile(role: str, changes: dict, tool_context: ToolContext) -> str:
     """Move one player's attributes in this match's dugout.
@@ -277,40 +110,18 @@ CONDITION_GUIDANCE = """
     warranted -- a small knock or mild tiredness does NOT need a tool call.
 """
 
-def backup_baseline_profiles() -> str:
-    """Copies the current player profiles to baseline backup files (capturing LAB01 state)."""
-    try:
-        # VALID_ROLES is defined as a set in football_mcp_server, but we can define it locally
-        valid_roles = {"defender", "midfielder", "forward", "goalkeeper"}
-        for role in valid_roles:
-            src = os.path.join(PLAYER_STATE_DIR, f"{role}.json")
-            dst = os.path.join(PLAYER_STATE_DIR, f"{role}_baseline.json")
-            if os.path.exists(src):
-                shutil.copyfile(src, dst)
-        print("--> [SYSTEM] Captured LAB01 starting profiles as baseline backup.")
-        return "Success: Baseline backup created."
-    except Exception as e:
-        return f"Error backing up baseline: {str(e)}"
+def restore_baseline_profiles(tool_context: ToolContext) -> str:
+    """Put this dugout's squad back to the shipped baseline.
 
-def restore_baseline_profiles() -> str:
-    """Restores the player profiles from the baseline backup files, resetting mid-game shouts."""
+    The lab starts every session from a known squad, which is what makes its
+    stages repeatable. There is nothing to back up first: the baseline is
+    shipped with the arena and a room is seeded from it when it is opened, so
+    this is a reset rather than a restore of something captured earlier.
+    """
+    room = tool_context.state.get("room_code") or arena_client.DEFAULT_ROOM
+    team = tool_context.state.get("team") or arena_client.DEFAULT_TEAM
     try:
-        valid_roles = {"defender", "midfielder", "forward", "goalkeeper"}
-        for role in valid_roles:
-            src = os.path.join(PLAYER_STATE_DIR, f"{role}_baseline.json")
-            dst = os.path.join(PLAYER_STATE_DIR, f"{role}.json")
-            if os.path.exists(src):
-                shutil.copyfile(src, dst)
-                
-        # Also clear any active substitutions/injuries
-        sub_file = os.path.join(PLAYER_STATE_DIR, "substitutions.json")
-        if os.path.exists(sub_file):
-            try:
-                os.remove(sub_file)
-            except OSError:
-                pass
-            
-        print("--> [SYSTEM] Restored profiles to LAB01 starting baseline.")
-        return "Success: Restored to LAB01 starting baseline."
-    except Exception as e:
-        return f"Error restoring baseline: {str(e)}"
+        arena_client.reset_profiles(room, team)
+    except arena_client.ArenaError as refusal:
+        return f"Rejected: {refusal}"
+    return f"Success: the {team} squad in room {room} is back to the shipped baseline."

@@ -66,42 +66,24 @@ def substitutions_path(room: str, team: str) -> str:
     return os.path.join(PLAYER_STATE_DIR, "substitutions", f"{room.upper()}__{team}.json")
 
 
-def pitch_substitutions_path() -> str:
-    """The single file main.js still polls.
-
-    Read from PLAYER_STATE_DIR on every call rather than frozen at import, so
-    redirecting that directory redirects this too. Deleted in step 3, when the
-    pitch gains a room socket.
-    """
-    return os.path.join(PLAYER_STATE_DIR, "substitutions.json")
-
-
-def _targets(room: str, team: str) -> list:
-    """This dugout's file, plus the one the pitch still polls."""
-    paths = [substitutions_path(room, team)]
-    if room == DEFAULT_ROOM and team == DEFAULT_TEAM:
-        paths.append(pitch_substitutions_path())
-    return paths
-
-
 def _write_entry(role: str, entry: dict,
                  room: str = DEFAULT_ROOM, team: str = DEFAULT_TEAM) -> None:
     """Merge one entry into this dugout's file."""
-    for path in _targets(room, team):
-        os.makedirs(os.path.dirname(path), exist_ok=True)
+    path = substitutions_path(room, team)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
 
-        data = {}
-        if os.path.exists(path):
-            try:
-                with open(path, "r") as f:
-                    data = json.load(f)
-            except (json.JSONDecodeError, OSError):
-                data = {}
+    data = {}
+    if os.path.exists(path):
+        try:
+            with open(path, "r") as f:
+                data = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            data = {}
 
-        data[role] = entry
+    data[role] = entry
 
-        with open(path, "w") as f:
-            json.dump(data, f, indent=2)
+    with open(path, "w") as f:
+        json.dump(data, f, indent=2)
 
 
 @mcp.tool()

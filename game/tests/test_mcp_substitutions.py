@@ -38,8 +38,10 @@ def test_a_substitution_request_lands_in_its_own_rooms_file(tmp_path, monkeypatc
     assert written["forward"]["action"] == "substitute"
 
 
-def test_the_default_room_still_writes_the_file_the_pitch_polls(tmp_path, monkeypatch):
-    # Temporary: main.js polls player_state/substitutions.json. Deleted in step 3.
+def test_nothing_is_written_outside_the_rooms_own_file(tmp_path, monkeypatch):
+    # There used to be a second, venue-wide copy for the pitch to poll. The
+    # pitch reads its room now, and one shared file was the whole bug.
     monkeypatch.setattr(server, "PLAYER_STATE_DIR", str(tmp_path))
-    server.report_injury("defender", "knock")
-    assert (tmp_path / "substitutions.json").exists()
+    server.report_injury("defender", "knock", room="7K2M", team="red")
+    written = [path.relative_to(tmp_path) for path in tmp_path.rglob("*.json")]
+    assert [str(path) for path in written] == ["substitutions/7K2M__red.json"]

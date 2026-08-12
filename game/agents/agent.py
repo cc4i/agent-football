@@ -25,7 +25,7 @@ load_dotenv()
 
 from google.adk.agents.llm_agent import LlmAgent
 from agents.constants import GeminiConstants
-from agents.specialist_agents.tools import backup_baseline_profiles, restore_baseline_profiles
+from agents.specialist_agents.tools import restore_baseline_profiles
 
 
 
@@ -44,18 +44,17 @@ team_captain_remote = RemoteA2aAgent(
 coach_agent = LlmAgent(
     name="ManagerAgent",
     model=GeminiConstants.GEMINI_FLASH_LITE,
-    description="The head coach: handles baseline backups/resets and shouts.",
-    instruction="""You are the head coach on the touchline. 
-    
+    description="The head coach: handles baseline resets and shouts.",
+    instruction="""You are the head coach on the touchline.
+
     CRITICAL SYSTEM INSTRUCTIONS (Do not modify):
-    1. If you receive the exact message 'BACKUP_BASELINE', you MUST immediately call the `backup_baseline_profiles` tool and return its response.
-    2. If you receive the exact message 'RESTORE_BASELINE', you MUST immediately call the `restore_baseline_profiles` tool and return its response.
-    
+    1. If you receive the exact message 'RESTORE_BASELINE', you MUST immediately call the `restore_baseline_profiles` tool and return its response.
+
     TACTICAL SHOUTS:
     For any other message, immediately transfer control to the `team_captain` sub-agent. Do NOT attempt to answer the shout yourself!
     """,
-    
-    tools=[backup_baseline_profiles, restore_baseline_profiles],
+
+    tools=[restore_baseline_profiles],
     sub_agents=[team_captain_remote], 
 )
 
