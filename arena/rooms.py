@@ -151,17 +151,14 @@ def append_event(conn, room_id, kind, payload, match_ms=None):
     Scoring is recomputed from this log and never from a submitted total, so
     it is append-only and numbered per room rather than globally.
     """
-    seq = conn.execute(
-        "SELECT COALESCE(MAX(seq), 0) + 1 AS next FROM event WHERE room_id = ?",
-        (room_id,),
-    ).fetchone()["next"]
-    conn.execute(
+    row = conn.execute(
         "INSERT INTO event (room_id, seq, kind, payload_json, match_ms, wall_ts) "
-        "VALUES (?, ?, ?, ?, ?, ?)",
-        (room_id, seq, kind, json.dumps(payload), match_ms, time.time()),
-    )
+        "SELECT ?, COALESCE(MAX(seq), 0) + 1, ?, ?, ?, ? FROM event WHERE room_id = ? "
+        "RETURNING seq",
+        (room_id, kind, json.dumps(payload), match_ms, time.time(), room_id),
+    ).fetchone()
     conn.commit()
-    return seq
+    return row["seq"]
 
 
 def events(conn, room_id):
@@ -221,6 +218,21 @@ def live(conn):
             "GROUP BY r.id ORDER BY r.created_at"
         )
     ]
+
+
+def seat_owner(conn, room_id, team):
+    """Return the player_id in this team's dugout, or None if empty."""
+    row = conn.execute(
+        "SELECT player_id FROM seat WHERE room_id = ? AND team = ?", (room_id, team)
+    ).fetchone()
+    return row["player_id"] if row else None
+
+
+def is_seated(conn, room_id, player_id):
+    """True if this player holds a dugout in this room."""
+    return conn.execute(
+        "SELECT 1 FROM seat WHERE room_id = ? AND player_id = ?", (room_id, player_id)
+    ).fetchone() is not None
 
 
 def _room(conn, room_id):

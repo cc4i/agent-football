@@ -86,7 +86,7 @@ class StartRequest(BaseModel):
     host_client_id: str = Field(min_length=1, max_length=200)
 
 
-def current_player(request: Request) -> int:
+async def current_player(request: Request) -> int:
     """The player id in the session cookie, or a 401."""
     player_id = identity.verify_token(request.cookies.get(COOKIE), SESSION_SECRET)
     if player_id is None or rooms.get_player(request.app.state.conn, player_id) is None:
@@ -176,18 +176,13 @@ def _room_or_404(connection, code):
 
 
 def _require_own_seat(connection, room_id, team, player_id):
-    seat = connection.execute(
-        "SELECT player_id FROM seat WHERE room_id = ? AND team = ?", (room_id, team)
-    ).fetchone()
-    if seat is None or seat["player_id"] != player_id:
+    owner = rooms.seat_owner(connection, room_id, team)
+    if owner is None or owner != player_id:
         raise HTTPException(403, f"the {team} dugout is not yours")
 
 
 def _require_seated(connection, room_id, player_id):
-    seat = connection.execute(
-        "SELECT 1 FROM seat WHERE room_id = ? AND player_id = ?", (room_id, player_id)
-    ).fetchone()
-    if seat is None:
+    if not rooms.is_seated(connection, room_id, player_id):
         raise HTTPException(403, "only somebody in this match can start it")
 
 
