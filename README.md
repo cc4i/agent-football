@@ -28,7 +28,7 @@ Stages 4 and 5 are deliberately opposite. Tuning sets numbers the agent
 chooses. A shout hands the decision to the game's own coach, captain and four
 player agents, and they pick the numbers.
 
-## The two processes
+## The three processes
 
 ```
 game/    the simulator, near enough as it was: a hook so the score is
@@ -38,6 +38,10 @@ game/    the simulator, near enough as it was: a hook so the score is
 
 dugout/  the showcase: a chat UI over an in-process Antigravity agent
          FastAPI :8002
+
+arena/   rooms, seats, player profiles and the live match bus, so more than
+         one person can play at once
+         FastAPI :8003
 ```
 
 The dugout embeds the Antigravity SDK directly, so thoughts, tool calls and
@@ -54,6 +58,7 @@ You need [uv](https://docs.astral.sh/uv/), Node, and the Antigravity CLI with
 cp game/.env.example   game/.env      # then set GOOGLE_CLOUD_PROJECT
 cp dugout/.env.example dugout/.env    # same
 
+cd arena  && ./run.sh                 # rooms, seats and player profiles
 cd game   && ./run.sh                 # frontend, coach and captain
 cd dugout && ./run.sh                 # then open http://localhost:8002
 ```
@@ -61,6 +66,11 @@ cd dugout && ./run.sh                 # then open http://localhost:8002
 Both `.env` files are needed. Without `game/.env` the pitch still renders and
 most of the quest works, but every call into the game's own agents fails and
 the squad never resets.
+
+The arena owns the player profiles, so it has to be up before stage 5 can move
+one. Export the same `ARENA_SERVICE_TOKEN` for the arena and for `game/`: the
+game's agents carry it instead of a phone session, and an unset token is
+refused rather than waved through. See `arena/README.md`.
 
 The agent runs shell commands unrestricted, by design, so that it can launch
 the script it writes in stage 2. Run this on your own machine.
