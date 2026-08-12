@@ -3,10 +3,11 @@
 The arena, the board and the wall can then be built, tested and demoed without
 a browser running physics:
 
-    uv run python fake_host.py --room K7F2 --log fixtures/match-3-1.jsonl
+    curl -X POST http://127.0.0.1:8003/api/rooms/K7F2/start | jq -r .host_token
+    uv run python fake_host.py --room K7F2 --client-id <token> --log fixtures/match-3-1.jsonl
 
-The room must already be live with `--client-id` as its host, which is what
-`POST /api/rooms/{code}/start` sets.
+The room must already be live, and `--client-id` must be the `host_token`
+returned by `POST /api/rooms/{code}/start`.
 
 The log is JSON Lines, one frame per line, `#` for a comment:
 
@@ -86,8 +87,8 @@ def main(argv=None):
         description="Replay a recorded match into an arena room.")
     parser.add_argument("--room", required=True, help="room code, for example K7F2")
     parser.add_argument("--log", required=True, help="path to a JSONL match log")
-    parser.add_argument("--client-id", default="fake-host",
-                        help="must match the room's host_client_id")
+    parser.add_argument("--client-id", required=True,
+                        help="the host_token returned by POST /api/rooms/{code}/start")
     parser.add_argument("--arena", default="ws://127.0.0.1:8003")
     parser.add_argument("--speed", type=float, default=1.0,
                         help="1.0 plays in real time; 10 is useful for a smoke test")

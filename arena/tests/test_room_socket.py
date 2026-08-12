@@ -37,10 +37,10 @@ def test_a_seat_being_taken_reaches_everyone_watching(client, phones):
 
 
 def test_the_host_state_reaches_a_viewer(client, live_room):
-    code = live_room()
+    code, host_token = live_room()
     with client.websocket_connect(f"/ws/rooms/{code}") as viewer:
         viewer.receive_json()
-        with client.websocket_connect(f"/ws/rooms/{code}?client_id=phone-7") as host:
+        with client.websocket_connect(f"/ws/rooms/{code}?client_id={host_token}") as host:
             host.receive_json()
             host.send_json({"type": "host.state", "payload": {"clock": 12, "score": [1, 0]}})
             frame = viewer.receive_json()
@@ -48,7 +48,7 @@ def test_the_host_state_reaches_a_viewer(client, live_room):
 
 
 def test_a_client_that_is_not_the_host_cannot_move_the_ball(client, live_room):
-    code = live_room()
+    code, host_token = live_room()
     with client.websocket_connect(f"/ws/rooms/{code}") as viewer:
         viewer.receive_json()
         with client.websocket_connect(f"/ws/rooms/{code}?client_id=impostor") as liar:
@@ -56,21 +56,39 @@ def test_a_client_that_is_not_the_host_cannot_move_the_ball(client, live_room):
             liar.send_json({"type": "host.state", "payload": {"clock": 99}})
             # Rather than wait on a timeout, send a frame that IS allowed and
             # prove it is the first thing the viewer sees.
-            with client.websocket_connect(f"/ws/rooms/{code}?client_id=phone-7") as host:
+            with client.websocket_connect(f"/ws/rooms/{code}?client_id={host_token}") as host:
                 host.receive_json()
                 host.send_json({"type": "host.state", "payload": {"clock": 12}})
                 frame = viewer.receive_json()
     assert frame == {"type": "state", "clock": 12}
 
 
+def test_a_guessed_client_id_cannot_drive_the_match(client, phones):
+    phones.join("Alex Rivera", "alex@example.com")
+    code = client.post("/api/rooms", json={"mode": "solo"}).json()["code"]
+    client.post(f"/api/rooms/{code}/seats/blue", json={"philosophy": "high press"})
+    client.post(f"/api/rooms/{code}/seats/blue/ready", json={"ready": True})
+    client.post(f"/api/rooms/{code}/start")
+
+    with client.websocket_connect(f"/ws/rooms/{code}") as viewer:
+        viewer.receive_json()
+        # Try every predictable value an attacker might guess.
+        for guess in ("phone-7", "phone-8", "fake-host", "screen-1", "host", ""):
+            with client.websocket_connect(f"/ws/rooms/{code}?client_id={guess}") as attacker:
+                attacker.receive_json()
+                attacker.send_json({"type": "host.state", "payload": {"clock": 999}})
+        # Nothing should have reached the viewer.
+        # (The socket would timeout if we tried to receive, so we don't.)
+
+
 def test_a_socket_with_no_client_id_can_only_watch(client, live_room):
-    code = live_room()
+    code, host_token = live_room()
     with client.websocket_connect(f"/ws/rooms/{code}") as viewer:
         viewer.receive_json()
         with client.websocket_connect(f"/ws/rooms/{code}") as silent:
             silent.receive_json()
             silent.send_json({"type": "host.state", "payload": {"clock": 99}})
-            with client.websocket_connect(f"/ws/rooms/{code}?client_id=phone-7") as host:
+            with client.websocket_connect(f"/ws/rooms/{code}?client_id={host_token}") as host:
                 host.receive_json()
                 host.send_json({"type": "host.state", "payload": {"clock": 12}})
                 frame = viewer.receive_json()
@@ -78,8 +96,8 @@ def test_a_socket_with_no_client_id_can_only_watch(client, live_room):
 
 
 def test_a_host_event_comes_back_numbered(client, live_room):
-    code = live_room()
-    with client.websocket_connect(f"/ws/rooms/{code}?client_id=phone-7") as host:
+    code, host_token = live_room()
+    with client.websocket_connect(f"/ws/rooms/{code}?client_id={host_token}") as host:
         host.receive_json()
         host.send_json({"type": "host.event", "kind": "goal", "match_ms": 27400,
                         "payload": {"team": "blue", "scorer": "forward"}})
@@ -89,8 +107,8 @@ def test_a_host_event_comes_back_numbered(client, live_room):
 
 
 def test_host_events_are_written_to_the_log_in_order(client, live_room):
-    code = live_room()
-    with client.websocket_connect(f"/ws/rooms/{code}?client_id=phone-7") as host:
+    code, host_token = live_room()
+    with client.websocket_connect(f"/ws/rooms/{code}?client_id={host_token}") as host:
         host.receive_json()
         for kind, match_ms in (("kickoff", 0), ("goal", 27400), ("full_time", 180000)):
             host.send_json({"type": "host.event", "kind": kind,
@@ -105,8 +123,8 @@ def test_host_events_are_written_to_the_log_in_order(client, live_room):
 
 def test_a_state_frame_is_not_written_to_the_log(client, live_room):
     # Positions at 10 Hz would swamp the log, and scoring never reads them.
-    code = live_room()
-    with client.websocket_connect(f"/ws/rooms/{code}?client_id=phone-7") as host:
+    code, host_token = live_room()
+    with client.websocket_connect(f"/ws/rooms/{code}?client_id={host_token}") as host:
         host.receive_json()
         host.send_json({"type": "host.state", "payload": {"clock": 12}})
         host.receive_json()
@@ -116,8 +134,8 @@ def test_a_state_frame_is_not_written_to_the_log(client, live_room):
 
 
 def test_a_message_the_protocol_does_not_know_is_ignored(client, live_room):
-    code = live_room()
-    with client.websocket_connect(f"/ws/rooms/{code}?client_id=phone-7") as host:
+    code, host_token = live_room()
+    with client.websocket_connect(f"/ws/rooms/{code}?client_id={host_token}") as host:
         host.receive_json()
         host.send_json({"type": "please.let.us.win", "payload": {}})
         host.send_json({"type": "host.state", "payload": {"clock": 3}})
@@ -133,10 +151,10 @@ def test_a_socket_can_watch_a_room_that_has_not_kicked_off(client, phones):
 
 def test_a_bare_list_sent_up_is_ignored(client, live_room):
     # A client running ahead of the server must not get hung up on.
-    code = live_room()
+    code, host_token = live_room()
     with client.websocket_connect(f"/ws/rooms/{code}") as viewer:
         viewer.receive_json()
-        with client.websocket_connect(f"/ws/rooms/{code}?client_id=phone-7") as host:
+        with client.websocket_connect(f"/ws/rooms/{code}?client_id={host_token}") as host:
             host.receive_json()
             host.send_json([1, 2, 3])
             host.send_json({"type": "host.state", "payload": {"clock": 7}})
@@ -146,10 +164,10 @@ def test_a_bare_list_sent_up_is_ignored(client, live_room):
 
 def test_a_host_state_with_a_list_payload_is_ignored(client, live_room):
     # Graceful degradation: truthy non-dict payloads don't kill the socket.
-    code = live_room()
+    code, host_token = live_room()
     with client.websocket_connect(f"/ws/rooms/{code}") as viewer:
         viewer.receive_json()
-        with client.websocket_connect(f"/ws/rooms/{code}?client_id=phone-7") as host:
+        with client.websocket_connect(f"/ws/rooms/{code}?client_id={host_token}") as host:
             host.receive_json()
             host.send_json({"type": "host.state", "payload": [1, 2, 3]})
             host.send_json({"type": "host.state", "payload": {"clock": 9}})
@@ -159,10 +177,10 @@ def test_a_host_state_with_a_list_payload_is_ignored(client, live_room):
 
 def test_a_host_cannot_forge_the_frame_type(client, live_room):
     # Server keys must win over anything in the payload.
-    code = live_room()
+    code, host_token = live_room()
     with client.websocket_connect(f"/ws/rooms/{code}") as viewer:
         viewer.receive_json()
-        with client.websocket_connect(f"/ws/rooms/{code}?client_id=phone-7") as host:
+        with client.websocket_connect(f"/ws/rooms/{code}?client_id={host_token}") as host:
             host.receive_json()
             host.send_json({"type": "host.state", "payload": {"type": "room", "clock": 5}})
             frame = viewer.receive_json()
@@ -172,12 +190,12 @@ def test_a_host_cannot_forge_the_frame_type(client, live_room):
 
 def test_a_host_cannot_relay_into_another_rooms_wall_tile(client, live_room):
     # The wall is shared across every tenant; room boundaries must hold.
-    code = live_room()
+    code, host_token = live_room()
     bus = client.app.state.bus
     subscription = bus.subscribe("wall")
 
     try:
-        with client.websocket_connect(f"/ws/rooms/{code}?client_id=phone-7") as host:
+        with client.websocket_connect(f"/ws/rooms/{code}?client_id={host_token}") as host:
             host.receive_json()
             host.send_json({"type": "host.state", "payload": {"code": "ZZZZ", "clock": 1}})
             host.receive_json()
@@ -192,10 +210,10 @@ def test_a_host_cannot_relay_into_another_rooms_wall_tile(client, live_room):
 
 
 def test_non_json_text_does_not_crash_the_socket(client, live_room):
-    code = live_room()
+    code, host_token = live_room()
     with client.websocket_connect(f"/ws/rooms/{code}") as viewer:
         viewer.receive_json()
-        with client.websocket_connect(f"/ws/rooms/{code}?client_id=phone-7") as host:
+        with client.websocket_connect(f"/ws/rooms/{code}?client_id={host_token}") as host:
             host.receive_json()
             host.send_text("not json at all")
             host.send_json({"type": "host.state", "payload": {"clock": 5}})
@@ -204,10 +222,10 @@ def test_non_json_text_does_not_crash_the_socket(client, live_room):
 
 
 def test_a_binary_frame_does_not_crash_the_socket(client, live_room):
-    code = live_room()
+    code, host_token = live_room()
     with client.websocket_connect(f"/ws/rooms/{code}") as viewer:
         viewer.receive_json()
-        with client.websocket_connect(f"/ws/rooms/{code}?client_id=phone-7") as host:
+        with client.websocket_connect(f"/ws/rooms/{code}?client_id={host_token}") as host:
             host.receive_json()
             host.send_bytes(b"\x00\x01\x02")
             host.send_json({"type": "host.state", "payload": {"clock": 8}})
@@ -216,10 +234,10 @@ def test_a_binary_frame_does_not_crash_the_socket(client, live_room):
 
 
 def test_host_event_with_dict_match_ms_is_ignored(client, live_room):
-    code = live_room()
+    code, host_token = live_room()
     with client.websocket_connect(f"/ws/rooms/{code}") as viewer:
         viewer.receive_json()
-        with client.websocket_connect(f"/ws/rooms/{code}?client_id=phone-7") as host:
+        with client.websocket_connect(f"/ws/rooms/{code}?client_id={host_token}") as host:
             host.receive_json()
             host.send_json({"type": "host.event", "kind": "goal", "match_ms": {"n": 1}})
             host.send_json({"type": "host.state", "payload": {"clock": 10}})
@@ -228,11 +246,11 @@ def test_host_event_with_dict_match_ms_is_ignored(client, live_room):
 
 
 def test_host_event_with_oversized_kind_is_ignored(client, live_room):
-    code = live_room()
+    code, host_token = live_room()
     huge_kind = "x" * 10000
     with client.websocket_connect(f"/ws/rooms/{code}") as viewer:
         viewer.receive_json()
-        with client.websocket_connect(f"/ws/rooms/{code}?client_id=phone-7") as host:
+        with client.websocket_connect(f"/ws/rooms/{code}?client_id={host_token}") as host:
             host.receive_json()
             host.send_json({"type": "host.event", "kind": huge_kind,
                             "match_ms": 100, "payload": {}})
@@ -242,11 +260,11 @@ def test_host_event_with_oversized_kind_is_ignored(client, live_room):
 
 
 def test_host_event_with_oversized_payload_is_ignored(client, live_room):
-    code = live_room()
+    code, host_token = live_room()
     huge_payload = {"data": "x" * 200000}
     with client.websocket_connect(f"/ws/rooms/{code}") as viewer:
         viewer.receive_json()
-        with client.websocket_connect(f"/ws/rooms/{code}?client_id=phone-7") as host:
+        with client.websocket_connect(f"/ws/rooms/{code}?client_id={host_token}") as host:
             host.receive_json()
             host.send_json({"type": "host.event", "kind": "big",
                             "match_ms": 100, "payload": huge_payload})

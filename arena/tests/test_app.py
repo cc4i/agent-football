@@ -125,7 +125,7 @@ def test_a_solo_match_starts_once_its_manager_is_ready(client, phones):
     client.post(f"/api/rooms/{code}/seats/blue", json={"philosophy": "counter"})
     client.post(f"/api/rooms/{code}/seats/blue/ready", json={"ready": True})
 
-    body = client.post(f"/api/rooms/{code}/start", json={"host_client_id": "phone-7"}).json()
+    body = client.post(f"/api/rooms/{code}/start").json()
     assert body["status"] == "live"
     assert client.get(f"/api/rooms/{code}").json()["status"] == "live"
 
@@ -135,12 +135,52 @@ def test_a_match_will_not_start_before_its_manager_is_ready(client, phones):
     code = client.post("/api/rooms", json={"mode": "solo"}).json()["code"]
     client.post(f"/api/rooms/{code}/seats/blue", json={"philosophy": "counter"})
 
-    response = client.post(f"/api/rooms/{code}/start", json={"host_client_id": "phone-7"})
+    response = client.post(f"/api/rooms/{code}/start")
     assert response.status_code == 409
     assert response.json()["detail"] == "not every dugout is ready"
 
 
 def test_starting_a_room_that_does_not_exist_is_a_404(client, phones):
     phones.join("Alex Rivera", "alex@example.com")
-    assert client.post("/api/rooms/ZZZZ/start",
-                       json={"host_client_id": "phone-7"}).status_code == 404
+    assert client.post("/api/rooms/ZZZZ/start").status_code == 404
+
+
+def test_starting_a_match_mints_and_returns_a_host_token(client, phones):
+    phones.join("Alex Rivera", "alex@example.com")
+    code = client.post("/api/rooms", json={"mode": "solo"}).json()["code"]
+    client.post(f"/api/rooms/{code}/seats/blue", json={"philosophy": "high press"})
+    client.post(f"/api/rooms/{code}/seats/blue/ready", json={"ready": True})
+
+    response = client.post(f"/api/rooms/{code}/start")
+    body = response.json()
+    assert "host_token" in body
+    assert len(body["host_token"]) > 10
+    # Each start mints a different token.
+    second_code = client.post("/api/rooms", json={"mode": "solo"}).json()["code"]
+    client.post(f"/api/rooms/{second_code}/seats/blue", json={"philosophy": "counter"})
+    client.post(f"/api/rooms/{second_code}/seats/blue/ready", json={"ready": True})
+    second_response = client.post(f"/api/rooms/{second_code}/start")
+    assert second_response.json()["host_token"] != body["host_token"]
+
+
+def test_the_host_token_does_not_leak_into_the_snapshot_or_broadcast(client, phones):
+    phones.join("Alex Rivera", "alex@example.com")
+    code = client.post("/api/rooms", json={"mode": "solo"}).json()["code"]
+    client.post(f"/api/rooms/{code}/seats/blue", json={"philosophy": "high press"})
+    client.post(f"/api/rooms/{code}/seats/blue/ready", json={"ready": True})
+
+    start_response = client.post(f"/api/rooms/{code}/start")
+    host_token = start_response.json()["host_token"]
+
+    # The snapshot from /start must not contain the token.
+    assert "host_token" in start_response.json()
+    assert "host_client_id" not in start_response.json()
+    # Reading the room must not leak it.
+    read_response = client.get(f"/api/rooms/{code}")
+    assert "host_token" not in read_response.json()
+    assert "host_client_id" not in read_response.json()
+    # The opening socket frame must not leak it.
+    with client.websocket_connect(f"/ws/rooms/{code}") as socket:
+        opening = socket.receive_json()
+        assert "host_token" not in str(opening)
+        assert host_token not in str(opening)

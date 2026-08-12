@@ -90,11 +90,6 @@ class ReadyRequest(BaseModel):
     ready: bool
 
 
-class StartRequest(BaseModel):
-    # Client IDs are opaque, but 200 chars is generous without enabling abuse.
-    host_client_id: str = Field(min_length=1, max_length=200)
-
-
 async def current_player(request: Request) -> int:
     """The player id in the session cookie, or a 401."""
     player_id = identity.verify_token(request.cookies.get(COOKIE), SESSION_SECRET)
@@ -173,8 +168,7 @@ async def set_ready(code: str, team: str, body: ReadyRequest, request: Request,
 
 
 @app.post("/api/rooms/{code}/start")
-async def start(code: str, body: StartRequest, request: Request,
-                player_id: int = Depends(current_player)):
+async def start(code: str, request: Request, player_id: int = Depends(current_player)):
     """Kick off. Whoever calls this holds physics for the whole match."""
     connection = request.app.state.conn
     code = code.upper()
@@ -182,11 +176,12 @@ async def start(code: str, body: StartRequest, request: Request,
         raise HTTPException(404, f"there is no room {code}")
     room = _room_or_404(connection, code)
     _require_seated(connection, room["id"], player_id)
+    host_token = secrets.token_urlsafe(16)
     with _rules():
-        rooms.start_match(connection, room["id"], body.host_client_id)
+        rooms.start_match(connection, room["id"], host_token)
     snapshot = _announce(request.app, room)
     request.app.state.bus.publish(WALL, {"type": "wall", "rooms": rooms.live(connection)})
-    return snapshot
+    return {**snapshot, "host_token": host_token}
 
 
 def _room_or_404(connection, code):

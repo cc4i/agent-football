@@ -303,15 +303,6 @@ def test_email_over_254_chars_is_refused(client):
     assert response.status_code == 422
 
 
-def test_host_client_id_over_limit_is_refused(client, phones):
-    phones.join("Alex Rivera", "alex@example.com")
-    code = client.post("/api/rooms", json={"mode": "solo"}).json()["code"]
-    client.post(f"/api/rooms/{code}/seats/blue", json={"philosophy": "high press"})
-    client.post(f"/api/rooms/{code}/seats/blue/ready", json={"ready": True})
-    huge_id = "x" * 10000
-    response = client.post(f"/api/rooms/{code}/start", json={"host_client_id": huge_id})
-    assert response.status_code == 422
-
 
 def test_room_codes_are_matched_case_insensitively(client, phones):
     phones.join("Alex Rivera", "alex@example.com")

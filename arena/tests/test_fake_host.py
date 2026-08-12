@@ -98,10 +98,10 @@ async def test_speed_shortens_every_gap():
 
 
 def test_the_fixture_replays_into_a_live_room(client, live_room):
-    code = live_room()
+    code, host_token = live_room()
     frames = fake_host.parse_log(FIXTURE)
 
-    with client.websocket_connect(f"/ws/rooms/{code}?client_id=phone-7") as host:
+    with client.websocket_connect(f"/ws/rooms/{code}?client_id={host_token}") as host:
         host.receive_json()                     # the opening room snapshot
         last = None
         for frame in frames:
