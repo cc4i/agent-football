@@ -1,0 +1,318 @@
+{
+  "frames": {
+    "ready_0": {
+      "frame": {
+        "x": 0,
+        "y": 0,
+        "w": 189,
+        "h": 148
+      },
+      "sourceSize": {
+        "w": 189,
+        "h": 148
+      },
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 189,
+        "h": 148
+      }
+    },
+    "ready_1": {
+      "frame": {
+        "x": 189,
+        "y": 0,
+        "w": 189,
+        "h": 148
+      },
+      "sourceSize": {
+        "w": 189,
+        "h": 148
+      },
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 189,
+        "h": 148
+      }
+    },
+    "ready_2": {
+      "frame": {
+        "x": 378,
+        "y": 0,
+        "w": 189,
+        "h": 148
+      },
+      "sourceSize": {
+        "w": 189,
+        "h": 148
+      },
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 189,
+        "h": 148
+      }
+    },
+    "ready_3": {
+      "frame": {
+        "x": 567,
+        "y": 0,
+        "w": 189,
+        "h": 148
+      },
+      "sourceSize": {
+        "w": 189,
+        "h": 148
+      },
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 189,
+        "h": 148
+      }
+    },
+    "ready_4": {
+      "frame": {
+        "x": 756,
+        "y": 0,
+        "w": 189,
+        "h": 148
+      },
+      "sourceSize": {
+        "w": 189,
+        "h": 148
+      },
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 189,
+        "h": 148
+      }
+    },
+    "ready_5": {
+      "frame": {
+        "x": 945,
+        "y": 0,
+        "w": 189,
+        "h": 148
+      },
+      "sourceSize": {
+        "w": 189,
+        "h": 148
+      },
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 189,
+        "h": 148
+      }
+    },
+    "ready_6": {
+      "frame": {
+        "x": 1134,
+        "y": 0,
+        "w": 189,
+        "h": 148
+      },
+      "sourceSize": {
+        "w": 189,
+        "h": 148
+      },
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 189,
+        "h": 148
+      }
+    },
+    "dive_left_0": {
+      "frame": {
+        "x": 0,
+        "y": 148,
+        "w": 189,
+        "h": 148
+      },
+      "sourceSize": {
+        "w": 189,
+        "h": 148
+      },
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 189,
+        "h": 148
+      }
+    },
+    "dive_left_1": {
+      "frame": {
+        "x": 189,
+        "y": 148,
+        "w": 189,
+        "h": 148
+      },
+      "sourceSize": {
+        "w": 189,
+        "h": 148
+      },
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 189,
+        "h": 148
+      }
+    },
+    "dive_left_2": {
+      "frame": {
+        "x": 378,
+        "y": 148,
+        "w": 189,
+        "h": 148
+      },
+      "sourceSize": {
+        "w": 189,
+        "h": 148
+      },
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 189,
+        "h": 148
+      }
+    },
+    "dive_left_3": {
+      "frame": {
+        "x": 567,
+        "y": 148,
+        "w": 189,
+        "h": 148
+      },
+      "sourceSize": {
+        "w": 189,
+        "h": 148
+      },
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 189,
+        "h": 148
+      }
+    },
+    "dive_left_4": {
+      "frame": {
+        "x": 756,
+        "y": 148,
+        "w": 189,
+        "h": 148
+      },
+      "sourceSize": {
+        "w": 189,
+        "h": 148
+      },
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 189,
+        "h": 148
+      }
+    },
+    "dive_right_0": {
+      "frame": {
+        "x": 0,
+        "y": 296,
+        "w": 189,
+        "h": 148
+      },
+      "sourceSize": {
+        "w": 189,
+        "h": 148
+      },
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 189,
+        "h": 148
+      }
+    },
+    "dive_right_1": {
+      "frame": {
+        "x": 189,
+        "y": 296,
+        "w": 189,
+        "h": 148
+      },
+      "sourceSize": {
+        "w": 189,
+        "h": 148
+      },
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 189,
+        "h": 148
+      }
+    },
+    "dive_right_2": {
+      "frame": {
+        "x": 378,
+        "y": 296,
+        "w": 189,
+        "h": 148
+      },
+      "sourceSize": {
+        "w": 189,
+        "h": 148
+      },
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 189,
+        "h": 148
+      }
+    },
+    "dive_right_3": {
+      "frame": {
+        "x": 567,
+        "y": 296,
+        "w": 189,
+        "h": 148
+      },
+      "sourceSize": {
+        "w": 189,
+        "h": 148
+      },
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 189,
+        "h": 148
+      }
+    },
+    "dive_right_4": {
+      "frame": {
+        "x": 756,
+        "y": 296,
+        "w": 189,
+        "h": 148
+      },
+      "sourceSize": {
+        "w": 189,
+        "h": 148
+      },
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 189,
+        "h": 148
+      }
+    }
+  },
+  "meta": {
+    "size": {
+      "w": 1323,
+      "h": 444
+    },
+    "scale": "1",
+    "image": "goalkeeper_blue_team.png"
+  }
+}

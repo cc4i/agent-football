@@ -1,0 +1,84 @@
+{
+  "frames": {
+    "idle": {
+      "frame": {
+        "x": 0,
+        "y": 0,
+        "w": 96,
+        "h": 124
+      },
+      "sourceSize": {
+        "w": 96,
+        "h": 124
+      },
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 96,
+        "h": 124
+      }
+    },
+    "run_0": {
+      "frame": {
+        "x": 96,
+        "y": 0,
+        "w": 96,
+        "h": 124
+      },
+      "sourceSize": {
+        "w": 96,
+        "h": 124
+      },
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 96,
+        "h": 124
+      }
+    },
+    "run_1": {
+      "frame": {
+        "x": 192,
+        "y": 0,
+        "w": 96,
+        "h": 124
+      },
+      "sourceSize": {
+        "w": 96,
+        "h": 124
+      },
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 96,
+        "h": 124
+      }
+    },
+    "kick": {
+      "frame": {
+        "x": 288,
+        "y": 0,
+        "w": 96,
+        "h": 124
+      },
+      "sourceSize": {
+        "w": 96,
+        "h": 124
+      },
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 96,
+        "h": 124
+      }
+    }
+  },
+  "meta": {
+    "size": {
+      "w": 384,
+      "h": 124
+    },
+    "scale": "1",
+    "image": "player_blue_team.png"
+  }
+}

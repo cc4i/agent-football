@@ -12,10 +12,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import os
 import io
-import base64
 from PIL import Image
+
+# Below this a pixel is background rather than a faint edge of something.
+ALPHA_FLOOR = 16
+
+
+def flat_pixels(image: Image.Image) -> list:
+    """Every pixel in one list. getdata() is on its way out of Pillow."""
+    if hasattr(image, "get_flattened_data"):
+        return list(image.get_flattened_data())
+    return list(image.getdata())
+
 
 def detect_key_color(image: Image.Image, fallback=(0, 255, 0)):
     """The background colour actually present, taken from the four corners.
@@ -41,32 +50,88 @@ def detect_key_color(image: Image.Image, fallback=(0, 255, 0)):
     return (r, g, b) if g > r and g > b else fallback
 
 
-def apply_chroma_key(image: Image.Image, key_color=(0, 255, 0), tolerance=60) -> Image.Image:
-    """
-    Removes the solid background color (chroma-keying) and makes it transparent.
-    Used to remove the green screen background from generated spritesheets.
+def apply_chroma_key(image: Image.Image, key_color=(0, 255, 0), tolerance=60,
+                     reach=130) -> Image.Image:
+    """Take the green screen off a generated sheet, halo and all.
+
+    Three passes, because one is not enough:
+
+    1. Everything within `tolerance` of the key colour goes. This is the only
+       pass that can reach a pocket of screen enclosed by the figure -- between
+       an arm and the body, say -- so it has to stay.
+    2. The screen is then flooded outward from what pass 1 took. Resizing the
+       sheet blends the screen into the figure's edge, and those blend pixels
+       sit well past `tolerance`: at 130 they are what came through as a neon
+       rim around every player. Walking out from known background is what keeps
+       the same generous radius off a green jersey, which the figure's own dark
+       outline stands between.
+    3. What survives against the hole is de-spilled: green that still dominates
+       a pixel is pulled back to its other channels, so the last blended ring
+       reads as an outline instead of glowing.
+
+    A jersey in the same bright green as the screen cannot be told from it, and
+    is not meant to be: the manager gets the kit they asked the model for.
     """
     image = image.convert("RGBA")
-    
-    if hasattr(image, "get_flattened_data"):
-        data = image.get_flattened_data()
-    else:
-        data = list(image.getdata())
-        
-    new_data = []
+    width, height = image.size
+    pixels = flat_pixels(image)
+    total = width * height
     kr, kg, kb = key_color
-    
-    for item in data:
-        r, g, b, a = item
-        # Calculate Euclidean distance to key color
-        dist = ((r - kr) ** 2 + (g - kg) ** 2 + (b - kb) ** 2) ** 0.5
-        if dist < tolerance:
-            new_data.append((0, 0, 0, 0)) # Make transparent
-        else:
-            new_data.append(item)
-            
-    image.putdata(new_data)
+    near = tolerance ** 2
+    far = reach ** 2
+
+    hole = bytearray(total)
+    frontier = []
+    for i, (r, g, b, a) in enumerate(pixels):
+        if a <= ALPHA_FLOOR or (r - kr) ** 2 + (g - kg) ** 2 + (b - kb) ** 2 < near:
+            hole[i] = 1
+            frontier.append(i)
+
+    # Pass 2: outward from the hole, across greenish pixels only, and only as
+    # far as `reach`.
+    while frontier:
+        i = frontier.pop()
+        for j in touching(i, width, height, total):
+            if hole[j]:
+                continue
+            r, g, b, _ = pixels[j]
+            if g > r and g > b and (r - kr) ** 2 + (g - kg) ** 2 + (b - kb) ** 2 < far:
+                hole[j] = 1
+                frontier.append(j)
+
+    # Pass 3: two rings of de-spill, which is about as far as a resize blends.
+    ring = [i for i in range(total)
+            if not hole[i] and any(hole[j] for j in touching(i, width, height, total))]
+    seen = bytearray(hole)
+    for i in ring:
+        seen[i] = 1
+    for _ in range(2):
+        nxt = []
+        for i in ring:
+            r, g, b, a = pixels[i]
+            if g > max(r, b):
+                pixels[i] = (r, max(r, b), b, a)
+            for j in touching(i, width, height, total):
+                if not seen[j]:
+                    seen[j] = 1
+                    nxt.append(j)
+        ring = nxt
+
+    image.putdata([(0, 0, 0, 0) if hole[i] else pixels[i] for i in range(total)])
     return image
+
+
+def touching(index: int, width: int, height: int, total: int):
+    """The four pixels touching this one, without wrapping round a row end."""
+    x = index % width
+    if x:
+        yield index - 1
+    if x + 1 < width:
+        yield index + 1
+    if index >= width:
+        yield index - width
+    if index + width < total:
+        yield index + width
 
 
 def extract_image_bytes(response):
@@ -80,35 +145,19 @@ def extract_image_bytes(response):
     return None
 
 
-def process_avatar_image(image_bytes: bytes, target_size: tuple) -> Image.Image:
-    """
-    Loads, resizes, and applies chroma key transparency to the image.
+def process_avatar_image(image_bytes: bytes, target_size: tuple = None) -> Image.Image:
+    """Load a generation and take the screen off it.
+
+    `target_size` is for callers that need a fixed canvas. Leave it alone and
+    the generation keeps the size the model drew: whoever cuts it into frames
+    is going to resample anyway, and doing it once from the original is what
+    keeps a figure sharp.
     """
     image = Image.open(io.BytesIO(image_bytes))
     # Sample before resizing: interpolation smears the border into the figure.
     key_color = detect_key_color(image)
-    if image.size != target_size:
+    if target_size and image.size != target_size:
         image = image.resize(target_size, Image.Resampling.LANCZOS)
     # Tight: the screen is uniform, and gold trim sits only ~109 from the lime
     # the model returns, so a loose radius erases the crest along with it.
     return apply_chroma_key(image, key_color=key_color, tolerance=60)
-
-
-def save_and_encode_image(image: Image.Image, filename: str, output_dir: str, make_default_gk: bool = False) -> str:
-    """
-    Saves the image to the target output directory and returns its base64 URI.
-    Optional: Copies the goalkeeper to a default goalkeeper.png if make_default_gk is True.
-    """
-    os.makedirs(output_dir, exist_ok=True)
-    dest_path = os.path.join(output_dir, filename)
-    image.save(dest_path, "PNG")
-    
-    if make_default_gk:
-        default_gk_path = os.path.join(output_dir, "goalkeeper.png")
-        image.save(default_gk_path, "PNG")
-            
-    # Prepare Base64 preview
-    buffered = io.BytesIO()
-    image.save(buffered, format="PNG")
-    img_base64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
-    return f"data:image/png;base64,{img_base64}"

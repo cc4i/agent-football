@@ -1,0 +1,84 @@
+{
+  "frames": {
+    "idle": {
+      "frame": {
+        "x": 0,
+        "y": 0,
+        "w": 89,
+        "h": 124
+      },
+      "sourceSize": {
+        "w": 89,
+        "h": 124
+      },
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 89,
+        "h": 124
+      }
+    },
+    "run_0": {
+      "frame": {
+        "x": 89,
+        "y": 0,
+        "w": 89,
+        "h": 124
+      },
+      "sourceSize": {
+        "w": 89,
+        "h": 124
+      },
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 89,
+        "h": 124
+      }
+    },
+    "run_1": {
+      "frame": {
+        "x": 178,
+        "y": 0,
+        "w": 89,
+        "h": 124
+      },
+      "sourceSize": {
+        "w": 89,
+        "h": 124
+      },
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 89,
+        "h": 124
+      }
+    },
+    "kick": {
+      "frame": {
+        "x": 267,
+        "y": 0,
+        "w": 89,
+        "h": 124
+      },
+      "sourceSize": {
+        "w": 89,
+        "h": 124
+      },
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 89,
+        "h": 124
+      }
+    }
+  },
+  "meta": {
+    "size": {
+      "w": 356,
+      "h": 124
+    },
+    "scale": "1",
+    "image": "player_red_team.png"
+  }
+}

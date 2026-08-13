@@ -29,6 +29,48 @@ const CATCH_UP_MS = 90;
 // player who has stopped would otherwise jog on the spot forever.
 const STILL_PX = 2.5;
 
+// How tall a figure stands on the pitch. The kits are generated per match and
+// the dugout cuts them to whatever size the model drew, so nothing on the pitch
+// may be scaled by a factor: everything is given the height it plays at.
+const OUTFIELD_HEIGHT = 38;
+const KEEPER_HEIGHT = 46;
+
+/**
+ * The frames of one pose, in the order they were drawn.
+ *
+ * A cut sheet names its frames `idle`, `run_0`, `dive_left_3` and so on, and
+ * carries as many of each as the model happened to draw.
+ *
+ * @param {string[]} names - every frame in the sheet.
+ * @param {string} prefix - the pose to pick out.
+ */
+export function posesNamed(names, prefix) {
+  const numbered = new RegExp(`^${prefix}_(\\d+)$`);
+  const order = (name) => (numbered.exec(name) ? Number(numbered.exec(name)[1]) : 0);
+  return names
+    .filter((name) => name === prefix || numbered.test(name))
+    .sort((a, b) => order(a) - order(b));
+}
+
+/** Draw a figure at a fixed height on the pitch, whatever size it was drawn. */
+export function fitHeight(sprite, height) {
+  sprite.setScale(height / sprite.frame.height);
+}
+
+/**
+ * Size a physics body in pitch pixels rather than in the art.
+ *
+ * @param {number} drop - how far below the middle of the figure to sit, for a
+ *   body that should follow the boots rather than the head.
+ */
+export function fitBody(sprite, width, height, drop = 0) {
+  const w = width / sprite.scaleX;
+  const h = height / sprite.scaleY;
+  sprite.body.setSize(w, h);
+  sprite.body.setOffset((sprite.frame.width - w) / 2,
+    (sprite.frame.height - h) / 2 + drop / sprite.scaleY);
+}
+
 /** A match clock as a scoreboard shows it. */
 function stamp(seconds) {
   const whole = Math.max(0, Math.round(seconds));
@@ -105,19 +147,18 @@ export class SoccerGameScene extends Phaser.Scene {
     this.load.image('shout_input', '/assets/ui/shout_input.png');
     this.load.image('ball', '/assets/sprites/ball.png');
 
-    // Load players sheets
-    this.load.spritesheet('player_blue', '/assets/sprites/player_blue_team.png', {
-      frameWidth: 352,
-      frameHeight: 768
-    });
-    this.load.spritesheet('player_red', '/assets/sprites/player_red_team.png', {
-      frameWidth: 352,
-      frameHeight: 768
-    });
-
-    this.load.image('goalkeeper_blue', '/assets/sprites/goalkeeper_blue_team.png');
-    this.load.image('goalkeeper_red', '/assets/sprites/goalkeeper_red_team.png');
-    this.load.image('goalkeeper', '/assets/sprites/goalkeeper.png');
+    // The kits. Each sheet is generated per match and cut in the dugout, which
+    // writes the atlas beside it: where every pose landed and what it is
+    // called. Nothing here assumes a grid, because a generated sheet is not one.
+    for (const [key, sheet] of Object.entries({
+      player_blue: 'player_blue_team',
+      player_red: 'player_red_team',
+      goalkeeper_blue: 'goalkeeper_blue_team',
+      goalkeeper_red: 'goalkeeper_red_team'
+    })) {
+      this.load.atlas(key, `/assets/sprites/${sheet}.png`,
+        `/assets/sprites/${sheet}.json`);
+    }
   }
 
   create() {
@@ -134,9 +175,6 @@ export class SoccerGameScene extends Phaser.Scene {
     // 1. Pitch background (grass, goals, flags, and crowd integrated)
     this.add.image(width / 2, height / 2, 'pitch');
 
-    // Slice goalkeeper texture into animation frames
-    this.createGoalkeeperFrames();
-
     // 3. Goals — geometry shared by the drawn nets, the collision walls and
     //    the goal-line scoring test in checkGoals().
     this.goalMouthTop = 262;
@@ -150,7 +188,7 @@ export class SoccerGameScene extends Phaser.Scene {
     this.buildGoalColliders(this.leftGoalBack, this.leftGoalLine);
     this.buildGoalColliders(this.rightGoalLine, this.rightGoalBack);
     this.drawGoals();
-    this.createPlayerAnimations();
+    this.createAnimations();
 
     // Outfield Roles Mapping: 0 = Midfielder, 1 & 2 = Defender, 3 = Forward
     const outfieldRoles = ['midfielder', 'defender', 'defender', 'forward'];
@@ -163,12 +201,12 @@ export class SoccerGameScene extends Phaser.Scene {
       { x: 560, y: 380 }
     ];
     blueSpawnCoords.forEach((coord, idx) => {
-      const p = this.physics.add.sprite(coord.x, coord.y, 'player_blue', 0);
-      p.setScale(0.07); // Outfield players consistent size
+      const p = this.physics.add.sprite(coord.x, coord.y, 'player_blue', 'idle');
+      fitHeight(p, OUTFIELD_HEIGHT);
       p.setCollideWorldBounds(true);
-      // Body aligned to the visible figure
-      p.body.setSize(150, 430);
-      p.body.setOffset(101, 200);
+      // Narrower than the figure, and low on it: a player is jostled by the
+      // body rather than by an outflung arm.
+      fitBody(p, 11, 30, 2);
 
       // Initialize AI properties
       p.setData('team', 1);
@@ -195,12 +233,11 @@ export class SoccerGameScene extends Phaser.Scene {
       { x: 848, y: 380 }
     ];
     redSpawnCoords.forEach((coord, idx) => {
-      const p = this.physics.add.sprite(coord.x, coord.y, 'player_red', 0);
-      p.setScale(0.07);
+      const p = this.physics.add.sprite(coord.x, coord.y, 'player_red', 'idle');
+      fitHeight(p, OUTFIELD_HEIGHT);
       p.setFlipX(true);
       p.setCollideWorldBounds(true);
-      p.body.setSize(150, 430);
-      p.body.setOffset(101, 200);
+      fitBody(p, 11, 30, 2);
 
       // Initialize AI properties
       p.setData('team', 2);
@@ -230,25 +267,25 @@ export class SoccerGameScene extends Phaser.Scene {
     }
 
     // 6. AI Goalkeeper 1 (Left Goal)
-    this.gk1 = this.physics.add.sprite(180, 380, 'goalkeeper_blue', 'goalkeeper_blue_ready_0');
-    this.gk1.setScale(0.22);
+    this.gk1 = this.physics.add.sprite(180, 380, 'goalkeeper_blue', 'ready_0');
+    fitHeight(this.gk1, KEEPER_HEIGHT);
     this.gk1.setCollideWorldBounds(true);
     this.gk1.body.setImmovable(true);
     this.gk1.play('gk_blue_ready');
-    this.gk1.body.setSize(120, 160);
-    this.gk1.body.setOffset(40, 20);
+    // Wide enough to be worth beating, and the same however the keeper is
+    // drawn: a dive is a shorter, wider frame than a stance.
+    fitBody(this.gk1, 26, 35);
     this.gk1.setData('team', 1);
     this.gk1.setData('role', 'goalkeeper');
 
     // 7. AI Goalkeeper 2 (Right Goal)
-    this.gk2 = this.physics.add.sprite(1228, 380, 'goalkeeper_red', 'goalkeeper_red_ready_0');
-    this.gk2.setScale(0.22);
+    this.gk2 = this.physics.add.sprite(1228, 380, 'goalkeeper_red', 'ready_0');
+    fitHeight(this.gk2, KEEPER_HEIGHT);
     this.gk2.setFlipX(true);
     this.gk2.setCollideWorldBounds(true);
     this.gk2.body.setImmovable(true);
     this.gk2.play('gk_red_ready');
-    this.gk2.body.setSize(120, 160);
-    this.gk2.body.setOffset(40, 20);
+    fitBody(this.gk2, 26, 35);
     this.gk2.setData('team', 2);
     this.gk2.setData('role', 'goalkeeper');
 
@@ -1842,10 +1879,6 @@ export class SoccerGameScene extends Phaser.Scene {
     const TOP = 18;
     const INSET = 22;
 
-    // Frame 0 is the standing pose. The crop trims the neighbouring frame's
-    // boot, which overhangs the frame edge on a generated sheet.
-    const CROP = { x: 40, y: 110, w: 250, h: 550 };
-
     const portrait = (panelX, texture, accent) => {
       const gfx = this.add.graphics();
       gfx.fillStyle(0x0f172a, 0.85);
@@ -1853,10 +1886,10 @@ export class SoccerGameScene extends Phaser.Scene {
       gfx.lineStyle(1.5, accent, 0.8);
       gfx.strokeRoundedRect(panelX, TOP, PANEL_W, PANEL_H, 10);
 
+      // The standing pose, at whatever size it was cut, filling the panel.
       const kit = this.add.sprite(
-        panelX + PANEL_W / 2, TOP + PANEL_H / 2, texture, 0);
-      kit.setCrop(CROP.x, CROP.y, CROP.w, CROP.h);
-      kit.setScale((PANEL_H - 14) / CROP.h);
+        panelX + PANEL_W / 2, TOP + PANEL_H / 2, texture, 'idle');
+      fitHeight(kit, PANEL_H - 14);
     };
 
     portrait(INSET, 'player_blue', 0x60a5fa);
@@ -2002,217 +2035,53 @@ export class SoccerGameScene extends Phaser.Scene {
     else this.shoutTimer2 = timer;
   }
 
-  createPlayerAnimations() {
-    this.anims.create({
-      key: 'blue_idle',
-      frames: [{ key: 'player_blue', frame: 0 }],
-      frameRate: 1
-    });
-    this.anims.create({
-      key: 'blue_run',
-      frames: this.anims.generateFrameNumbers('player_blue', { start: 0, end: 2 }),
-      frameRate: 8,
-      repeat: -1
-    });
-    this.anims.create({
-      key: 'blue_kick',
-      frames: [{ key: 'player_blue', frame: 3 }],
-      frameRate: 1
-    });
+  /**
+   * Build every animation out of the poses the sheets actually carry.
+   *
+   * The kits arrive from an image model, so the sheet is different every match:
+   * seven ready poses one time and six the next, a kick the model forgot, a
+   * dive row it drew as two. Each animation therefore names the poses it would
+   * like in order of preference and takes the first the sheet has got.
+   */
+  createAnimations() {
+    for (const team of ['blue', 'red']) {
+      const kit = `player_${team}`;
+      this.animate(`${team}_idle`, kit, ['idle', 'run'], { frameRate: 1 });
+      this.animate(`${team}_run`, kit, ['run', 'idle'], { frameRate: 8, repeat: -1 });
+      this.animate(`${team}_kick`, kit, ['kick', 'idle'], { frameRate: 1 });
 
-    this.anims.create({
-      key: 'red_idle',
-      frames: [{ key: 'player_red', frame: 0 }],
-      frameRate: 1
-    });
-    this.anims.create({
-      key: 'red_run',
-      frames: this.anims.generateFrameNumbers('player_red', { start: 0, end: 2 }),
-      frameRate: 8,
-      repeat: -1
-    });
-    this.anims.create({
-      key: 'red_kick',
-      frames: [{ key: 'player_red', frame: 3 }],
-      frameRate: 1
-    });
-  }
-
-  createGoalkeeperFrames() {
-    const readyCoords = [
-      { x: 35, w: 206 },
-      { x: 263, w: 205 },
-      { x: 501, w: 192 },
-      { x: 730, w: 191 },
-      { x: 941, w: 206 },
-      { x: 1168, w: 205 }
-    ];
-
-    const keys = [];
-    if (this.textures.exists('goalkeeper_blue')) keys.push('goalkeeper_blue');
-    if (this.textures.exists('goalkeeper_red')) keys.push('goalkeeper_red');
-    if (this.textures.exists('goalkeeper')) keys.push('goalkeeper');
-
-    keys.forEach(key => {
-      readyCoords.forEach((coord, idx) => {
-        this.textures.get(key).add(`${key}_ready_${idx}`, 0, coord.x, 49, coord.w, 198);
-      });
-    });
-
-    const diveLeftCoords = [
-      { x: 35, w: 255 },
-      { x: 307, w: 262 },
-      { x: 586, w: 251 },
-      { x: 856, w: 252 },
-      { x: 1119, w: 254 }
-    ];
-    keys.forEach(key => {
-      diveLeftCoords.forEach((coord, idx) => {
-        this.textures.get(key).add(`${key}_dive_left_${idx}`, 0, coord.x, 307, coord.w, 180);
-      });
-    });
-
-    const diveRightCoords = [
-      { x: 35, w: 259 },
-      { x: 312, w: 255 },
-      { x: 583, w: 254 },
-      { x: 850, w: 253 },
-      { x: 1119, w: 254 }
-    ];
-    keys.forEach(key => {
-      diveRightCoords.forEach((coord, idx) => {
-        this.textures.get(key).add(`${key}_dive_right_${idx}`, 0, coord.x, 556, coord.w, 177);
-      });
-    });
-
-    if (this.textures.exists('goalkeeper_blue')) {
-      this.anims.create({
-        key: 'gk_blue_ready',
-        frames: [
-          { key: 'goalkeeper_blue', frame: 'goalkeeper_blue_ready_0' },
-          { key: 'goalkeeper_blue', frame: 'goalkeeper_blue_ready_1' },
-          { key: 'goalkeeper_blue', frame: 'goalkeeper_blue_ready_2' },
-          { key: 'goalkeeper_blue', frame: 'goalkeeper_blue_ready_3' },
-          { key: 'goalkeeper_blue', frame: 'goalkeeper_blue_ready_4' },
-          { key: 'goalkeeper_blue', frame: 'goalkeeper_blue_ready_5' }
-        ],
-        frameRate: 6,
-        repeat: -1
-      });
-
-      this.anims.create({
-        key: 'gk_blue_dive_left',
-        frames: [
-          { key: 'goalkeeper_blue', frame: 'goalkeeper_blue_dive_left_0' },
-          { key: 'goalkeeper_blue', frame: 'goalkeeper_blue_dive_left_1' },
-          { key: 'goalkeeper_blue', frame: 'goalkeeper_blue_dive_left_2' },
-          { key: 'goalkeeper_blue', frame: 'goalkeeper_blue_dive_left_3' },
-          { key: 'goalkeeper_blue', frame: 'goalkeeper_blue_dive_left_4' }
-        ],
-        frameRate: 8,
-        repeat: 0
-      });
-
-      this.anims.create({
-        key: 'gk_blue_dive_right',
-        frames: [
-          { key: 'goalkeeper_blue', frame: 'goalkeeper_blue_dive_right_0' },
-          { key: 'goalkeeper_blue', frame: 'goalkeeper_blue_dive_right_1' },
-          { key: 'goalkeeper_blue', frame: 'goalkeeper_blue_dive_right_2' },
-          { key: 'goalkeeper_blue', frame: 'goalkeeper_blue_dive_right_3' },
-          { key: 'goalkeeper_blue', frame: 'goalkeeper_blue_dive_right_4' }
-        ],
-        frameRate: 8,
-        repeat: 0
-      });
-    }
-
-    if (this.textures.exists('goalkeeper_red')) {
-      this.anims.create({
-        key: 'gk_red_ready',
-        frames: [
-          { key: 'goalkeeper_red', frame: 'goalkeeper_red_ready_0' },
-          { key: 'goalkeeper_red', frame: 'goalkeeper_red_ready_1' },
-          { key: 'goalkeeper_red', frame: 'goalkeeper_red_ready_2' },
-          { key: 'goalkeeper_red', frame: 'goalkeeper_red_ready_3' },
-          { key: 'goalkeeper_red', frame: 'goalkeeper_red_ready_4' },
-          { key: 'goalkeeper_red', frame: 'goalkeeper_red_ready_5' }
-        ],
-        frameRate: 6,
-        repeat: -1
-      });
-
-      this.anims.create({
-        key: 'gk_red_dive_left',
-        frames: [
-          { key: 'goalkeeper_red', frame: 'goalkeeper_red_dive_left_0' },
-          { key: 'goalkeeper_red', frame: 'goalkeeper_red_dive_left_1' },
-          { key: 'goalkeeper_red', frame: 'goalkeeper_red_dive_left_2' },
-          { key: 'goalkeeper_red', frame: 'goalkeeper_red_dive_left_3' },
-          { key: 'goalkeeper_red', frame: 'goalkeeper_red_dive_left_4' }
-        ],
-        frameRate: 8,
-        repeat: 0
-      });
-
-      this.anims.create({
-        key: 'gk_red_dive_right',
-        frames: [
-          { key: 'goalkeeper_red', frame: 'goalkeeper_red_dive_right_0' },
-          { key: 'goalkeeper_red', frame: 'goalkeeper_red_dive_right_1' },
-          { key: 'goalkeeper_red', frame: 'goalkeeper_red_dive_right_2' },
-          { key: 'goalkeeper_red', frame: 'goalkeeper_red_dive_right_3' },
-          { key: 'goalkeeper_red', frame: 'goalkeeper_red_dive_right_4' }
-        ],
-        frameRate: 8,
-        repeat: 0
-      });
-    }
-
-    if (this.textures.exists('goalkeeper')) {
-      this.anims.create({
-        key: 'gk_ready',
-        frames: [
-          { key: 'goalkeeper', frame: 'goalkeeper_ready_0' },
-          { key: 'goalkeeper', frame: 'goalkeeper_ready_1' },
-          { key: 'goalkeeper', frame: 'goalkeeper_ready_2' },
-          { key: 'goalkeeper', frame: 'goalkeeper_ready_3' },
-          { key: 'goalkeeper', frame: 'goalkeeper_ready_4' },
-          { key: 'goalkeeper', frame: 'goalkeeper_ready_5' }
-        ],
-        frameRate: 6,
-        repeat: -1
-      });
-
-      this.anims.create({
-        key: 'gk_dive_left',
-        frames: [
-          { key: 'goalkeeper', frame: 'goalkeeper_dive_left_0' },
-          { key: 'goalkeeper', frame: 'goalkeeper_dive_left_1' },
-          { key: 'goalkeeper', frame: 'goalkeeper_dive_left_2' },
-          { key: 'goalkeeper', frame: 'goalkeeper_dive_left_3' },
-          { key: 'goalkeeper', frame: 'goalkeeper_dive_left_4' }
-        ],
-        frameRate: 8,
-        repeat: 0
-      });
-
-      this.anims.create({
-        key: 'gk_dive_right',
-        frames: [
-          { key: 'goalkeeper', frame: 'goalkeeper_dive_right_0' },
-          { key: 'goalkeeper', frame: 'goalkeeper_dive_right_1' },
-          { key: 'goalkeeper', frame: 'goalkeeper_dive_right_2' },
-          { key: 'goalkeeper', frame: 'goalkeeper_dive_right_3' },
-          { key: 'goalkeeper', frame: 'goalkeeper_dive_right_4' }
-        ],
-        frameRate: 8,
-        repeat: 0
-      });
+      const gloves = `goalkeeper_${team}`;
+      this.animate(`gk_${team}_ready`, gloves, ['ready'],
+        { frameRate: 6, repeat: -1 });
+      // A keeper drawn without a dive still has to be told to dive.
+      this.animate(`gk_${team}_dive_left`, gloves, ['dive_left', 'ready'],
+        { frameRate: 8, repeat: 0 });
+      this.animate(`gk_${team}_dive_right`, gloves, ['dive_right', 'ready'],
+        { frameRate: 8, repeat: 0 });
     }
   }
 
-
+  /**
+   * One animation, from the first of `poses` the sheet has frames for.
+   *
+   * @param {string[]} poses - what to play, best first.
+   * @returns {boolean} whether the sheet could answer any of them.
+   */
+  animate(key, texture, poses, config) {
+    if (!this.textures.exists(texture)) return false;
+    const names = this.textures.get(texture).getFrameNames();
+    for (const pose of poses) {
+      const found = posesNamed(names, pose);
+      if (!found.length) continue;
+      this.anims.create({
+        key,
+        frames: found.map((frame) => ({ key: texture, frame })),
+        ...config
+      });
+      return true;
+    }
+    return false;
+  }
 
   // Build the invisible static collision walls for one goal. The mouth faces
   // the pitch; the back and sides contain the ball once it crosses the line.

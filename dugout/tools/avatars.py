@@ -12,20 +12,27 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Team rebranding. Owns image generation so the chroma-key pipeline always runs."""
+"""Team rebranding. Owns image generation so the sheet the pitch reads is sound.
+
+A generation is not a sprite sheet yet: it is figures the model placed where it
+liked, on a green screen, at whatever size it drew them. Both of those are dealt
+with here, before anything reaches disk -- the screen keyed off, the poses cut
+out and packed into a grid with an atlas beside them. What the pitch loads is
+then a grid, whatever the model did.
+"""
 
 from pathlib import Path
 
 from google import genai
 
 import prompts
+import sprites
 import utils
 
 SPRITE_DIR = (
     Path(__file__).resolve().parent.parent.parent
     / "game" / "frontend" / "public" / "assets" / "sprites"
 )
-SPRITE_SIZE = (1408, 768)
 TEAMS = ("blue", "red")
 
 _CLIENT = None
@@ -42,16 +49,23 @@ def _client():
     return _CLIENT
 
 
-def _generate_one(client, prompt: str, filename: str, make_default_gk: bool):
+def _generate_one(client, prompt: str, filename: str):
+    """One sheet: asked for, keyed, cut into frames, written with its atlas."""
     response = client.models.generate_content(
         model="gemini-3.1-flash-image", contents=prompt)
     image_bytes = utils.extract_image_bytes(response)
     if not image_bytes:
         return None
-    image = utils.process_avatar_image(image_bytes, SPRITE_SIZE)
-    utils.save_and_encode_image(image, filename, str(SPRITE_DIR),
-                                make_default_gk=make_default_gk)
-    return str(SPRITE_DIR / filename)
+    # Keyed and cut at the size the model drew, so the only resampling a figure
+    # goes through is the single step down to the frame.
+    image = utils.process_avatar_image(image_bytes)
+    try:
+        sheet, atlas = sprites.normalise(image, sprites.layout_for(filename))
+    except sprites.SheetError as unusable:
+        raise AvatarGenerationError(
+            f"the model drew nothing usable for {filename}: {unusable}") from unusable
+    SPRITE_DIR.mkdir(parents=True, exist_ok=True)
+    return str(sprites.write(sheet, atlas, SPRITE_DIR / filename))
 
 
 def generate_team_avatars(team: str, color: str, logo: str, style: str) -> dict:
@@ -67,20 +81,17 @@ def generate_team_avatars(team: str, color: str, logo: str, style: str) -> dict:
         raise ValueError(f"unknown team {team!r}, expected one of {TEAMS}")
 
     client = _client()
-    SPRITE_DIR.mkdir(parents=True, exist_ok=True)
 
     outfield = _generate_one(
         client, prompts.get_player_prompt(color, logo, style),
-        f"player_{team}_team.png", False)
+        f"player_{team}_team.png")
     if outfield is None:
         raise AvatarGenerationError(
             f"the model returned no image for the {team} outfield players")
 
-    # Only our own keeper becomes the fallback goalkeeper.png; the opponent's
-    # must not overwrite it.
     keeper = _generate_one(
         client, prompts.get_goalkeeper_prompt(color, logo, style),
-        f"goalkeeper_{team}_team.png", team == "blue")
+        f"goalkeeper_{team}_team.png")
     if keeper is None:
         raise AvatarGenerationError(
             f"the model returned no image for the {team} goalkeeper")
