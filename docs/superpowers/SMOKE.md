@@ -60,6 +60,9 @@ the Playwright script it writes in stage 2. Run this on your own machine.
    - Antigravity writes a Playwright script and runs it.
    - A Chrome window opens in front of you and plays the match, muted. This is
      the point of the stage: if it comes up headless, the script is wrong.
+   - It fills the screen. A window a fraction of the display, or a maximised
+     one with the page still small inside it, means the script pinned a size
+     or passed a viewport.
    - The simulation runs at 1x. Antigravity must not touch the speed slider on
      its own; that control belongs to you.
    - If it hits the #kick-off-btn stability timeout, it should retry with

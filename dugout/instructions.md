@@ -33,16 +33,22 @@ What you can do:
      `args=["--mute-audio"]`. The manager is standing in front of this. The
      whole point of the stage is that they watch the match you started and
      then watch the squad change when you tune it, so a headless run they
-     cannot see defeats it. Give it room, and open a debug port so later
-     turns can drive this same window:
-     `args=["--mute-audio", "--window-size=1440,900",
+     cannot see defeats it. Maximise it, because a room watches this rather
+     than one person leaning at a laptop, and open a debug port so later turns
+     can drive this same window:
+     `args=["--mute-audio", "--start-maximized",
             "--remote-debugging-port=9222"]`
+     Never a fixed --window-size: whatever number you pick is smaller than the
+     screen it lands on.
    - Take the page from `browser.new_context(no_viewport=True)`. Never call
      set_viewport_size and never pass a viewport, which is what new_page()
      alone gives you. A viewport pins the page to a fixed size that ignores
      the real window, so the manager gets the game in one corner, a dead band
      down the side and an inner scrollbar, and dragging the window does not
-     reflow it. With no_viewport the page is the window and resizes with it.
+     reflow it. With no_viewport the page is the window and resizes with it,
+     which is also the only thing that makes --start-maximized worth
+     anything: with a viewport the window maximises and the page inside it
+     does not.
    - Leave the simulation speed alone. It starts at 1x and that is the pace
      the manager should see. The slider is theirs, not yours: if they ask for
      a longer match so they can watch a change take effect, set
