@@ -51,9 +51,10 @@ uv run pytest
 | GET | `/api/rooms/{code}/qr.svg` | anyone |
 | POST | `/api/rooms/{code}/seats/{team}` | a phone with a session |
 | POST | `/api/rooms/{code}/seats/{team}/ready` | that dugout's manager |
-| POST | `/api/rooms/{code}/shout` | that dugout's manager, once the match is live |
+| POST | `/api/rooms/{code}/shout` | that dugout's manager, once the match is live; in `WRKS`, a caller with `X-Arena-Service` |
 | POST | `/api/rooms/{code}/start` | anyone seated in the match |
 | GET | `/api/philosophies`, `/api/presets` | anyone |
+| GET | `/api/attributes` | anyone - every role's shipped values and the band each may move in |
 | GET | `/api/rooms/{code}/teams/{team}/profiles` | anyone |
 | GET | `/api/rooms/{code}/teams/{team}/profiles/{role}` | anyone |
 | PATCH | `/api/rooms/{code}/teams/{team}/profiles/{role}` | that dugout's manager, or a caller with `X-Arena-Service` |
@@ -91,3 +92,10 @@ The host is trusted for physics and for nothing else. It cannot say who won.
 The arena opens one room for itself at startup, code `WRKS`, unranked. It is
 where the dugout tunes profiles with nobody sitting in a dugout seat, and it
 is the room the pitch renders when it is opened with no `?room=`.
+
+It never kicks off and never ends, so the seat-and-live rule that governs
+shouting has nobody to apply to. A caller holding `ARENA_SERVICE_TOKEN` may
+shout there instead, always as blue and always under the name `Antigravity` -
+the manager is in a chat window, and the agent is the one on the touchline.
+That exemption is for `WRKS` and nowhere else: the same token shouting into a
+stranger's match is refused like any passer-by.

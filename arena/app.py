@@ -26,6 +26,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator, model_validator
 from uvicorn.protocols.utils import ClientDisconnected
 
+import attributes
 import board
 import chain
 import codes
@@ -86,6 +87,11 @@ if not SERVICE_TOKEN:
 # A role has fewer than fifty attributes. Anything larger is a mistake or an
 # attempt to make the validator do work, and it is cheaper to refuse it here.
 MAX_CHANGES = 64
+
+# Whose name goes on a shout made in the workshop. Nobody is sitting in that
+# dugout: the manager is in a chat window and the agent is the one on the
+# touchline, so the agent is who the log says shouted.
+WORKSHOP_ACTOR = "Antigravity"
 
 # How much of a room's log one catch-up read may return. A three-minute match
 # produces tens of events, so this only bites on a room somebody has left open.
@@ -234,10 +240,7 @@ class ProfilePatchRequest(BaseModel):
 
 async def current_player(request: Request) -> int:
     """The player id in the session cookie, or a 401."""
-    player_id = identity.verify_token(request.cookies.get(COOKIE), SESSION_SECRET)
-    if player_id is None or rooms.get_player(request.app.state.conn, player_id) is None:
-        raise HTTPException(401, "join first - your phone has no session")
-    return player_id
+    return _player_or_401(request, request.app.state.conn)
 
 
 @app.get("/health")
@@ -434,9 +437,31 @@ async def read_presets():
     return {"presets": presets.catalogue()}
 
 
+@app.get("/api/attributes")
+async def read_attributes():
+    """Every role's attributes: what the squad ships with, and how far each may move.
+
+    The rules themselves, rather than any room's copy of them. The dugout's
+    tuners are shown a band per attribute so they never propose a number that
+    was always going to be refused, and they used to be shown it from a second
+    copy of these rules kept beside the workshop. Two copies of a validator
+    drift apart until one of them is wrong, so the one that decides is also the
+    one that answers.
+    """
+    return {"roles": {role: _bands(role) for role in attributes.ROLES}}
+
+
+def _bands(role):
+    """One role's attributes, each with its shipped value and its two limits."""
+    bands = {}
+    for name, value in attributes.baseline_for(role).items():
+        low, high = attributes.range_for(name, value)
+        bands[name] = {"baseline": value, "min": low, "max": high}
+    return bands
+
+
 @app.post("/api/rooms/{code}/shout")
-async def shout(code: str, body: ShoutRequest, request: Request,
-                player_id: int = Depends(current_player)):
+async def shout(code: str, body: ShoutRequest, request: Request):
     """Say something to your squad, with a chip or in your own words.
 
     The words are logged and broadcast first, then what they moved, so the
@@ -446,12 +471,7 @@ async def shout(code: str, body: ShoutRequest, request: Request,
     the chain answering them runs on after this returns.
     """
     connection, room = _profile_room(request, code)
-    team = rooms.team_of(connection, room["id"], player_id)
-    if team is None:
-        raise HTTPException(403, "only somebody in a dugout can shout")
-    if room["status"] != "live":
-        raise HTTPException(409, "there is nobody out there to shout at yet")
-    player = rooms.get_player(connection, player_id)
+    team, actor = _who_is_shouting(request, connection, room)
 
     if body.preset is not None:
         try:
@@ -459,7 +479,7 @@ async def shout(code: str, body: ShoutRequest, request: Request,
         except presets.Unknown as problem:
             raise HTTPException(422, str(problem)) from problem
         said = _say(request.app, connection, room, team, chip["phrase"],
-                    player["display_name"], preset=chip["name"])
+                    actor, preset=chip["name"])
         for result in presets.apply(connection, room["id"], team, chip["name"]):
             _record_patch(request.app, connection, room, team, result,
                           reason=chip["phrase"], actor="preset",
@@ -476,10 +496,36 @@ async def shout(code: str, body: ShoutRequest, request: Request,
     if not request.app.state.chain.has_room(room["id"], team):
         raise HTTPException(429, "give the squad a moment - two of your calls "
                                  "are still going out")
-    said = _say(request.app, connection, room, team, words, player["display_name"])
-    ahead = request.app.state.chain.submit(
-        room, team, said["seq"], words, player["display_name"])
+    said = _say(request.app, connection, room, team, words, actor)
+    ahead = request.app.state.chain.submit(room, team, said["seq"], words, actor)
     return {**said, "ahead": ahead}
+
+
+def _who_is_shouting(request, connection, room):
+    """Which dugout a shout came from, and whose name goes on it.
+
+    Two callers, and only two. A manager shouts from a phone, with a session
+    and a seat, at a match that has kicked off. The workshop has no phones and
+    no seats -- it is the lab the dugout's five stages happen in, one blue
+    squad in front of a pitch that is always running -- so Antigravity shouts
+    there with the service token instead.
+
+    That authority stops at the workshop on purpose. The token is held by
+    processes on the machine the arena runs on, and none of them has any
+    business shouting into a match a stranger is playing on their phone.
+    """
+    if _is_service_caller(request) and room["code"] == codes.WORKSHOP:
+        if room["status"] not in ("lobby", "live"):
+            raise HTTPException(409, "that match is over")
+        return "blue", WORKSHOP_ACTOR
+
+    player_id = _player_or_401(request, connection)
+    team = rooms.team_of(connection, room["id"], player_id)
+    if team is None:
+        raise HTTPException(403, "only somebody in a dugout can shout")
+    if room["status"] != "live":
+        raise HTTPException(409, "there is nobody out there to shout at yet")
+    return team, rooms.get_player(connection, player_id)["display_name"]
 
 
 def _say(fastapi_app, connection, room, team, text, actor, preset=None):
@@ -644,18 +690,33 @@ def _require_own_seat(connection, room_id, team, player_id):
 def _require_profile_writer(request, connection, room_id, team):
     """A dugout's own manager, or a trusted service caller acting for them.
 
-    The service token is checked first and in constant time, because the
-    agents have no session to fall back on. An empty configured token can
-    never match, so forgetting to set it locks the agents out rather than
-    letting everyone in.
+    The service token is checked first, because the agents have no session to
+    fall back on.
+    """
+    if _is_service_caller(request):
+        return
+    _require_own_seat(connection, room_id, team,
+                      _player_or_401(request, connection))
+
+
+def _is_service_caller(request):
+    """Whether this came from a process holding the shared secret.
+
+    Compared in constant time, and an empty configured token can never match,
+    so forgetting to set one locks the agents out rather than letting everyone
+    in.
     """
     offered = request.headers.get("x-arena-service", "")
-    if SERVICE_TOKEN and offered and hmac.compare_digest(offered, SERVICE_TOKEN):
-        return
+    return bool(SERVICE_TOKEN and offered
+                and hmac.compare_digest(offered, SERVICE_TOKEN))
+
+
+def _player_or_401(request, connection):
+    """The player id in the session cookie, or a 401 a phone can read."""
     player_id = identity.verify_token(request.cookies.get(COOKIE), SESSION_SECRET)
     if player_id is None or rooms.get_player(connection, player_id) is None:
         raise HTTPException(401, "join first - your phone has no session")
-    _require_own_seat(connection, room_id, team, player_id)
+    return player_id
 
 
 def _require_seated(connection, room_id, player_id):

@@ -66,6 +66,32 @@ def test_baseline_for_refuses_a_role_it_does_not_know():
         attributes.baseline_for("striker")
 
 
+def test_the_rules_are_published_role_by_role(client):
+    # The dugout tunes against these. It used to keep a second copy of them,
+    # which is exactly how one of the two ends up wrong.
+    roles = client.get("/api/attributes").json()["roles"]
+    assert set(roles) == set(attributes.ROLES)
+    assert set(roles["defender"]) == set(attributes.baseline_for("defender"))
+
+
+def test_every_published_attribute_carries_its_shipped_value_and_its_band(client):
+    defender = client.get("/api/attributes").json()["roles"]["defender"]
+    assert defender["aggression"] == {
+        "baseline": attributes.baseline_for("defender")["aggression"],
+        "min": 0.0, "max": 1.0}
+    assert defender["tackleCooldown"]["min"] == 100.0
+    assert defender["tackleCooldown"]["max"] == 2000.0
+
+
+def test_a_value_at_either_end_of_a_published_band_is_one_the_validator_takes(client):
+    # The band is shown to a tuner so it never proposes a number that was
+    # always going to be refused. That only holds if both come from one place.
+    for role, bands in client.get("/api/attributes").json()["roles"].items():
+        for name, band in bands.items():
+            assert attributes.validate(role, {name: band["min"]}) == []
+            assert attributes.validate(role, {name: band["max"]}) == []
+
+
 def test_every_baseline_attribute_is_named_like_the_game_reads_it():
     # A baseline is also the list of names a squad will accept an instruction
     # about. "-aggression" once sat beside "aggression" in the defender file:
