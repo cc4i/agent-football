@@ -19,7 +19,7 @@
 from google.adk.agents.llm_agent import LlmAgent
 from agents.constants import GeminiConstants
 from .tools import update_profile
-from .tools import make_condition_toolset, CONDITION_GUIDANCE
+from .tools import make_condition_toolset, CONDITION_GUIDANCE, stamp_the_room
 
 
 # Prompts set aside as uncommented variables:
@@ -81,6 +81,7 @@ forward_agent = LlmAgent(
     tools=[update_profile]
     + make_condition_toolset()
     ,
+    before_tool_callback=stamp_the_room,
     output_key="forward_response"
 )
 

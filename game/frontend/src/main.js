@@ -437,6 +437,11 @@ async function sendInstructionToAgent(msg, options = {}) {
       },
       body: JSON.stringify({
         state: {
+          // The specialists read the room from here, exactly as the arena's
+          // own chain sets it. Without it they file every injury against the
+          // workshop, whichever match this tab is actually running.
+          room_code: room.code,
+          team: room.team,
           __session_metadata__: {
             displayName: "Futsal Coach Session"
           }

@@ -99,6 +99,33 @@ def make_condition_toolset() -> list:
         return [dummy_report_injury, dummy_request_substitution]
 
 
+# The two tools the MCP server exposes. They are filtered by name in
+# `make_condition_toolset`, and stamped by name below.
+CONDITION_TOOLS = ("report_injury", "request_substitution")
+
+
+def stamp_the_room(tool, args, tool_context):
+    """Put the room and the dugout on an MCP condition call.
+
+    `update_profile` runs in this process and reads both from session state.
+    These two do not: they are behind stdio in the MCP server, which has no way
+    to reach ADK state, so they take the room as an argument. Nothing in the
+    prompt told the model what to pass, so it passed nothing and every room's
+    injuries were filed against the workshop.
+
+    Asking for it in the prompt would make one room's toast depend on a
+    language model remembering an argument. The room is not the model's to
+    choose, so it is stamped here and any value the model did invent is
+    overwritten. Returning None lets the call go on with the arguments as
+    amended.
+    """
+    if tool.name not in CONDITION_TOOLS:
+        return None
+    args["room"] = tool_context.state.get("room_code") or arena_client.DEFAULT_ROOM
+    args["team"] = tool_context.state.get("team") or arena_client.DEFAULT_TEAM
+    return None
+
+
 # Shared guidance appended to every outfield player about self-reporting condition.
 CONDITION_GUIDANCE = """
 
