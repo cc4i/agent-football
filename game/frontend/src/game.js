@@ -18,9 +18,37 @@ import { Sound } from './audio';
 export const GAME_DURATION_SEC = 180;
 export const STATUS_CHECK_MS = 55000;
 
+// A viewer is told where everything is ten times a second and redraws sixty
+// times a second, so each sprite is eased toward the last place the host put
+// it. Over one wire interval this closes most of the gap without ever getting
+// ahead of the host, which is what a lower number would do between frames.
+const CATCH_UP_MS = 90;
+
+// Below this much still to travel a viewer's player is standing still. It has
+// to be a little more than nothing: eased motion never quite arrives, and a
+// player who has stopped would otherwise jog on the spot forever.
+const STILL_PX = 2.5;
+
+/** A match clock as a scoreboard shows it. */
+function stamp(seconds) {
+  const whole = Math.max(0, Math.round(seconds));
+  const mins = Math.floor(whole / 60);
+  const secs = whole % 60;
+  return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+}
+
 export class SoccerGameScene extends Phaser.Scene {
-  constructor() {
+  /**
+   * @param {{role?: 'host'|'viewer'}} options - `viewer` renders the host's
+   *   frames and runs none of the AI or physics below it.
+   */
+  constructor(options = {}) {
     super({ key: 'SoccerGameScene' });
+    this.role = options.role === 'viewer' ? 'viewer' : 'host';
+    // The most recent frame off the room socket. main.js parks it here and
+    // applyFrame drains it; a frame that arrives between two draws replaces
+    // the one before it rather than queueing, because it is more recent.
+    this.wire = null;
     this.score1 = 0;
     this.score2 = 0;
     this.matchTime = GAME_DURATION_SEC;
@@ -388,10 +416,7 @@ export class SoccerGameScene extends Phaser.Scene {
     }).setOrigin(0.5);
 
     // Timer
-    const initialMins = Math.floor(GAME_DURATION_SEC / 60);
-    const initialSecs = GAME_DURATION_SEC % 60;
-    const initialTimeStr = `${initialMins.toString().padStart(2, '0')}:${initialSecs.toString().padStart(2, '0')}`;
-    this.timeText = this.add.text(width / 2, sbY + sbHeight / 2, initialTimeStr, {
+    this.timeText = this.add.text(width / 2, sbY + sbHeight / 2, stamp(GAME_DURATION_SEC), {
       fontFamily: '"Outfit", "Inter", Arial, sans-serif',
       fontSize: '22px',
       color: '#ffcc00',
@@ -401,6 +426,8 @@ export class SoccerGameScene extends Phaser.Scene {
     this.setupCoaches();
     this.setupKitPortraits();
 
+    if (this.role === 'viewer') return this.watch();
+
     this.startTimer();
     this.gameActive = true;
     Sound.playWhistle();
@@ -408,7 +435,31 @@ export class SoccerGameScene extends Phaser.Scene {
     this.report('kickoff', {});
   }
 
+  /**
+   * Hand the match over to the host and settle in to watch.
+   *
+   * The world is paused rather than the scene stopped: the pitch, the sprites
+   * and the scoreboard are all still here and still drawn, and only the bodies
+   * stop moving. No timer either -- the clock on this screen is the host's
+   * clock, arriving with every frame, so a viewer whose tab was throttled comes
+   * back showing the right time rather than its own.
+   */
+  watch() {
+    this.physics.world.pause();
+    this.timeText.setText(stamp(GAME_DURATION_SEC));
+    // The two arrows mark whichever player the keyboard is currently driving.
+    // Nobody is driving one here, and the host does not say who it is driving,
+    // so they would sit in the corner pointing at the crowd all match.
+    this.blueIndicator.setVisible(false);
+    this.redIndicator.setVisible(false);
+  }
+
   update(time, delta) {
+    // A viewer runs none of the thousand-odd lines below. Every sprite here is
+    // an arcade body whose position this client computes, so the only thing
+    // that has to change for it to be somebody else's match is where those
+    // positions come from.
+    if (this.role === 'viewer') return this.applyFrame(delta);
     if (!this.gameActive) return;
     this.publishFrame(time);
 
@@ -640,8 +691,18 @@ export class SoccerGameScene extends Phaser.Scene {
     }
   }
 
-  updateBlueProfiles(profiles) {
-    this.blueProfiles = JSON.parse(JSON.stringify(profiles));
+  /**
+   * Hand one dugout's squad to the pitch.
+   *
+   * Both sides, because a host in a head-to-head room is running the other
+   * manager's players as well as its own, and their shouts have to move
+   * somebody. Copied rather than referenced so nothing outside the scene can
+   * change a profile mid-frame.
+   */
+  updateProfiles(team, profiles) {
+    const squad = JSON.parse(JSON.stringify(profiles));
+    if (team === 'red') this.redProfiles = squad;
+    else this.blueProfiles = squad;
   }
 
   setSimulationSpeed(speed) {
@@ -1546,15 +1607,124 @@ export class SoccerGameScene extends Phaser.Scene {
     };
   }
 
+  /**
+   * Draw the host's most recent frame, eased.
+   *
+   * The frame carries fractions of the canvas rather than pixels, so a viewer
+   * on a wall and a viewer on a laptop each multiply by their own size and get
+   * the same match. Nothing is extrapolated: a sprite is only ever moved toward
+   * a position the host has actually reported, which is why a dropped frame
+   * shows as a moment of coasting rather than a player running through a wall
+   * and being yanked back.
+   */
+  applyFrame(delta) {
+    const frame = this.wire;
+    if (!frame) return;
+
+    const width = this.sys.game.config.width;
+    const height = this.sys.game.config.height;
+    const ease = Math.min(1, delta / CATCH_UP_MS);
+    // Measured before the move, because after it there is nothing left to
+    // measure: at a full step the sprite is standing on the answer.
+    const toward = (sprite, at) => {
+      const x = at[0] * width;
+      const y = at[1] * height;
+      const togo = Phaser.Math.Distance.Between(sprite.x, sprite.y, x, y);
+      const heading = x - sprite.x;
+      sprite.setPosition(sprite.x + heading * ease, sprite.y + (y - sprite.y) * ease);
+      return { togo, heading };
+    };
+
+    if (frame.ball) {
+      const { togo, heading } = toward(this.ball, frame.ball);
+      // The host turns the ball as it rolls, by the same coefficient. A ball
+      // that slides across a wall without spinning reads as a bug on a screen
+      // people are standing in front of.
+      this.ball.rotation += Math.sign(heading) * togo * ease * 0.09;
+      if (this.ballShadow) this.ballShadow.setPosition(this.ball.x, this.ball.y);
+    }
+    this.watchSide([this.gk1, ...this.bluePlayers], frame.blue, 1, toward);
+    this.watchSide([this.gk2, ...this.redPlayers], frame.red, 2, toward);
+    this.watchScore(frame);
+  }
+
+  /**
+   * One dugout's five, keeper first, in the order the host packed them.
+   *
+   * There is no velocity on the wire and there does not need to be: how far a
+   * player still has to travel says whether they are running, and which way
+   * says which way they are facing. Sending it would be sending something the
+   * receiver can already see.
+   */
+  watchSide(sprites, positions, teamNum, toward) {
+    if (!Array.isArray(positions)) return;
+    sprites.forEach((sprite, index) => {
+      const at = positions[index];
+      if (!sprite || !Array.isArray(at)) return;
+      const { togo, heading } = toward(sprite, at);
+      this.followSprite(sprite);
+      // The keepers have their own ready and dive animations and no run cycle.
+      if (index === 0) return;
+      if (togo <= STILL_PX) return sprite.play(teamNum === 1 ? 'blue_idle' : 'red_idle', true);
+      sprite.setFlipX(heading < 0);
+      sprite.play(teamNum === 1 ? 'blue_run' : 'red_run', true);
+    });
+  }
+
+  /**
+   * Take a player's floating name and any live shout along with them.
+   *
+   * Neither is a child of the sprite, so neither moves on its own. The host
+   * drags them along at the bottom of `update`; without the same thing here a
+   * viewer shows ten players running out from under their own names, which is
+   * exactly what it looks like.
+   */
+  followSprite(sprite) {
+    const label = sprite.getData('label');
+    if (label) label.setPosition(sprite.x, sprite.y - 45);
+    const bubble = sprite.getData('shoutGraphics');
+    const words = sprite.getData('shoutText');
+    if (bubble && words && bubble.alpha > 0) {
+      bubble.setPosition(sprite.x, sprite.y - 75);
+      words.setPosition(sprite.x, sprite.y - 75);
+    }
+  }
+
+  /**
+   * React to something the host reported.
+   *
+   * A goal on a big screen with no whistle and no flash reads as the number
+   * quietly going up. The host does all of this from `scoreGoal`, which a
+   * viewer never runs, so a viewer has to be told instead.
+   */
+  cheer(kind) {
+    if (this.role !== 'viewer') return;
+    if (kind === 'goal' || kind === 'own_goal') {
+      Sound.playGoal();
+      this.cameras.main.flash(300, 255, 255, 255);
+    }
+    if (kind === 'kickoff' || kind === 'full_time') Sound.playWhistle();
+  }
+
+  /** The scoreline and the clock, both the host's. */
+  watchScore(frame) {
+    if (Array.isArray(frame.score)) {
+      [this.score1, this.score2] = frame.score;
+      this.scoreText1.setText(String(this.score1));
+      this.scoreText2.setText(String(this.score2));
+    }
+    if (typeof frame.clock === 'number') {
+      this.matchTime = Math.max(0, frame.clock);
+      this.timeText.setText(stamp(this.matchTime));
+    }
+  }
+
   startTimer() {
     this.timerEvent = this.time.addEvent({
       delay: 1000,
       callback: () => {
         this.matchTime--;
-
-        const mins = Math.floor(this.matchTime / 60);
-        const secs = this.matchTime % 60;
-        this.timeText.setText(`${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`);
+        this.timeText.setText(stamp(this.matchTime));
 
         if (this.matchTime <= 0) {
           this.endMatch();
@@ -1606,10 +1776,7 @@ export class SoccerGameScene extends Phaser.Scene {
     this.matchTime = GAME_DURATION_SEC;
     this.scoreText1.setText('0');
     this.scoreText2.setText('0');
-    const initialMins = Math.floor(GAME_DURATION_SEC / 60);
-    const initialSecs = GAME_DURATION_SEC % 60;
-    const initialTimeStr = `${initialMins.toString().padStart(2, '0')}:${initialSecs.toString().padStart(2, '0')}`;
-    this.timeText.setText(initialTimeStr);
+    this.timeText.setText(stamp(GAME_DURATION_SEC));
     this.isResetting = false;
 
     this.ball.body.setEnable(true);

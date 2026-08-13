@@ -45,6 +45,18 @@ export const room = {
 
 export const isHost = () => room.as === 'host' && Boolean(room.clientId);
 
+/**
+ * Whether this pitch renders somebody else's match instead of running its own.
+ *
+ * Being in a match without the token that holds its physics is exactly what
+ * watching is. The workshop is deliberately not a match, so the lab still runs
+ * its own simulation with no token anywhere in sight.
+ */
+export const isViewer = () => room.inMatch && !isHost();
+
+/** The other dugout. A host drives both of them. */
+export const opposite = (team = room.team) => (team === 'red' ? 'blue' : 'red');
+
 /** Every role's attributes for one dugout, as the arena holds them. */
 export async function readProfiles(team = room.team) {
   const response = await fetch(

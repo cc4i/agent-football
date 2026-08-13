@@ -17,10 +17,16 @@ import Phaser from 'phaser';
 import { SoccerGameScene, GAME_DURATION_SEC, STATUS_CHECK_MS } from './game';
 import { Sound } from './audio';
 import { createStatusHook } from './status.js';
-import { room, isHost, readProfiles, connect } from './arena.js';
+import { room, isHost, isViewer, opposite, readProfiles, connect } from './arena.js';
 
 let gameInstance = null;
 let currentProfiles = {};
+
+// The other dugout, which only a host has any business holding. Kept apart from
+// `currentProfiles` because that one is this page's own squad: it is what the
+// attribute panel shows, what the debug log diffs, and what the workshop
+// stages work on. The opposition is simulation input and nothing else.
+let otherProfiles = {};
 
 // Toggle to show/hide the "Debug logs" panel entirely. Set to false to remove
 // the panel from the UI (it will not be rendered and no logs are collected).
@@ -245,7 +251,9 @@ function applyProfilesToScene() {
   window.currentProfiles = currentProfiles; // Expose globally for Phaser
   if (!gameInstance) return;
   const scene = gameInstance.scene.getScene('SoccerGameScene');
-  if (scene) scene.updateBlueProfiles(currentProfiles);
+  if (!scene) return;
+  scene.updateProfiles(room.team, currentProfiles);
+  if (isHost()) scene.updateProfiles(opposite(), otherProfiles);
 }
 
 // This dugout's squad as the arena holds it. Read once at load and again on a
@@ -258,6 +266,11 @@ async function loadProfiles() {
       // Log the initial values so the panel shows the starting config.
       appendDebugLog(role, diffProfile({}, profile), 'initial load');
     });
+    // A host runs the whole pitch, so it reads the other dugout too. In a solo
+    // room that is the house side the arena seeded from the baselines, and in
+    // a head-to-head room it is a second manager's squad, moving on their
+    // shouts. Only the arena knows which, and it does not have to say.
+    if (isHost()) otherProfiles = await readProfiles(opposite());
     applyProfilesToScene();
   } catch (err) {
     console.error("Failed to load player profiles:", err);
@@ -268,13 +281,20 @@ async function loadProfiles() {
 // all the simulation and the debug panel need -- and it arrives when it
 // happens, rather than up to two seconds later.
 function applyPatch(payload) {
-  if (payload.team !== room.team) return; // the other dugout's business
-  const before = currentProfiles[payload.role] || {};
+  const mine = payload.team === room.team;
+  // A viewer computes nothing: its players are wherever the host's last frame
+  // put them, so the other dugout's moves are the host's business alone.
+  if (!mine && !isHost()) return;
+  const squad = mine ? currentProfiles : otherProfiles;
+  const before = squad[payload.role] || {};
   const after = { ...before, ...(payload.changed || {}) };
   const changes = diffProfile(before, after);
   if (!changes.length) return;
-  currentProfiles[payload.role] = after;
-  appendDebugLog(payload.role, changes, payload.actor || 'applied');
+  squad[payload.role] = after;
+  // The panel and the log belong to this page's dugout. The opposition moving
+  // is not this manager's news, and printing it would read as their own squad
+  // changing under them.
+  if (mine) appendDebugLog(payload.role, changes, payload.actor || 'applied');
   applyProfilesToScene();
 }
 
@@ -685,7 +705,10 @@ function startPhaserGame() {
         debug: false
       }
     },
-    scene: [SoccerGameScene]
+    // An instance rather than the class, because which of the two things this
+    // pitch is -- the match, or a picture of somebody else's -- has to be
+    // settled before create() runs a whistle and a clock.
+    scene: [new SoccerGameScene({ role: isViewer() ? 'viewer' : 'host' })]
   };
 
   gameInstance = new Phaser.Game(config);
@@ -694,7 +717,7 @@ function startPhaserGame() {
   gameInstance.events.once('ready', () => {
     const scene = gameInstance.scene.getScene('SoccerGameScene');
     if (scene) {
-      scene.updateBlueProfiles(currentProfiles);
+      applyProfilesToScene();
       const speedVal = parseFloat(document.getElementById('sim-speed-input').value);
       scene.setSimulationSpeed(speedVal);
       if (isHost()) {
@@ -850,7 +873,16 @@ async function checkSubstitutions() {
 // nothing said between the read and the connect is missed.
 const feed = connect({
   onEvent: (message) => {
-    if (message.kind === 'profile.patch') applyPatch(message.payload);
+    if (message.kind === 'profile.patch') return applyPatch(message.payload);
+    const watching = gameInstance && gameInstance.scene.getScene('SoccerGameScene');
+    if (watching) watching.cheer(message.kind);
+  },
+  // A viewer's whole match arrives here. Parked rather than drawn: the scene
+  // reads it on its next frame, so a burst off a reconnecting socket costs one
+  // draw rather than one draw each.
+  onState: (message) => {
+    const scene = gameInstance && gameInstance.scene.getScene('SoccerGameScene');
+    if (scene) scene.wire = message;
   },
 });
 
@@ -870,11 +902,17 @@ if (room.inMatch) {
   sendInstructionToAgent("RESTORE_BASELINE", { showHuddle: false }).then(loadProfiles);
 }
 
-// Poll for player condition events (injuries / sub requests) and toast them.
-primeSubstitutions().then(() => setInterval(checkSubstitutions, 2000));
+// The squad's own housekeeping, and the workshop's alone. A viewer is a
+// picture of a match somebody else is running: asking its specialists how
+// tired they feel would put four agents to work on behalf of a screen, and
+// then act on the answer in a room this tab does not hold the physics for.
+if (!isViewer()) {
+  // Poll for player condition events (injuries / sub requests) and toast them.
+  primeSubstitutions().then(() => setInterval(checkSubstitutions, 2000));
 
-// Periodic team condition self-check so injuries/subs can happen autonomously.
-setInterval(runStatusCheck, STATUS_CHECK_MS);
+  // Periodic team condition self-check so injuries/subs can happen autonomously.
+  setInterval(runStatusCheck, STATUS_CHECK_MS);
+}
 
 // 📟 Wire up terminal clear button
 const terminalClearBtn = document.getElementById("terminal-clear");
