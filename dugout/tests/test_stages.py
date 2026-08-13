@@ -11,14 +11,7 @@ import stages
 def fake_fs(tmp_path, monkeypatch):
     sprites = tmp_path / "sprites"
     sprites.mkdir()
-    state = tmp_path / "player_state"
-    state.mkdir()
-    for name in ("defender", "midfielder", "forward", "goalkeeper"):
-        payload = json.dumps({"pace": 0.5})
-        (state / f"{name}.json").write_text(payload)
-        (state / f"{name}_baseline.json").write_text(payload)
     monkeypatch.setattr(stages, "SPRITE_DIR", sprites)
-    monkeypatch.setattr(stages, "PLAYER_STATE_DIR", state)
     monkeypatch.setattr(stages.match, "STATUS_FILE", tmp_path / "status.json")
     return tmp_path
 
@@ -92,21 +85,12 @@ def test_a_stale_status_file_does_not_count_as_being_on_the_field(fake_fs, monke
     assert by_id["take_the_field"].is_done() is False
 
 
-def test_tune_is_done_once_a_tuner_rewrites_a_role_file(fake_fs, monkeypatch):
-    monkeypatch.setattr(stages, "STARTED_AT", time.time())
-    monkeypatch.setattr(stages.match, "CALLED", {"tune"})
+def test_tune_is_done_once_a_tuner_has_moved_something(fake_fs, monkeypatch):
+    monkeypatch.setattr(stages.match, "CALLED", set())
     by_id = {s.id: s for s in stages.STAGES}
     assert by_id["tune_the_squad"].is_done() is False
-    (fake_fs / "player_state" / "forward.json").write_text(json.dumps({"pace": 0.9}))
+    stages.match.CALLED.add("tune")
     assert by_id["tune_the_squad"].is_done() is True
-
-
-def test_role_files_shipped_by_the_repo_do_not_count_as_tuned(fake_fs, monkeypatch):
-    # Three of the four shipped role files already differ from their baselines,
-    # so a content comparison would read as done on a clean checkout.
-    monkeypatch.setattr(stages, "STARTED_AT", time.time() + 60)
-    by_id = {s.id: s for s in stages.STAGES}
-    assert by_id["tune_the_squad"].is_done() is False
 
 
 def test_stage_status_is_json_serialisable(fake_fs):
@@ -148,10 +132,9 @@ def test_shouting_is_its_own_stage(fake_fs, monkeypatch):
 
 
 def test_the_two_routes_tick_only_their_own_stage(fake_fs, monkeypatch):
-    # Both rewrite the same role files, so only the tool that ran tells them
-    # apart. A shout must not claim the subagents were used, or the other way.
-    monkeypatch.setattr(stages, "STARTED_AT", time.time())
-    (fake_fs / "player_state" / "forward.json").write_text(json.dumps({"pace": 0.9}))
+    # Both move the same attributes in the same arena, so only the tool that
+    # ran tells them apart. A shout must not claim the subagents were used, or
+    # the other way about.
     by_id = {s.id: s for s in stages.STAGES}
 
     monkeypatch.setattr(stages.match, "CALLED", {"tune"})

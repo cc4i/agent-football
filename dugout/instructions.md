@@ -4,8 +4,12 @@ want.
 
 The repository root is your workspace. The game is a Vite app on
 http://localhost:5173 with an ADK coach on :8000 and a team captain on :8001.
+The arena on :8003 holds the squad. Everything you change about the players
+goes through it, and the pitch is told the moment it changes. Start it with
+`arena/run.sh` if :8003 is not answering; nothing else you do will work until
+it is.
 
-Those three are one stack and the only supported way to start it is
+The other three are one stack and the only supported way to start it is
 `game/run.sh`. If the game is down, run that and nothing else. Starting the
 front end on its own with `npm run dev` looks like it worked, because the
 pitch renders and get_match_status starts answering, but the coach and the
@@ -45,14 +49,17 @@ What you can do:
      #sim-speed-input and dispatch a real input event, but never on your own
      initiative.
    - Wait for the squad to load before you kick off, or the match freezes on
-     its first frame. The page fetches player_state after the coach answers,
-     and the scene reads those attributes every tick, so clicking too early
+     its first frame. The page reads the squad from the arena after the coach
+     answers, and the scene reads those attributes every tick, so clicking too
+     early
      throws "Cannot read properties of undefined" inside the game loop and
      kills it for good: the pitch renders once, the clock sits at 03:00 and
      nothing moves. A human never notices because they take a second to
      click. Wait for the profiles, not just the button:
      `page.wait_for_function("() => { const p = window.currentProfiles; return
      p && ['defender','midfielder','forward','goalkeeper'].every(r => p[r]); }")`
+     The page puts the squad back to the shipped baseline through the coach
+     before it reads it from the arena, so this is a few seconds, not instant.
    - The kick-off button #kick-off-btn carries a CSS pulse animation, so a
      plain click() times out and you must pass force=True.
    - After kick-off, confirm the clock is actually moving. Read
@@ -70,29 +77,27 @@ What you can do:
      does not, read /tmp/take_the_field.log to find out why.
    Leave that window open and keep the same script running for the rest of the
    session. Tuning is only visible because the match on screen keeps playing
-   while the squad's files change underneath it. Do not start a second window
-   on later turns unless the match has actually finished, and when you do,
+   while the squad changes underneath it. Do not start a second window on later
+   turns unless the match has actually finished, and when you do,
    `pkill -f take_the_field.py` first so there is only ever one match on
    screen.
 3. Read the game. get_match_status() and read_player_stats() tell you the score,
    the clock and every attribute with the range it must stay inside.
 4. Shout to the team. When the manager wants something said to the players -
    "tell them to press", "get them pushing up" - words in the chat are not
-   enough. Call shout_to_the_team(). It attaches to the match window already
-   on screen, types into the game's shout bar and waits for the answers, so
-   never write your own script for this. It returns the replies: the coach
-   relays to the team captain over A2A on :8001, which briefs four player
-   agents, and that round trip is the thing worth reporting back.
+   enough. Call shout_to_the_team(). It shouts into the match and waits for the
+   answers, so never write your own script for this and never type into the
+   page yourself. It returns the replies: the coach relays to the team captain
+   over A2A on :8001, which briefs four player agents, and that round trip is
+   the thing worth reporting back. It takes up to a couple of minutes.
 
    It is the opposite of tuning. Tuning sets numbers you choose; a shout hands
    the decision to the game's own agents and they change the squad themselves.
    If the manager says what they want the players to do, shout it. If they
    name an attribute or a specific fix, tune it.
-
-   If it comes back with no_match_window, take the field first.
 5. Tune the squad. Start all four subagents at once: defender-tuner,
    midfielder-tuner, forward-tuner, goalkeeper-tuner. Each owns one player. The
-   running game reloads their files within about two seconds, so you can watch
+   arena tells the running match the moment a change lands, so you can watch
    the effect and go again.
 
 How to work:

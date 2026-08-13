@@ -1,10 +1,52 @@
-import json
+import asyncio
+from contextlib import asynccontextmanager
+
 import pytest
 
+import arena
 import channel
 from tools import shout
 from tools.match import CALLED
-from attributes import ROLES
+
+# What the fake arena hands back for the first shout of a test.
+SEQ = 42
+
+COACH = {"type": "relay.coach", "seq": SEQ, "team": "blue", "state": "done"}
+CAPTAIN = {"type": "relay.captain", "seq": SEQ, "team": "blue",
+           "state": "thinking"}
+FORWARD = {"type": "relay.specialist", "seq": SEQ, "team": "blue",
+           "role": "forward", "state": "done", "text": "I will push up"}
+HUDDLE = {"type": "relay.huddle", "seq": SEQ, "team": "blue", "state": "done",
+          "status": "Tactics executed"}
+
+
+def patch(role, changed, reason="press them", seq=SEQ):
+    """A profile.patch event, shaped as the arena publishes it."""
+    return {"type": "event", "seq": seq + 1, "kind": "profile.patch",
+            "match_ms": None,
+            "payload": {"team": "blue", "role": role, "changed": changed,
+                        "reason": reason, "actor": "specialist",
+                        "shout_seq": seq}}
+
+
+def relay(*messages, then_silent=False):
+    """A workshop socket that says these things, in this order.
+
+    By default it then closes, which is a socket the arena dropped. With
+    `then_silent` it stays open saying nothing, which is an arena still there
+    but no longer reporting -- the case the wait exists for.
+    """
+    @asynccontextmanager
+    async def listening():
+        async def heard():
+            for message in messages:
+                yield message
+            if then_silent:
+                await asyncio.sleep(3600)
+
+        yield heard()
+
+    return listening
 
 
 @pytest.fixture(autouse=True)
@@ -14,158 +56,179 @@ def clean():
     CALLED.clear()
 
 
+@pytest.fixture(autouse=True)
+def a_match_on_screen(monkeypatch):
+    # Otherwise every result carries the "take the field" note, which is its
+    # own test.
+    monkeypatch.setattr(shout, "read_status",
+                        lambda: {"score1": 0, "score2": 0, "gameActive": True})
+
+
+@pytest.fixture
+def workshop(fake_arena, monkeypatch):
+    """The arena, with its relay under the test's control."""
+    def says(*messages, **how):
+        monkeypatch.setattr(arena, "listening", relay(*messages, **how))
+        return fake_arena
+
+    return says
+
+
 async def test_an_empty_shout_is_refused():
     assert "error" in await shout.shout_to_the_team("   ")
 
 
-async def test_no_match_window_is_reported_not_raised(monkeypatch):
-    # The manager may shout before taking the field. That must read as an
-    # instruction the agent can act on, not a stack trace in the log.
-    monkeypatch.setattr(shout, "DEBUG_URL", "http://localhost:9")
-    result = await shout.shout_to_the_team("press high")
-    assert result["error"] == "no_match_window"
-    assert "take the field" in result["detail"].lower()
-
-
-async def test_shouting_is_recorded_for_the_quest(monkeypatch):
-    monkeypatch.setattr(shout, "DEBUG_URL", "http://localhost:9")
+async def test_shouting_is_recorded_for_the_quest(workshop):
+    workshop(HUDDLE)
     await shout.shout_to_the_team("press high")
     assert "shout_to_the_team" in CALLED
 
 
-def test_only_the_new_terminal_lines_come_back():
-    before = "> ready\n> waiting\n"
-    after = "> ready\n> waiting\n> Coach shouted\n\n> Captain: huddle\n"
-    assert shout._new_lines(before, after) == ["> Coach shouted", "> Captain: huddle"]
+async def test_the_manager_s_own_words_reach_the_arena(workshop):
+    said = workshop(HUDDLE)
+    await shout.shout_to_the_team("press   high\nup the pitch")
+    assert said.seen[-1][:2] == ("POST", "/api/rooms/WRKS/shout")
+    assert said.seen[-1][2] == {"text": "press high up the pitch"}
 
 
-def test_the_chain_is_complete_once_four_players_answer():
-    partial = ["> Coach shouted", "Coach: Relaying to Team Captain"]
-    assert shout._chain_complete(partial) is False
-    full = partial + ["Captain: Huddle assembled!"] + [
-        f"└─ {role}: on it" for role in
-        ("DEFENDER", "MIDFIELDER", "FORWARD", "GOALKEEPER")]
-    assert shout._chain_complete(full) is True
+async def test_every_answer_comes_back_in_the_order_it_was_heard(workshop):
+    workshop(COACH, CAPTAIN, FORWARD, HUDDLE)
+    result = await shout.shout_to_the_team("press high")
+    assert result["replies"] == [
+        "Coach: relayed it to the captain over A2A",
+        "Captain: briefing the four player agents",
+        "forward: I will push up",
+        "Captain: Tactics executed",
+    ]
 
 
-async def test_a_half_finished_chain_after_full_time_says_so(monkeypatch):
-    monkeypatch.setattr(shout, "read_status", lambda: {"gameActive": False})
-    assert shout._chain_complete([]) is False
-    # The note is built from the same read_status the tool uses.
-    assert not shout.read_status()["gameActive"]
+async def test_another_room_s_chain_is_not_reported_as_this_one_s(workshop):
+    # Every shout in the venue comes down a socket this one is not watching,
+    # but the workshop's own earlier shouts come down this one.
+    stranger = {**FORWARD, "seq": SEQ - 5, "text": "sit deep"}
+    workshop(stranger, FORWARD, HUDDLE)
+    result = await shout.shout_to_the_team("press high")
+    assert "forward: sit deep" not in result["replies"]
 
 
-@pytest.fixture
-def squad(tmp_path, monkeypatch):
-    baseline = {"finishing": 0.5, "shotPower": 0.5}
-    for name in ROLES:
-        (tmp_path / f"{name}.json").write_text(json.dumps(baseline))
-        (tmp_path / f"{name}_baseline.json").write_text(json.dumps(baseline))
-    monkeypatch.setattr(shout, "PLAYER_STATE_DIR", tmp_path)
-    monkeypatch.setattr("attributes.PLAYER_STATE_DIR", tmp_path)
-    return tmp_path
+async def test_nothing_after_the_huddle_is_waited_for(workshop):
+    # The huddle is the captain's last word, and the socket stays open for the
+    # next shout, so a tool that kept reading would never return.
+    workshop(HUDDLE, FORWARD, then_silent=True)
+    result = await shout.shout_to_the_team("press high")
+    assert result["replies"] == ["Captain: Tactics executed"]
 
 
-def test_the_squad_is_read_from_disk(squad):
-    assert shout._profiles()["forward"]["finishing"] == 0.5
-    assert set(shout._profiles()) == set(ROLES)
+async def test_what_the_players_moved_is_reported_against_what_it_was(workshop):
+    workshop(patch("forward", {"finishing": 0.9}), HUDDLE)
+    result = await shout.shout_to_the_team("shoot on sight")
+    change = result["changed"][0]
+    assert change["role"] == "forward"
+    assert change["where"] == "WRKS/blue/forward"
+    assert change["reason"] == "press them"
+    assert (change["deltas"][0]["before"], change["deltas"][0]["after"]) == (
+        0.5, 0.9)
 
 
-def test_an_unreadable_profile_is_skipped_not_raised(squad):
-    (squad / "forward.json").write_text("{ broken")
-    profiles = shout._profiles()
-    assert "forward" not in profiles
-    assert "defender" in profiles
+async def test_a_patch_that_answers_a_different_shout_is_not_ours(workshop):
+    # A tuner or another manager can move the same squad while this shout is
+    # still going out. Claiming it would credit the shout with somebody's work.
+    workshop(patch("forward", {"finishing": 0.9}, seq=SEQ - 5), HUDDLE)
+    assert (await shout.shout_to_the_team("shoot on sight"))["changed"] == []
 
 
-def test_a_role_the_agents_left_alone_is_not_reported(squad):
-    before = {"forward": {"finishing": 0.5}}
-    assert shout._diff(before, {"forward": {"finishing": 0.5}}) == []
+async def test_a_shout_that_moved_nothing_says_so_plainly(workshop):
+    workshop(COACH, HUDDLE)
+    assert (await shout.shout_to_the_team("press high"))["changed"] == []
 
 
-def test_every_role_the_agents_moved_comes_back(squad):
-    before = {"forward": {"finishing": 0.5}, "defender": {"finishing": 0.5}}
-    after = {"forward": {"finishing": 0.9}, "defender": {"finishing": 0.5}}
-    changed = shout._diff(before, after)
-    assert [c["role"] for c in changed] == ["forward"]
-    assert changed[0]["deltas"][0]["before"] == 0.5
-    assert changed[0]["deltas"][0]["after"] == 0.9
+async def test_a_squad_that_never_answered_is_worth_saying_out_loud(workshop):
+    # The huddle always arrives, even for a chain that fell over, so this is
+    # what a coach or captain being down looks like from here.
+    workshop({**HUDDLE, "state": "failed", "status": None})
+    result = await shout.shout_to_the_team("press high")
+    assert ":8000" in result["note"] and ":8001" in result["note"]
 
 
-def test_a_shout_carries_no_reason_because_it_gave_none(squad):
-    changed = shout._diff({"forward": {"finishing": 0.5}},
-                          {"forward": {"finishing": 0.9}})
-    assert changed[0]["reason"] is None
+async def test_an_arena_that_stops_reporting_is_worth_saying_out_loud(workshop,
+                                                                      monkeypatch):
+    monkeypatch.setattr(shout, "WAIT_SECONDS", 0.05)
+    workshop(COACH, then_silent=True)
+    result = await shout.shout_to_the_team("press high")
+    assert "stopped reporting" in result["note"]
+    assert result["replies"] == ["Coach: relayed it to the captain over A2A"]
 
 
-def test_a_role_whose_baseline_is_unreadable_is_skipped_not_raised(squad):
-    # The game rewrites the *_baseline.json files on a page load, so one can be
-    # caught half written. The same bargain as _profiles: the replies are the
-    # point of the tool and the diff is the extra, and losing the diff must not
-    # lose the replies, which a second shout cannot fetch back.
-    (squad / "forward_baseline.json").write_text("{ half writ")
-    before = {"forward": {"finishing": 0.5}, "defender": {"finishing": 0.5}}
-    after = {"forward": {"finishing": 0.9}, "defender": {"finishing": 0.9}}
-    assert [c["role"] for c in shout._diff(before, after)] == ["defender"]
+async def test_a_shout_with_no_match_on_screen_says_take_the_field(workshop,
+                                                                   monkeypatch):
+    monkeypatch.setattr(shout, "read_status", lambda: {"error": "game_not_running"})
+    workshop(HUDDLE)
+    result = await shout.shout_to_the_team("press high")
+    assert "Take the field" in result["note"]
 
 
-def test_a_role_whose_baseline_is_missing_is_skipped_not_raised(squad):
-    (squad / "forward_baseline.json").unlink()
-    before = {"forward": {"finishing": 0.5}}
-    assert shout._diff(before, {"forward": {"finishing": 0.9}}) == []
+async def test_a_shout_that_went_the_whole_way_needs_no_note(workshop):
+    workshop(COACH, HUDDLE)
+    assert "note" not in await shout.shout_to_the_team("press high")
 
 
-def test_a_role_unreadable_before_the_shout_is_skipped(squad):
+async def test_an_arena_that_is_down_is_reported_rather_than_raised(fake_arena):
+    fake_arena.silent = True
+    result = await shout.shout_to_the_team("press high")
+    assert result["error"] == "arena_unreachable"
+    assert "127.0.0.1:8003" in result["detail"]
+
+
+async def test_an_arena_that_refuses_the_shout_is_reported_too(workshop):
+    said = workshop(HUDDLE)
+    said.refusal = (409, "that match is over")
+    result = await shout.shout_to_the_team("press high")
+    assert result["error"] == "arena_unreachable"
+    assert "that match is over" in result["detail"]
+
+
+def test_a_coach_still_thinking_is_not_worth_a_line():
+    assert shout._lines({"type": "relay.coach", "state": "thinking"}) == []
+
+
+def test_a_player_that_never_answered_is_named_as_such():
+    assert shout._lines({"type": "relay.specialist", "role": "goalkeeper",
+                         "state": "missing"}) == ["goalkeeper: no answer"]
+
+
+def test_trouble_on_the_chain_is_passed_straight_through():
+    assert shout._lines({"type": "relay.trouble", "text": "captain timed out"}) \
+        == ["Trouble: captain timed out"]
+
+
+def test_a_shout_queued_behind_another_says_how_many():
+    assert shout._lines({"type": "relay.waiting", "ahead": 2}) == [
+        "Waiting: 2 shout(s) ahead of this one"]
+
+
+def test_a_kind_of_message_this_tool_has_no_words_for_is_dropped():
+    assert shout._lines({"type": "relay.something-new", "state": "done"}) == []
+
+
+def test_a_role_that_was_not_read_before_the_shout_is_skipped():
     # Nothing to measure the move against, so reporting it would invent a
     # before value the manager never had.
-    assert shout._diff({}, {"forward": {"finishing": 0.9}}) == []
+    assert shout._changed({}, [patch("forward", {"finishing": 0.9})["payload"]]) \
+        == []
 
 
-async def test_early_error_paths_do_not_publish(monkeypatch):
+async def test_an_early_refusal_publishes_nothing(monkeypatch):
     published = []
-    monkeypatch.setattr(channel, "publish", lambda name, result: published.append((name, result)))
-    monkeypatch.setattr(shout, "DEBUG_URL", "http://localhost:9")
-    result = await shout.shout_to_the_team("press high")
-    assert result["error"] == "no_match_window" and published == []
+    monkeypatch.setattr(channel, "publish",
+                        lambda name, result: published.append((name, result)))
+    assert "error" in await shout.shout_to_the_team("   ")
+    assert published == []
 
 
-async def test_a_completed_shout_publishes_its_result(monkeypatch):
+async def test_a_completed_shout_publishes_its_result(workshop, monkeypatch):
     published = []
-    monkeypatch.setattr(channel, "publish", lambda name, result: published.append((name, result)))
-    monkeypatch.setattr(shout, "REPLY_TIMEOUT_MS", 0)
-    monkeypatch.setattr(shout, "read_status", lambda: {"gameActive": False})
-
-    class StubButton:
-        async def wait_for(self, state, timeout): pass
-        async def is_enabled(self): return True
-        async def click(self): pass
-
-    class StubPage:
-        url = f"http://{shout.GAME_URL}/match"
-        def locator(self, selector): return StubButton()
-        async def inner_text(self, selector): return "ready"
-        async def fill(self, selector, text): pass
-
-    class StubContext:
-        pages = [StubPage()]
-
-    class StubBrowser:
-        contexts = [StubContext()]
-        async def close(self): pass
-
-    class StubChromium:
-        async def connect_over_cdp(self, url): return StubBrowser()
-
-    class StubPlaywright:
-        chromium = StubChromium()
-        async def __aenter__(self): return self
-        async def __aexit__(self, *args): pass
-
-    def stub_async_playwright():
-        return StubPlaywright()
-
-    monkeypatch.setattr("playwright.async_api.async_playwright", stub_async_playwright)
-
+    monkeypatch.setattr(channel, "publish",
+                        lambda name, result: published.append((name, result)))
+    workshop(COACH, patch("forward", {"finishing": 0.9}), HUDDLE)
     result = await shout.shout_to_the_team("press high")
     assert published == [("shout_to_the_team", result)]
-    assert "note" in result

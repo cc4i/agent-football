@@ -60,21 +60,41 @@ const el = (tag, cls, text) => {
   return n;
 };
 
-function richText(cls, source) {
-  // Thoughts arrive as markdown. Built as DOM nodes, never innerHTML: this is
-  // model output and may contain anything.
-  const p = el('p', cls);
-  for (const [i, part] of String(source).split('**').entries()) {
-    if (!part) continue;
-    p.append(i % 2 ? el('b', null, part) : document.createTextNode(part));
+// **bold** and `code`, the only markdown the models reach for mid-sentence.
+// Anything unpaired is left as the characters it is: a half-typed marker is
+// what a streaming answer looks like a keystroke before it closes.
+const MARKUP = /\*\*([^*]+)\*\*|`([^`]+)`/g;
+
+function richBody(source) {
+  // Model output, so it is built as DOM nodes and never innerHTML. Its own
+  // line breaks are kept, because the answers are lists as often as prose and
+  // one long run-on paragraph is not what was written.
+  const out = document.createDocumentFragment();
+  const lines = String(source).split('\n').filter((line) => line.trim());
+  for (const [i, line] of lines.entries()) {
+    if (i) out.append(el('br'));
+    let at = 0;
+    for (const found of line.matchAll(MARKUP)) {
+      if (found.index > at)
+        out.append(document.createTextNode(line.slice(at, found.index)));
+      out.append(found[1] ? el('b', null, found[1]) : el('code', null, found[2]));
+      at = found.index + found[0].length;
+    }
+    if (at < line.length) out.append(document.createTextNode(line.slice(at)));
   }
+  return out;
+}
+
+function richText(cls, source) {
+  const p = el('p', cls);
+  p.append(richBody(source));
   return p;
 }
 
 const LANE_CLASS = { defender: 'def', midfielder: 'mid', forward: 'fwd', goalkeeper: 'gk' };
 const TUNERS = Object.keys(LANE_CLASS).map((role) => `${role}-tuner`);
 const PANEL_HEAD = {
-  'a-agy': ['Antigravity subagents', 'one player file each'],
+  'a-agy': ['Antigravity subagents', 'one player each'],
   'a-sys': ["The game's agents", 'four player agents, through the coach'],
 };
 
@@ -101,7 +121,7 @@ function panelFor(actor, minute) {
   return panels[family];
 }
 
-function laneFor(panel, role, file) {
+function laneFor(panel, role, where) {
   if (panel.byRole[role]) return panel.byRole[role];
 
   const lane = el('div', `lane ${LANE_CLASS[role] || ''}`);
@@ -111,7 +131,8 @@ function laneFor(panel, role, file) {
   working.append(el('i'), el('span', null, 'working…'));
   const rows = el('div', 'rows');
   const whys = el('div', 'whys');
-  lane.append(header, el('div', 'file', file || `player_state/${role}.json`),
+  // Where the squad lives now: a room and a dugout in the arena, not a file.
+  lane.append(header, el('div', 'where', where || `WRKS/blue/${role}`),
               working, rows, whys);
 
   panel.lanes.append(lane);
@@ -156,7 +177,7 @@ function deltaRow(d) {
 function drawTuning(actor, minute, entries) {
   const panel = panelFor(actor, minute);
   for (const entry of entries) {
-    const lane = laneFor(panel, entry.role, entry.file);
+    const lane = laneFor(panel, entry.role, entry.where);
     lane.working.remove();
     for (const d of entry.deltas) {
       // A second call touching the same attribute keeps one row. What the
@@ -290,9 +311,13 @@ async function checkHealth() {
     document.querySelector(`.svc[data-service="${name}"]`)
       ?.classList.toggle('down', !up);
   }
-  // Three unexplained port numbers mean nothing until one of them dies, so
-  // say what to do at the moment it matters.
-  document.querySelector('.rig-warn').hidden = Object.values(game).every(Boolean);
+  // Four unexplained port numbers mean nothing until one of them dies, so say
+  // what to do at the moment it matters. Two scripts start these, and being
+  // told to run the wrong one is worse than being told nothing.
+  const warn = document.querySelector('.rig-warn');
+  const script = game.arena === false ? 'arena/run.sh' : 'game/run.sh';
+  warn.replaceChildren(document.createTextNode('not running · '), el('code', null, script));
+  warn.hidden = Object.values(game).every(Boolean);
   showScoreline(match);
 }
 
@@ -372,6 +397,7 @@ async function send() {
   let buffer = '';
   let textNode = null;
   let textStep = null;
+  let textSaid = '';
 
   try {
     for (;;) {
@@ -404,10 +430,15 @@ async function send() {
           // subagents' sentences into one another.
           if (!textNode || step !== textStep) {
             textNode = el('p', 'say', '');
+            textSaid = '';
             textStep = step;
             addEvent(actor, minute, textNode);
           }
-          textNode.textContent += payload;
+          // Redrawn from the whole answer rather than appended to, because a
+          // marker can arrive split across two chunks and only the text either
+          // side of it says what it was.
+          textSaid += payload;
+          textNode.replaceChildren(richBody(textSaid));
         }
         else if (kind === 'kit') { addEvent(actor, minute, kitNode(payload)); textNode = null; }
         else if (kind === 'error') { addEvent(actor, minute, el('pre', 'out bad', payload)); }

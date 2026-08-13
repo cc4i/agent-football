@@ -37,6 +37,16 @@ if [ ! -f ".env" ]; then
     exit 1
 fi
 
+# Every tool in the dugout writes to the arena, and the arena refuses a write
+# from a caller with no token. Reading still works, so the symptom is a squad
+# that renders and then will not move. Warn rather than exit: the page itself
+# is worth having up, and the header says whether the arena is answering.
+if [ -z "${ARENA_SERVICE_TOKEN:-}" ]; then
+    echo "WARNING: ARENA_SERVICE_TOKEN is unset." >&2
+    echo "         Export the same value the arena was started with, or every" >&2
+    echo "         tune and every shout will be refused." >&2
+fi
+
 # The game's ADK servers read their own .env. Without it they still start and
 # the pitch still renders, so the only symptom is baseline backup and restore
 # failing with "No API key was provided" deep in the browser console. Warn

@@ -1,66 +1,83 @@
 import pytest
 
-from attributes import ROLES, allowed_attributes, range_for, validate_changes
+import arena
+import attributes
+from attributes import ROLES, band, bands
+
+PUBLISHED = {
+    "defender": {
+        "aggression": {"baseline": 0.6, "min": 0.0, "max": 1.0},
+        "tackleCooldown": {"baseline": 800.0, "min": 100.0, "max": 2000.0},
+    },
+    "midfielder": {"passRange": {"baseline": 0.7, "min": 0.0, "max": 1.0}},
+    "forward": {"finishing": {"baseline": 0.5, "min": 0.0, "max": 1.0}},
+    "goalkeeper": {"reflexes": {"baseline": 0.8, "min": 0.0, "max": 1.0}},
+}
+
+
+@pytest.fixture(autouse=True)
+def a_fresh_process(monkeypatch):
+    # The cache outlives a call by design, so each test starts as a new one
+    # would: nothing remembered, and an arena that answers.
+    monkeypatch.setattr(attributes, "_rules", None)
+    monkeypatch.setattr(arena, "rules", lambda: PUBLISHED)
+
+
+@pytest.fixture
+def asked(monkeypatch):
+    """Count the questions actually put to the arena."""
+    times = []
+
+    def answer():
+        times.append(1)
+        return PUBLISHED
+
+    monkeypatch.setattr(arena, "rules", answer)
+    return times
 
 
 def test_roles_are_the_four_players():
     assert ROLES == ("defender", "midfielder", "forward", "goalkeeper")
 
 
-def test_allowlist_comes_from_the_baseline_file():
-    keys = allowed_attributes("forward")
-    assert "finishing" in keys
-    assert "shotPower" in keys
-    assert "notARealAttribute" not in keys
+def test_the_rules_come_from_the_arena():
+    assert bands("forward")["finishing"]["baseline"] == 0.5
+
+
+def test_the_arena_is_asked_once_and_the_answer_is_kept(asked):
+    # Every tuner call and every delta reads a band. The rules the game was
+    # built with cannot change under a running arena, so asking each time
+    # would be a round trip per attribute for an answer that never moves.
+    for role in ROLES:
+        bands(role)
+    assert len(asked) == 1
+
+
+def test_a_new_session_asks_again(asked):
+    bands("forward")
+    attributes.forget()
+    bands("forward")
+    assert len(asked) == 2
 
 
 def test_unknown_role_is_rejected():
     with pytest.raises(ValueError, match="unknown role"):
-        allowed_attributes("striker")
+        bands("striker")
 
 
-def test_unit_attributes_range_zero_to_one():
-    assert range_for("finishing") == (0.0, 1.0)
+def test_an_attribute_carries_the_band_the_arena_published():
+    assert band("defender", "tackleCooldown") == {
+        "baseline": 800.0, "min": 100.0, "max": 2000.0}
 
 
-def test_millisecond_attributes_have_their_own_range():
-    assert range_for("tackleCooldown") == (100.0, 2000.0)
-    assert range_for("decisionDelay") == (0.0, 500.0)
-    assert range_for("recoverySpeedMultiplier") == (0.5, 2.0)
+def test_an_attribute_the_arena_never_heard_of_falls_back_to_a_weight():
+    # Only a shout can produce one, because the arena refuses a tuner that
+    # names it. It is drawn as a weight with no shipped tick rather than
+    # failing the panel it appears in.
+    assert band("forward", "invented") == {
+        "baseline": None, "min": 0.0, "max": 1.0}
 
 
-def test_valid_changes_produce_no_violations():
-    assert validate_changes("forward", {"finishing": 0.8}) == []
-
-
-def test_unknown_attribute_is_a_violation():
-    violations = validate_changes("forward", {"nope": 0.5})
-    assert len(violations) == 1
-    assert "nope" in violations[0]
-
-
-def test_out_of_range_value_is_a_violation():
-    violations = validate_changes("forward", {"finishing": 1.4})
-    assert len(violations) == 1
-    assert "1.4" in violations[0]
-    assert "0.0" in violations[0] and "1.0" in violations[0]
-
-
-def test_non_numeric_value_is_a_violation():
-    violations = validate_changes("forward", {"finishing": "fast"})
-    assert len(violations) == 1
-
-
-def test_a_unit_bearing_attribute_outside_the_table_is_inferred():
-    # The shipped midfielder carries decisionsDelay=150 alongside
-    # decisionDelay. Read as a 0-1 weight it makes the game's own current
-    # state illegal, so a tuner echoing it back gets refused.
-    import json
-
-    from attributes import PLAYER_STATE_DIR, ROLES, validate_changes
-
-    for role in ROLES:
-        live = json.loads((PLAYER_STATE_DIR / f"{role}.json").read_text())
-        numeric = {k: v for k, v in live.items()
-                   if isinstance(v, (int, float)) and not isinstance(v, bool)}
-        assert validate_changes(role, numeric) == [], role
+def test_a_role_the_arena_did_not_publish_has_no_attributes(monkeypatch):
+    monkeypatch.setattr(arena, "rules", lambda: {})
+    assert bands("forward") == {}

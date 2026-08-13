@@ -1,5 +1,5 @@
 """One tuner per role. The tool set is the guardrail: a tuner physically cannot
-write another player's file, because it is not given that function."""
+move another player's attributes, because it is not given that function."""
 
 from google.antigravity.types import SubagentConfig
 
@@ -13,7 +13,9 @@ _INSTRUCTIONS = (
     "Then call {tool}() exactly once. Change at most 3 attributes and give a "
     "one-line reason naming what you expect to improve.\n"
     "Every value must stay inside the min and max that read_player_stats "
-    "reports for it. Most attributes are 0.0 to 1.0 weights.\n"
+    "reports for it. Most attributes are 0.0 to 1.0 weights. The arena holds "
+    "the squad and refuses anything outside those limits, so a change that "
+    "breaks one simply does not happen.\n"
     "You cannot edit any other player. Do not try."
 )
 

@@ -16,7 +16,7 @@ Five things, in any order and as often as you like:
 | 1 | **Rebrand the team** | Generates new player sprites and puts your crest on the shirt. |
 | 2 | **Take the field** | Writes its own Playwright script and runs it. A real Chrome window opens and plays a match. |
 | 3 | **Read the game** | Reads the live score and every attribute, with the range each one must stay inside. |
-| 4 | **Tune the squad** | Four subagents in parallel, one player file each. Each can only touch its own player. |
+| 4 | **Tune the squad** | Four subagents in parallel, one player each. Each can only touch its own player. |
 | 5 | **Shout to the bench** | Types into the game's own coach bar and lets *the game's* agents decide what to change. |
 
 Stage 2 is the one people remember: nobody handed the agent a browser tool, so
@@ -58,6 +58,8 @@ You need [uv](https://docs.astral.sh/uv/), Node, and the Antigravity CLI with
 cp game/.env.example   game/.env      # then set GOOGLE_CLOUD_PROJECT
 cp dugout/.env.example dugout/.env    # same
 
+export ARENA_SERVICE_TOKEN=dev-token  # the same value in all three shells
+
 cd arena  && ./run.sh                 # rooms, seats and player profiles
 cd game   && ./run.sh                 # frontend, coach and captain
 cd dugout && ./run.sh                 # then open http://localhost:8002
@@ -67,10 +69,11 @@ Both `.env` files are needed. Without `game/.env` the pitch still renders and
 most of the quest works, but every call into the game's own agents fails and
 the squad never resets.
 
-The arena owns the player profiles, so it has to be up before stage 5 can move
-one. Export the same `ARENA_SERVICE_TOKEN` for the arena and for `game/`: the
-game's agents carry it instead of a phone session, and an unset token is
-refused rather than waved through. See `arena/README.md`.
+The arena owns the player profiles, so it has to be up first, and nothing the
+dugout does with the squad works until it is. The token is why all three
+shells need the same value: the game's agents and the dugout's tools carry it
+instead of a phone session, and an unset token is refused rather than waved
+through. See `arena/README.md`.
 
 The agent runs shell commands unrestricted, by design, so that it can launch
 the script it writes in stage 2. Run this on your own machine.

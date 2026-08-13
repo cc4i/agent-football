@@ -1,167 +1,154 @@
-"""Shouting to the bench, through the game's own coach.
+"""Shouting to the bench, through the game's own agents.
 
-Tuning edits the squad's files directly. This does the opposite: it types into
-the game's shout bar and lets the game's own agent chain decide what to change.
-That chain is ADK coach -> team captain over A2A -> four player agents, and
-watching Antigravity drive it through the interface is the point of the stage.
+Tuning picks numbers and asks the arena to store them. This does the opposite:
+it says something in the manager's words and lets the game's own chain decide
+what that means. That chain is the arena's coach -> the team captain over A2A
+-> four player agents, and watching Antigravity set it going and report back is
+the point of the stage.
 
-The match window is the one the agent opened in stage 2, reached over its
-debug port, so the shout lands in the match already on screen rather than in
-some second browser nobody is watching.
+The words go to the arena and the answers come back on the workshop room's
+socket, which is the same feed the pitch is watching. Relay traffic is never
+written to the event log -- it is a progress report, not a record -- so the
+socket is opened before the shout rather than after.
 """
 
 import asyncio
-import json
 
+import arena
 import channel
-from attributes import PLAYER_STATE_DIR, ROLES
 from deltas import describe_change
 from tools.match import CALLED, read_status
 
-DEBUG_URL = "http://localhost:9222"
-GAME_URL = "localhost:5173"
-SHOUT_INPUT = "#shout-message-input"
-SHOUT_BUTTON = "#shout-send-btn"
-TERMINAL = "#terminal-body"
-
-# The coach, the captain and four player agents all answer in turn.
-REPLY_TIMEOUT_MS = 120000
-
-
-def _profiles() -> dict:
-    """The four squad files as they stand. Unreadable ones are skipped.
-
-    A missing or half-written file is not worth failing a shout over: the
-    replies are the point of the tool and the diff is the extra.
-    """
-    squad = {}
-    for role in ROLES:
-        try:
-            squad[role] = json.loads(
-                (PLAYER_STATE_DIR / f"{role}.json").read_text())
-        except (OSError, json.JSONDecodeError):
-            continue
-    return squad
-
-
-def _diff(before: dict, after: dict) -> list:
-    """What the game's own agents changed, one entry per role that moved.
-
-    A role missing from `before` is skipped rather than reported as new:
-    there is nothing to measure the move against. So is a role whose baseline
-    will not read: the game rewrites those files on a page load and one can be
-    caught half written. Same bargain as `_profiles`, and a sharper one here,
-    because the replies are already in hand by this point and a second shout
-    fetches new ones rather than the ones a raise would throw away.
-    """
-    changed = []
-    for role, profile in after.items():
-        if role not in before:
-            continue
-        try:
-            change = describe_change(role, before[role], profile)
-        except (OSError, ValueError):  # unreadable, unparseable, or unknown role
-            continue
-        if change:
-            changed.append(change)
-    return changed
-
-
-def _chain_complete(replies: list[str]) -> bool:
-    """True once all four players have answered the captain's huddle."""
-    return sum(1 for line in replies if line.startswith("\u2514")) >= 4
-
-
-def _new_lines(before: str, after: str) -> list[str]:
-    old = before.splitlines()
-    return [line.strip() for line in after.splitlines()[len(old):] if line.strip()]
+# The arena gives a chain 150 seconds and always ends it with a huddle, even a
+# failed one, so this is a backstop for a socket that has gone quiet rather
+# than the thing that decides how long to wait.
+WAIT_SECONDS = 180.0
 
 
 async def shout_to_the_team(message: str) -> dict:
     """Shout an instruction to the players through the game's coach.
 
-    Use this instead of editing attributes when the manager wants the team
-    told something: press, push up, sit deep, shoot on sight. The game's own
-    agents decide what that means and change the squad themselves.
+    Use this instead of tuning attributes when the manager wants the team told
+    something: press, push up, sit deep, shoot on sight. The game's own agents
+    decide what that means and move the squad themselves.
 
-    Waits for the whole chain and returns every reply it heard, so call it
+    Waits for the whole chain and returns every answer it heard, so call it
     once. Calling it again does not fetch the previous answers, it shouts
     again.
 
     Args:
       message: what to shout, in the manager's words.
     """
-    from playwright.async_api import async_playwright
-
     CALLED.add("shout_to_the_team")
-    stripped = message.strip()
-    if not stripped:
+    words = " ".join(message.split())
+    if not words:
         return {"error": "nothing to shout"}
 
-    async with async_playwright() as pw:
-        try:
-            browser = await pw.chromium.connect_over_cdp(DEBUG_URL)
-        except Exception:
-            return {"error": "no_match_window",
-                    "detail": "No match is on screen. Take the field first, "
-                              "and launch it with --remote-debugging-port=9222."}
-        try:
-            page = next((p for c in browser.contexts for p in c.pages
-                         if GAME_URL in p.url), None)
-            if page is None:
-                return {"error": "no_match_window",
-                        "detail": f"Nothing at {GAME_URL} in the open browser."}
+    try:
+        # The squad as it stands. The answers say what the players decided in
+        # words; only this says what they did to the numbers.
+        before = arena.read_profiles()
+        async with arena.listening() as relay:
+            said = await asyncio.to_thread(arena.shout, words)
+            replies, patches, huddle = await _follow(relay, said["seq"])
+    except (arena.Down, arena.Refused) as trouble:
+        return {"error": "arena_unreachable", "detail": str(trouble)}
 
-            button = page.locator(SHOUT_BUTTON)
-            # The bar disables itself while the coach is busy.
-            await button.wait_for(state="attached", timeout=10000)
-            for _ in range(60):
-                if await button.is_enabled():
-                    break
-                await asyncio.sleep(0.5)
+    result = {"shouted": words, "replies": replies,
+              "changed": _changed(before, patches)}
+    note = _note(huddle)
+    if note:
+        result["note"] = note
+    channel.publish("shout_to_the_team", result)
+    return result
 
-            # Snapshot the squad before the chain runs. The game's agents
-            # write these same four files, and their replies never say which
-            # numbers they chose.
-            squad_before = _profiles()
-            before = await page.inner_text(TERMINAL)
-            await page.fill(SHOUT_INPUT, stripped)
-            await button.click()
 
-            deadline = REPLY_TIMEOUT_MS / 1000
-            waited, quiet, seen = 0.0, 0.0, before
-            while waited < deadline:
-                await asyncio.sleep(1)
-                waited += 1
-                now = await page.inner_text(TERMINAL)
-                if now != seen:
-                    quiet, seen = 0.0, now
-                    if _chain_complete(_new_lines(before, now)):
-                        break
+async def _follow(relay, seq):
+    """Everything this shout caused, until the huddle that always ends it.
+
+    Returns what was said, what moved, and the huddle itself -- or no huddle at
+    all if the wait ran out, which is the one case the arena cannot report on
+    because it means the arena stopped talking.
+    """
+    replies, patches = [], []
+    try:
+        async with asyncio.timeout(WAIT_SECONDS):
+            async for message in relay:
+                kind = message.get("type", "")
+                if kind == "event":
+                    payload = message.get("payload") or {}
+                    if (message.get("kind") == "profile.patch"
+                            and payload.get("shout_seq") == seq):
+                        patches.append(payload)
                     continue
-                quiet += 1
-                # The coach answers within a second, then the terminal goes
-                # quiet for half a minute or more while the captain briefs four
-                # player agents over A2A. Giving up on ten seconds of silence
-                # returns just the relay line and misses the huddle entirely.
-                if quiet >= 30 and now != before:
-                    break
+                # Every other room's shouts come down this socket too, and so
+                # do this room's earlier ones. Only ours is being reported on.
+                if not kind.startswith("relay.") or message.get("seq") != seq:
+                    continue
+                replies.extend(_lines(message))
+                if kind == "relay.huddle":
+                    return replies, patches, message
+    except (TimeoutError, asyncio.TimeoutError):
+        pass
+    return replies, patches, None
 
-            replies = _new_lines(before, seen)
-            result = {"shouted": stripped, "replies": replies,
-                      "changed": _diff(squad_before, _profiles())}
-            if not _chain_complete(replies):
-                # The players only answer during a live match, so a half
-                # finished chain after full time is expected, not a fault.
-                over = "error" in read_status() or not read_status().get("gameActive")
-                result["note"] = (
-                    "The coach took it, but the players only answer during a "
-                    "live match and this one has finished. Kick off again to "
-                    "see the full huddle."
-                    if over else
-                    f"The players had not all answered within {int(deadline)}s. "
-                    "Report what came back; shouting again will not fetch more.")
-            channel.publish("shout_to_the_team", result)
-            return result
-        finally:
-            await browser.close()
+
+def _lines(message) -> list[str]:
+    """One relay message as the manager would hear it. Empty if it is chatter."""
+    kind = message["type"]
+    state = message.get("state")
+    if kind == "relay.coach":
+        return ["Coach: relayed it to the captain over A2A"] if state == "done" else []
+    if kind == "relay.captain":
+        return ["Captain: briefing the four player agents"] if state == "thinking" else []
+    if kind == "relay.specialist":
+        role = message.get("role", "someone")
+        if state == "missing":
+            return [f"{role}: no answer"]
+        return [f"{role}: {message.get('text', '')}"]
+    if kind == "relay.trouble":
+        return [f"Trouble: {message.get('text', '')}"]
+    if kind == "relay.waiting":
+        return [f"Waiting: {message.get('ahead')} shout(s) ahead of this one"]
+    if kind == "relay.huddle":
+        # The captain's own summary, which arrives after the players have
+        # spoken and is the last word on what the shout became.
+        status = message.get("status")
+        return [f"Captain: {status}"] if status else []
+    return []
+
+
+def _changed(before: dict, patches: list) -> list:
+    """What the players did to the squad, one entry per attribute they moved.
+
+    A role missing from `before` is skipped rather than reported as new: there
+    is nothing to measure the move against.
+    """
+    changed = []
+    for patch in patches:
+        role = patch.get("role")
+        if role not in before:
+            continue
+        change = describe_change(role, before[role], patch.get("changed") or {},
+                                 patch.get("reason"))
+        if change:
+            changed.append(change)
+    return changed
+
+
+def _note(huddle) -> str | None:
+    """What to say about a shout that did not go the whole way, if anything."""
+    if huddle is None:
+        return (f"The arena stopped reporting before the squad had finished, "
+                f"after {int(WAIT_SECONDS)}s. Report what came back; shouting "
+                f"again will not fetch more.")
+    if huddle.get("state") != "done":
+        return ("The shout reached the arena but the squad never answered it. "
+                "Check that the game's coach on :8000 and captain on :8001 are "
+                "both up.")
+    if "error" in read_status():
+        # The squad moved either way -- the arena holds the profiles now -- but
+        # in a lab with no match on screen there is nothing to see it happen to.
+        return ("The squad has changed, but no match is on screen to show it. "
+                "Take the field to watch the difference.")
+    return None

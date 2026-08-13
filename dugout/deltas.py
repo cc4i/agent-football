@@ -10,7 +10,8 @@ the ranges already live, and because the dugout has a pytest suite and no
 JavaScript one.
 """
 
-from attributes import baseline_profile, range_for
+from arena import ROOM, TEAM
+from attributes import band
 
 
 def _numeric(value) -> bool:
@@ -24,25 +25,24 @@ def describe_change(role: str, before: dict, after: dict,
     `after` may be a whole profile or only the attributes that were written,
     so a partial dict is not read as every other attribute having vanished.
     """
-    baseline = baseline_profile(role)
     deltas = []
     for attribute, new in after.items():
         old = before.get(attribute)
         if not _numeric(new) or old == new:
             continue
-        shipped = baseline.get(attribute)
-        low, high = range_for(attribute, shipped)
+        limits = band(role, attribute)
+        shipped = limits["baseline"]
         deltas.append({
             "attribute": attribute,
             "before": old if _numeric(old) else None,
             "after": new,
             "baseline": shipped if _numeric(shipped) else None,
-            "min": low,
-            "max": high,
+            "min": limits["min"],
+            "max": limits["max"],
         })
     if not deltas:
         return None
-    return {"role": role, "file": f"player_state/{role}.json",
+    return {"role": role, "where": f"{ROOM}/{TEAM}/{role}",
             "reason": reason, "deltas": deltas}
 
 

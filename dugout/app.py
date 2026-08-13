@@ -21,6 +21,7 @@ from session import (
     start_agent,
     stop_agent,
 )
+import arena
 from deltas import with_markers
 from skills import load_skills
 from stages import begin_session, stage_status
@@ -30,7 +31,10 @@ from tools.match import read_status
 load_dotenv()
 
 STATIC_DIR = Path(__file__).parent / "static"
-GAME_SERVICES = {"pitch": 5173, "coach": 8000, "captain": 8001}
+# The arena is in this list because every tool in the dugout now goes through
+# it: with the arena down the squad cannot be read, tuned or shouted at, and
+# the manager should see that in the header rather than in a tool result.
+GAME_SERVICES = {"arena": 8003, "pitch": 5173, "coach": 8000, "captain": 8001}
 
 
 @asynccontextmanager
@@ -97,7 +101,7 @@ def tuning_panels(result) -> list:
         return [with_markers(change) for change in result["changed"]]
     role, violations = result.get("role"), result.get("violations")
     if role and violations:
-        return [{"role": role, "file": f"player_state/{role}.json",
+        return [{"role": role, "where": f"{arena.ROOM}/{arena.TEAM}/{role}",
                  "reason": None, "deltas": [], "violations": violations}]
     return []
 

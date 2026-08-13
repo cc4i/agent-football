@@ -1,15 +1,16 @@
 """One tuning tool per role.
 
-Each subagent is given exactly one of these, so a subagent cannot write another
-player's file even if it wants to. The tool name is also the actor identity the
-trajectory renders, because the SDK exposes no subagent id.
+Each subagent is given exactly one of these, so a subagent cannot move another
+player's attributes even if it wants to. The tool name is also the actor
+identity the trajectory renders, because the SDK exposes no subagent id.
+
+The numbers themselves are the arena's to accept or refuse. What is checked
+here is only what the arena has no opinion about: how much one call may move at
+once, and whether the tuner said why it was moving it.
 """
 
-import json
-import os
-
+import arena
 import channel
-from attributes import PLAYER_STATE_DIR, validate_changes
 from deltas import describe_change
 from tools.match import CALLED
 
@@ -26,31 +27,36 @@ def _tune(role: str, changes: dict, reason: str) -> dict:
             f"got {len(changes)}")
     if not isinstance(reason, str) or not reason.strip():
         violations.append("a reason is required, so the change is legible")
-    if not violations:
-        violations = validate_changes(role, changes)
     if violations:
-        refused = {"ok": False, "role": role, "violations": violations}
-        channel.publish(f"tune_{role}", refused)
-        return refused
+        return _refuse(role, violations)
 
-    path = PLAYER_STATE_DIR / f"{role}.json"
-    profile = json.loads(path.read_text())
-    # Captured before the update, because this is the only moment the prior
-    # values still exist anywhere.
-    before = dict(profile)
-    profile.update(changes)
-    tmp = path.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(profile, indent=2))
-    os.replace(tmp, path)
-    # A shout rewrites these same files through the game's own agents, so the
+    reason = reason.strip()
+    try:
+        # Read before the write, because the arena's reply says what the squad
+        # is now and this is the last moment anything knows what it was.
+        before = arena.read_profile(role)
+        moved = arena.patch_profile(role, changes, f"{arena.ACTOR} {role}-tuner", reason)
+    except arena.Refused as no:
+        return _refuse(role, [str(no)])
+    except arena.Down as gone:
+        return _refuse(role, [str(gone)])
+
+    # A shout moves these same attributes through the game's own agents, so the
     # quest can only tell the two routes apart by which tool did the writing.
     CALLED.add("tune")
-    change = describe_change(role, before, changes, reason.strip())
-    result = {"ok": True, "role": role, "applied": changes,
-              "reason": reason.strip(),
+    change = describe_change(role, before, moved["changed"], reason)
+    result = {"ok": True, "role": role, "applied": moved["changed"],
+              "reason": reason,
               "changed": [change] if change else []}
     channel.publish(f"tune_{role}", result)
     return result
+
+
+def _refuse(role: str, violations: list[str]) -> dict:
+    """Nothing moved, and why. Drawn under the role's own lane, in red."""
+    refused = {"ok": False, "role": role, "violations": violations}
+    channel.publish(f"tune_{role}", refused)
+    return refused
 
 
 def tune_defender(changes: dict, reason: str) -> dict:

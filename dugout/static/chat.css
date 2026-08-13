@@ -136,6 +136,10 @@ body::before{
 .say.you{font-family:var(--sheet);font-weight:500;font-size:17px;letter-spacing:.04em}
 .thought{font-style:italic;font-weight:300;font-size:15.5px;line-height:1.6;color:var(--chalk-2);margin:0;max-width:64ch;opacity:.92}
 .thought::before{content:"";display:inline-block;width:14px;height:1px;background:var(--chalk-3);vertical-align:middle;margin-right:9px;opacity:.6}
+/* An attribute or a filename inside a sentence, set the way the log sets every
+   other piece of machine text. */
+.say code,.thought code{font-family:var(--data);font-size:.78em;color:var(--chalk-2);
+  background:rgba(233,229,218,.05);border-radius:3px;padding:1px 5px}
 
 /* an action is always attributed: a verb, then the call */
 .act{display:flex;align-items:baseline;gap:9px;flex-wrap:wrap}
@@ -163,7 +167,7 @@ body::before{
 .lane.mid header{color:var(--mid)}
 .lane.fwd header{color:var(--fwd)}
 .lane.gk  header{color:var(--gk)}
-.lane .file{font-family:var(--data);font-size:10px;color:var(--chalk-3);margin-bottom:8px;word-break:break-all}
+.lane .where{font-family:var(--data);font-size:10px;color:var(--chalk-3);margin-bottom:8px;word-break:break-all}
 .delta{display:flex;justify-content:space-between;gap:8px;font-family:var(--data);font-size:11px;padding:3px 0;color:var(--chalk-2)}
 /* A lane is a quarter of the panel and some attribute names do not fit in it.
    The numbers are the point of the row, so the name gives way first: it

@@ -4,12 +4,14 @@ import json
 import time
 from pathlib import Path
 
-from attributes import PLAYER_STATE_DIR, ROLES, baseline_profile, range_for
+import arena
+import attributes
+from attributes import ROLES
 
 STATUS_FILE = Path("/tmp/futsal_status.json")
 STATUS_MAX_AGE_SEC = 15.0
 
-# Reading the game is not observable on disk, so the stage predicate needs the
+# Reading the game is not observable anywhere, so the stage predicate needs the
 # tools to say they ran. Reset by the app on a fresh session.
 CALLED: set[str] = set()
 
@@ -42,8 +44,11 @@ def read_status() -> dict:
 def get_match_status() -> dict:
     """Return the live score and clock, or an error the agent can act on.
 
-    The status file is written by the agent's own Playwright script, which polls
-    window.__futsal.status(). No file means no match is being played.
+    The score is drawn on a canvas and the workshop pitch runs its own physics
+    without reporting to the arena, so this is the one thing the dugout cannot
+    ask the arena for. It comes from the agent's own Playwright script, which
+    polls window.__futsal.status() and writes the file. No file means no match
+    is being played.
     """
     CALLED.add("get_match_status")
     return read_status()
@@ -53,17 +58,25 @@ def read_player_stats(role: str | None = None) -> dict:
     """Return current attributes with the range each one must stay inside."""
     if role is not None and role not in ROLES:
         raise ValueError(f"unknown role {role!r}, expected one of {ROLES}")
-    CALLED.add("read_player_stats")
     wanted = (role,) if role else ROLES
-    stats = {}
-    for name in wanted:
-        profile = json.loads((PLAYER_STATE_DIR / f"{name}.json").read_text())
-        # Ranges come from the baseline, the same source tuning validates
-        # against, so a tuner is never shown bounds its change would fail.
-        baseline = baseline_profile(name)
-        low_high = {k: range_for(k, baseline.get(k)) for k in profile}
-        stats[name] = {
-            k: {"value": v, "min": low_high[k][0], "max": low_high[k][1]}
-            for k, v in profile.items()
-        }
+    try:
+        squad = arena.read_profiles()
+        # The bands come from the arena too, so a tuner is never shown limits
+        # that its own change would then be refused for breaking.
+        stats = {name: _with_bands(name, squad.get(name, {})) for name in wanted}
+    except (arena.Down, arena.Refused) as trouble:
+        return {"error": "arena_unreachable", "detail": str(trouble)}
+
+    # Recorded only once the squad has actually been read: an arena that is
+    # down should not tick the stage off for a tool call that told the agent
+    # nothing at all about the game.
+    CALLED.add("read_player_stats")
     return stats
+
+
+def _with_bands(role: str, profile: dict) -> dict:
+    reported = {}
+    for name, value in profile.items():
+        limits = attributes.band(role, name)
+        reported[name] = {"value": value, "min": limits["min"], "max": limits["max"]}
+    return reported

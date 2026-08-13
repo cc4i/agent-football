@@ -1,18 +1,22 @@
-import json
-
 import pytest
 
+import attributes
 from deltas import describe_change, marker, with_markers
+
+BANDS = {
+    "finishing": {"baseline": 0.5, "min": 0.0, "max": 1.0},
+    "shotPower": {"baseline": 0.5, "min": 0.0, "max": 1.0},
+    "decisionDelay": {"baseline": 80.0, "min": 40.0, "max": 400.0},
+    "tackleCooldown": {"baseline": 800.0, "min": 100.0, "max": 2000.0},
+}
 
 
 @pytest.fixture(autouse=True)
-def state(tmp_path, monkeypatch):
-    baseline = {"finishing": 0.5, "shotPower": 0.5,
-                "decisionDelay": 80, "tackleCooldown": 800}
-    for name in ("defender", "midfielder", "forward", "goalkeeper"):
-        (tmp_path / f"{name}_baseline.json").write_text(json.dumps(baseline))
-    monkeypatch.setattr("attributes.PLAYER_STATE_DIR", tmp_path)
-    return tmp_path
+def rules(monkeypatch):
+    # What the arena would have answered. Cached in the module, so it is set
+    # there rather than served over a fake socket for every delta.
+    monkeypatch.setattr(
+        attributes, "_rules", {role: BANDS for role in attributes.ROLES})
 
 
 def test_only_attributes_that_moved_are_described():
@@ -35,15 +39,22 @@ def test_a_delta_carries_the_shipped_baseline_and_the_band():
     assert (delta["min"], delta["max"]) == (0.0, 1.0)
 
 
-def test_the_reason_and_the_file_travel_with_the_change():
+def test_a_band_that_is_not_the_unit_range_comes_through_as_the_arena_gave_it():
+    change = describe_change("defender", {"tackleCooldown": 800},
+                             {"tackleCooldown": 600})
+    delta = change["deltas"][0]
+    assert (delta["min"], delta["max"]) == (100.0, 2000.0)
+
+
+def test_the_reason_and_the_place_it_landed_travel_with_the_change():
     change = describe_change("defender", {"finishing": 0.5},
                              {"finishing": 0.8}, "hold a deeper line")
     assert change["role"] == "defender"
-    assert change["file"] == "player_state/defender.json"
+    assert change["where"] == "WRKS/blue/defender"
     assert change["reason"] == "hold a deeper line"
 
 
-def test_an_attribute_the_baseline_never_had_still_describes():
+def test_an_attribute_the_arena_never_had_still_describes():
     # A shout writes through the game's own agents, which can introduce a key.
     change = describe_change("forward", {}, {"invented": 0.4})
     delta = change["deltas"][0]
@@ -54,10 +65,10 @@ def test_an_attribute_the_baseline_never_had_still_describes():
 
 
 def test_an_unknown_attribute_above_one_is_flagged_out_of_band():
-    # No baseline means no band to derive, so it falls back to the 0.0-1.0
-    # weight range. Every non-unit attribute in these files is a weight, so a
-    # value above 1.0 under a name nothing recognises is anomalous and is
-    # drawn as such rather than parked mid-track on an invented band.
+    # No band means none to derive, so it falls back to the 0.0-1.0 weight
+    # range. Every attribute without a unit is a weight, so a value above 1.0
+    # under a name nothing recognises is anomalous and is drawn as such rather
+    # than parked mid-track on an invented band.
     placed = with_markers(describe_change("forward", {}, {"invented": 1500}))
     delta = placed["deltas"][0]
     assert (delta["min"], delta["max"]) == (0.0, 1.0)

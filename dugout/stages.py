@@ -1,10 +1,10 @@
-"""The quest, as data. Predicates are pure functions over filesystem state."""
+"""The quest, as data. Predicates are pure functions over what this session did."""
 
 import time
 from dataclasses import dataclass
 from typing import Callable
 
-from attributes import PLAYER_STATE_DIR, ROLES
+import attributes
 from tools import match
 from tools.avatars import SPRITE_DIR
 
@@ -26,6 +26,9 @@ def begin_session() -> None:
     global STARTED_AT
     STARTED_AT = time.time()
     match.CALLED.clear()
+    # A restarted arena is a different arena, and the rules are the first thing
+    # the next tuner will ask for.
+    attributes.forget()
 
 
 @dataclass(frozen=True)
@@ -67,27 +70,21 @@ def _scouted() -> bool:
 
 
 def _shouted() -> bool:
-    # A shout leaves the same trace on disk as tuning does, since the game's
-    # own agents edit the role files too. The tool recording itself is the only
-    # thing that tells the two apart.
+    # A shout moves the same attributes tuning does, since the game's own
+    # agents write them through the arena too. The tool recording itself is the
+    # only thing that tells the two routes apart.
     return "shout_to_the_team" in match.CALLED
 
 
 def _tuned() -> bool:
-    """True once one of the dugout's own tuners has written a role file.
+    """True once one of the dugout's own tuners has moved something.
 
-    Not simply "a role file changed": a shout rewrites the very same files
-    through the game's agents, and ticking this stage for that would claim
-    the manager had used the subagents when they had not. The tool recording
-    itself is what separates the two routes.
+    Not simply "the squad changed": a shout moves the very same attributes
+    through the game's agents, and ticking this stage for that would claim the
+    manager had used the subagents when they had not. Only a tune the arena
+    accepted is recorded, so a refused one leaves the stage where it was.
     """
-    if "tune" not in match.CALLED:
-        return False
-    for role in ROLES:
-        live = PLAYER_STATE_DIR / f"{role}.json"
-        if live.exists() and live.stat().st_mtime >= STARTED_AT:
-            return True
-    return False
+    return "tune" in match.CALLED
 
 
 STAGES = (
@@ -115,16 +112,17 @@ STAGES = (
     Stage(
         id="tune_the_squad",
         title="Tune the squad",
-        blurb="Four subagents, one player file each. Changes land within two seconds.",
+        blurb="Four subagents, one player each. The pitch shows the change as "
+              "soon as the arena has taken it.",
         suggested="They keep breaking through the middle. Tighten it up.",
         is_done=_tuned,
     ),
     Stage(
         id="shout",
         title="Shout to the bench",
-        blurb="The other way to change the team. Antigravity types into the "
-              "game's shout bar and the game's own coach, captain and four "
-              "player agents work out what it means.",
+        blurb="The other way to change the team. Antigravity shouts into the "
+              "match and the game's own coach, captain and four player agents "
+              "work out what it means.",
         suggested="Tell the lads to push up and press high.",
         is_done=_shouted,
     ),

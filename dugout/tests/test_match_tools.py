@@ -35,21 +35,43 @@ def test_status_passes_through_a_live_match(tmp_path, monkeypatch):
         "score1": 2, "score2": 1, "matchTime": 41.5, "gameActive": True}
 
 
-def test_read_player_stats_returns_all_four_roles():
+def test_read_player_stats_returns_all_four_roles(fake_arena):
     stats = match.read_player_stats()
     assert set(stats) == {"defender", "midfielder", "forward", "goalkeeper"}
 
 
-def test_read_player_stats_includes_the_valid_range():
+def test_read_player_stats_reads_the_squad_the_arena_holds(fake_arena):
+    fake_arena.squad["forward"]["finishing"] = 0.93
+    assert match.read_player_stats("forward")["forward"]["finishing"]["value"] \
+        == 0.93
+
+
+def test_read_player_stats_includes_the_valid_range(fake_arena):
     entry = match.read_player_stats("forward")["forward"]["finishing"]
     assert entry["min"] == 0.0
     assert entry["max"] == 1.0
     assert isinstance(entry["value"], (int, float))
 
 
-def test_read_player_stats_rejects_an_unknown_role():
+def test_read_player_stats_rejects_an_unknown_role(fake_arena):
     with pytest.raises(ValueError, match="unknown role"):
         match.read_player_stats("striker")
+
+
+def test_an_arena_that_is_down_is_reported_rather_than_raised(fake_arena):
+    # The agent reads this and decides what to do about it. An exception out of
+    # a tool is a stack trace in the chat window and nothing it can act on.
+    fake_arena.silent = True
+    answer = match.read_player_stats()
+    assert answer["error"] == "arena_unreachable"
+    assert "127.0.0.1:8003" in answer["detail"]
+
+
+def test_a_squad_that_could_not_be_read_does_not_tick_the_stage_off(fake_arena):
+    fake_arena.silent = True
+    match.CALLED.clear()
+    match.read_player_stats()
+    assert match.CALLED == set()
 
 
 def test_status_reports_game_not_running_when_the_file_is_stale(tmp_path, monkeypatch):
@@ -76,20 +98,12 @@ def test_read_status_reports_no_match_the_same_way(monkeypatch, tmp_path):
     assert match.read_status() == {"error": "game_not_running"}
 
 
-def test_reported_ranges_match_what_tuning_actually_enforces():
-    # A tuner reads its bounds here and is validated elsewhere. If the two
-    # disagree, the midfielder's decisionsDelay=150 is reported as 0 to 1 and
-    # any change it makes is refused.
-    from attributes import ROLES, validate_changes
-    from tools.match import read_player_stats
-
-    for role in ROLES:
-        for attribute, info in read_player_stats(role)[role].items():
-            value = info["value"]
-            if not isinstance(value, (int, float)) or isinstance(value, bool):
-                continue
-            assert info["min"] <= value <= info["max"], (
-                f"{role}.{attribute} is {value} but reported as "
-                f"{info['min']} to {info['max']}")
-            assert validate_changes(role, {attribute: info["min"]}) == []
-            assert validate_changes(role, {attribute: info["max"]}) == []
+def test_the_range_a_tuner_is_shown_is_the_one_the_arena_enforces(fake_arena):
+    # A tuner reads its bounds here and is refused elsewhere. The dugout used
+    # to derive these itself and the two drifted apart, so a value it offered
+    # was a value the arena would not take. Both now come from one place.
+    for role, bands in fake_arena.rules.items():
+        shown = match.read_player_stats(role)[role]
+        for attribute, limits in bands.items():
+            assert (shown[attribute]["min"], shown[attribute]["max"]) == (
+                limits["min"], limits["max"])

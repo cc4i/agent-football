@@ -12,6 +12,11 @@ dependencies = [
     "pydantic",
     "google-antigravity==0.1.10",
     "playwright",
+    # The arena holds the squad: httpx reads and moves it, websockets follows
+    # what a shout set going. Both already arrive with google-genai; they are
+    # named here because this project imports them itself.
+    "httpx",
+    "websockets",
 ]
 
 # app.py imports `prompts` and `utils` as top-level modules from this directory,

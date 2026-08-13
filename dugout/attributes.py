@@ -1,63 +1,50 @@
-"""Per-role attribute allowlist and ranges, derived from the game's baselines."""
+"""What each role's attributes are, and how far each one may move.
 
-import json
-from pathlib import Path
+This used to be a second copy of the arena's rules, worked out from the shipped
+baseline files sitting next to the pitch. Two copies of a validator drift apart
+until one of them is wrong, and this one had no business being a validator at
+all: the arena is what accepts or refuses a change. So the dugout asks it.
+
+Kept for the life of the process once fetched. These are the rules the game was
+built with, not a room's copy of them, and they cannot change under a running
+arena -- but a new session forgets them anyway, so a restarted arena is never
+answered from yesterday's cache.
+"""
+
+import arena
 
 ROLES = ("defender", "midfielder", "forward", "goalkeeper")
 
-PLAYER_STATE_DIR = (
-    Path(__file__).resolve().parent.parent
-    / "game" / "frontend" / "public" / "player_state"
-)
-
-# Everything is a 0.0-1.0 weight except these three, which carry real units.
-_EXPLICIT_RANGES = {
-    "tackleCooldown": (100.0, 2000.0),
-    "decisionDelay": (0.0, 500.0),
-    "recoverySpeedMultiplier": (0.5, 2.0),
-}
-_UNIT_RANGE = (0.0, 1.0)
+_rules: dict | None = None
 
 
-def range_for(attribute: str, baseline_value: float | None = None
-              ) -> tuple[float, float]:
-    """The band an attribute may move in.
-
-    The shipped files hold near-duplicates of the unit-bearing attributes: the
-    midfielder has decisionsDelay=150 next to decisionDelay. Read as a weight
-    that makes the game's own current state illegal, so anything whose
-    baseline is above 1.0 is taken to carry units.
-    """
-    if attribute in _EXPLICIT_RANGES:
-        return _EXPLICIT_RANGES[attribute]
-    if (isinstance(baseline_value, (int, float))
-            and not isinstance(baseline_value, bool)
-            and baseline_value > _UNIT_RANGE[1]):
-        return (0.0, float(baseline_value) * 2)
-    return _UNIT_RANGE
+def rules() -> dict:
+    """Every role's bands: {role: {attribute: {baseline, min, max}}}."""
+    global _rules
+    if _rules is None:
+        _rules = arena.rules()
+    return _rules
 
 
-def baseline_profile(role: str) -> dict:
+def forget() -> None:
+    """Drop what the arena said, so the next question is asked again."""
+    global _rules
+    _rules = None
+
+
+def bands(role: str) -> dict:
+    """One role's attributes: {attribute: {baseline, min, max}}."""
     if role not in ROLES:
         raise ValueError(f"unknown role {role!r}, expected one of {ROLES}")
-    return json.loads((PLAYER_STATE_DIR / f"{role}_baseline.json").read_text())
+    return rules().get(role, {})
 
 
-def allowed_attributes(role: str) -> frozenset[str]:
-    return frozenset(baseline_profile(role))
+def band(role: str, attribute: str) -> dict:
+    """One attribute's shipped value and its two limits.
 
-
-def validate_changes(role: str, changes: dict) -> list[str]:
-    baseline = baseline_profile(role)
-    violations = []
-    for key, value in changes.items():
-        if key not in baseline:
-            violations.append(f"{key!r} is not an attribute of the {role}")
-            continue
-        if isinstance(value, bool) or not isinstance(value, (int, float)):
-            violations.append(f"{key} must be a number, got {value!r}")
-            continue
-        low, high = range_for(key, baseline[key])
-        if not low <= value <= high:
-            violations.append(f"{key}={value} is outside {low} to {high}")
-    return violations
+    An attribute the arena has never heard of is given the unit range and no
+    shipped value, which is what draws it as a bar with no tick on it. Nothing
+    should reach this -- the arena refuses a change to an attribute it does not
+    hold -- but a panel is not worth failing a tool call over.
+    """
+    return bands(role).get(attribute) or {"baseline": None, "min": 0.0, "max": 1.0}
