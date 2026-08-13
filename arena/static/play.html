@@ -61,6 +61,16 @@
     </div>
 
     <div class="composer" id="composer">
+      <div class="queued" id="queued" hidden></div>
+      <div class="shout-row">
+        <!-- 200 is the arena's own limit on a shout, so the keyboard stops at
+             the same place the server would. -->
+        <input class="input" id="shout" type="text" maxlength="200"
+               autocomplete="off" autocapitalize="sentences" enterkeyhint="send"
+               aria-label="Say something to the squad"
+               placeholder="Say something to the squad">
+        <button id="send" type="button">Shout</button>
+      </div>
       <div class="chips" id="chips"></div>
     </div>
   </section>

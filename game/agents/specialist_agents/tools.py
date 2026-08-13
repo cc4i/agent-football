@@ -107,7 +107,7 @@ CONDITION_GUIDANCE = """
     badly tired/exhausted, call the `request_substitution` MCP tool with your role
     and reason 'tired'. If it says you are injured/hurt, call the `report_injury`
     MCP tool with your role and a short severity. Only call these when clearly
-    warranted -- a small knock or mild tiredness does NOT need a tool call.
+    warranted - a small knock or mild tiredness does NOT need a tool call.
 """
 
 def restore_baseline_profiles(tool_context: ToolContext) -> str:

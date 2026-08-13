@@ -344,10 +344,14 @@ document.getElementById('sim-speed-input').addEventListener('input', (e) => {
 const shoutInput = document.getElementById('shout-message-input');
 const shoutBtn = document.getElementById('shout-send-btn');
 
-let currentSessionId = null;
-let currentHuddleData = null;
-let isRequestInProgress = false;
-let isBackgroundRequestInProgress = false;
+// A shout and the periodic condition check are independent errands to two
+// independent ADK sessions, so they no longer share one lock. The old single
+// flag meant the check, which runs for ~13s out of every 55s, could swallow a
+// shout that arrived inside its window. What is still serialised is shouts
+// against each other: two chains moving the same squad at once would leave the
+// profiles in whichever order the two language models happened to finish in.
+let shoutInFlight = false;
+let checkInFlight = false;
 let pendingShout = null;
 
 function setShoutControls(enabled, label) {
@@ -362,30 +366,29 @@ async function sendInstructionToAgent(msg, options = {}) {
   const { showHuddle = true } = options;
   const isBackground = !showHuddle;
 
-  if (isRequestInProgress) {
-    if (isBackground) {
-      console.log("Skipping periodic status check: another request is in progress.");
+  if (isBackground) {
+    // Nothing is queued behind a condition check: the next one is 55 seconds
+    // away and asks the same question, so a skipped one costs nothing.
+    if (checkInFlight || shoutInFlight) {
+      console.log("Skipping periodic status check: the squad is already busy.");
       return;
     }
-    // A background status check holds the lock for ~13s out of every 55s. Queue the
-    // shout instead of dropping it, otherwise it disappears with no user-visible trace.
-    if (isBackgroundRequestInProgress) {
-      pendingShout = msg;
-      appendTerminalLine("system", `> ⏳ Shout queued: "${msg}" - waiting for the status check to finish...`);
-      setShoutControls(false, "Queued...");
-      return;
-    }
-    console.warn("Request already in progress. Ignoring shout.");
+    checkInFlight = true;
+  } else if (shoutInFlight) {
+    // One shout behind the one going out, and the manager can see it there.
+    // Silently dropping it is what made a shout feel unreliable.
+    pendingShout = msg;
+    appendTerminalLine("system", `> ⏳ Shout queued: "${msg}" - the squad is still answering the last one...`);
+    setShoutControls(false, "Queued...");
     return;
-  }
-
-  isRequestInProgress = true;
-  isBackgroundRequestInProgress = isBackground;
-  if (!isBackground) {
+  } else {
+    shoutInFlight = true;
     setShoutControls(false, "Thinking...");
   }
 
-  currentHuddleData = null; // Reset for this run
+  // Per run, not per page: a shout and a condition check can now be in the air
+  // at the same time, and one must not be able to apply the other's huddle.
+  const run = { huddle: null };
 
   try {
     const outgoingMsg = `${msg}\n\n${getFitnessReport()}`;
@@ -423,8 +426,8 @@ async function sendInstructionToAgent(msg, options = {}) {
     if (!sessionRes.ok) {
       throw new Error(`Failed to create session: ${sessionRes.statusText}`);
     }
-    currentSessionId = (await sessionRes.json()).id;
-    console.log(`Agent session created successfully. Session ID: ${currentSessionId}`);
+    run.session = (await sessionRes.json()).id;
+    console.log(`Agent session created successfully. Session ID: ${run.session}`);
 
     // 2. Send the message to /run_sse with streaming: true
     console.log(`Sending instruction to agent (streaming): "${outgoingMsg}"`);
@@ -436,7 +439,7 @@ async function sendInstructionToAgent(msg, options = {}) {
       body: JSON.stringify({
         appName: "agents",
         userId: "user",
-        sessionId: currentSessionId,
+        sessionId: run.session,
         newMessage: {
           role: "user",
           parts: [{ text: outgoingMsg }]
@@ -471,7 +474,7 @@ async function sendInstructionToAgent(msg, options = {}) {
           if (!jsonStr) continue;
           try {
             const event = JSON.parse(jsonStr);
-            processAgentEvent(event, { showHuddle });
+            processAgentEvent(event, { showHuddle, run });
           } catch (err) {
             // Silent catch for partial or malformed chunks
           }
@@ -480,30 +483,33 @@ async function sendInstructionToAgent(msg, options = {}) {
     }
 
     // Apply the accumulated huddle data at the end of the stream
-    if (currentHuddleData && showHuddle) {
-      console.log("Applying final huddle data to game:", currentHuddleData);
+    if (run.huddle && showHuddle) {
+      console.log("Applying final huddle data to game:", run.huddle);
       if (gameInstance) {
         const scene = gameInstance.scene.getScene('SoccerGameScene');
         if (scene && scene.gameActive) {
-          scene.showTeamHuddle(currentHuddleData);
+          scene.showTeamHuddle(run.huddle);
         }
       }
-    } else if (!currentHuddleData && showHuddle) {
+    } else if (!run.huddle && showHuddle) {
       appendTerminalLine("system", `> ⚠️ No huddle response received from Team Captain.`);
     }
   } catch (err) {
     console.error("Error communicating with agent:", err);
     appendTerminalLine("system", `> ❌ Error: ${err.message}`);
   } finally {
-    isRequestInProgress = false;
-    isBackgroundRequestInProgress = false;
+    if (isBackground) {
+      checkInFlight = false;
+      return;
+    }
+    shoutInFlight = false;
 
     if (pendingShout !== null) {
       const queued = pendingShout;
       pendingShout = null;
       // Defer so this invocation finishes unwinding before the queued one starts.
       setTimeout(() => sendInstructionToAgent(queued), 0);
-    } else if (!isBackground) {
+    } else {
       setShoutControls(true, "Shout!");
     }
   }
@@ -511,7 +517,7 @@ async function sendInstructionToAgent(msg, options = {}) {
 
 // 📟 Helper to parse and log agent events to the terminal in real-time
 function processAgentEvent(event, options = {}) {
-  const { showHuddle = true } = options;
+  const { showHuddle = true, run = {} } = options;
 
   // Log the raw event to the console for debugging A2A stream contents
   console.log("[Stream Event]", event);
@@ -526,8 +532,7 @@ function processAgentEvent(event, options = {}) {
   // 🔴 Handle backend errors (e.g., stale session) gracefully by invalidating the session ID
   if (event.error) {
     printLine("system", `> ❌ Session Error: ${event.error}`);
-    console.warn("Session error detected. Invalidating currentSessionId.");
-    currentSessionId = null; // Force a fresh session on the next shout
+    // Nothing to invalidate: the next instruction opens a session of its own.
     return;
   }
 
@@ -596,9 +601,9 @@ function processAgentEvent(event, options = {}) {
           try {
             const parsed = JSON.parse(text);
             if (parsed.huddle) {
-              currentHuddleData = parsed.huddle;
+              run.huddle = parsed.huddle;
               printLine("captain", `📋 Captain: Huddle assembled!`);
-              Object.entries(currentHuddleData).forEach(([player, quote]) => {
+              Object.entries(run.huddle).forEach(([player, quote]) => {
                 printLine("system", `   └─ ${player.toUpperCase()}: "${quote}"`);
               });
             }

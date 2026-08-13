@@ -22,9 +22,10 @@ from fastapi import (Depends, FastAPI, HTTPException, Request, Response, WebSock
                      WebSocketDisconnect)
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from uvicorn.protocols.utils import ClientDisconnected
 
+import chain
 import codes
 import db
 import identity
@@ -111,10 +112,14 @@ async def lifespan(fastapi_app: FastAPI):
         rooms.create_room(connection, "solo", codes.WORKSHOP)
     fastapi_app.state.conn = connection
     fastapi_app.state.bus = Bus()
+    fastapi_app.state.chain = chain.Chain(fastapi_app.state.bus)
     # Install filter to redact client_id from access logs.
     access_logger = logging.getLogger("uvicorn.access")
     access_logger.addFilter(_RedactClientId())
     yield
+    # Chains first: one still talking to the coach would otherwise come back to
+    # a closed database when its specialists write.
+    await fastapi_app.state.chain.close()
     connection.close()
 
 
@@ -162,8 +167,23 @@ class ReadyRequest(BaseModel):
 
 
 class ShoutRequest(BaseModel):
-    """One tap on a chip. Free text arrives with the agent chain."""
-    preset: str = Field(min_length=1, max_length=40)
+    """One tap on a chip, or something typed into the box. One or the other.
+
+    A chip is a patch the squad understands with no language model behind it,
+    so it lands at once. Words go down the chain and take tens of seconds. They
+    are the same instruction to everything downstream of the log, which is why
+    they arrive on the same route rather than on two.
+    """
+    preset: str | None = Field(default=None, min_length=1, max_length=40)
+    # Long enough for anything anybody shouts at a futsal match from a phone,
+    # and short enough that the prompt it becomes cannot be a document.
+    text: str | None = Field(default=None, min_length=1, max_length=200)
+
+    @model_validator(mode="after")
+    def one_or_the_other(self):
+        if bool(self.preset) == bool(self.text):
+            raise ValueError("a shout is either a chip or some words, not both and not neither")
+        return self
 
 
 class ProfilePatchRequest(BaseModel):
@@ -184,7 +204,7 @@ async def current_player(request: Request) -> int:
     """The player id in the session cookie, or a 401."""
     player_id = identity.verify_token(request.cookies.get(COOKIE), SESSION_SECRET)
     if player_id is None or rooms.get_player(request.app.state.conn, player_id) is None:
-        raise HTTPException(401, "join first -- your phone has no session")
+        raise HTTPException(401, "join first - your phone has no session")
     return player_id
 
 
@@ -353,11 +373,13 @@ async def read_presets():
 @app.post("/api/rooms/{code}/shout")
 async def shout(code: str, body: ShoutRequest, request: Request,
                 player_id: int = Depends(current_player)):
-    """Say something to your squad. Presets only until the chain is wired in.
+    """Say something to your squad, with a chip or in your own words.
 
     The words are logged and broadcast first, then what they moved, so the
-    manager sees their own instruction land before the squad reacts to it --
-    and so a late joiner replaying the log sees them in that order too.
+    manager sees their own instruction land before the squad reacts to it, and
+    so a late joiner replaying the log sees them in that order too. For a chip
+    that is the same request; for words it is tens of seconds earlier, because
+    the chain answering them runs on after this returns.
     """
     connection, room = _profile_room(request, code)
     team = rooms.team_of(connection, room["id"], player_id)
@@ -365,25 +387,47 @@ async def shout(code: str, body: ShoutRequest, request: Request,
         raise HTTPException(403, "only somebody in a dugout can shout")
     if room["status"] != "live":
         raise HTTPException(409, "there is nobody out there to shout at yet")
-    try:
-        chip = presets.describe(body.preset)
-    except presets.Unknown as problem:
-        raise HTTPException(422, str(problem)) from problem
-
     player = rooms.get_player(connection, player_id)
-    said = {"team": team, "text": chip["phrase"], "preset": chip["name"],
-            "actor": player["display_name"]}
+
+    if body.preset is not None:
+        try:
+            chip = presets.describe(body.preset)
+        except presets.Unknown as problem:
+            raise HTTPException(422, str(problem)) from problem
+        said = _say(request.app, connection, room, team, chip["phrase"],
+                    player["display_name"], preset=chip["name"])
+        for result in presets.apply(connection, room["id"], team, chip["name"]):
+            _record_patch(request.app, connection, room, team, result,
+                          reason=chip["phrase"], actor="preset",
+                          shout_seq=said["seq"])
+        return said
+
+    # Whitespace a phone keyboard put in is not part of the instruction, and
+    # the words become a prompt, so they arrive as one line either way.
+    words = " ".join(body.text.split())
+    if not words:
+        raise HTTPException(422, "a shout needs some words in it")
+    # Asked before anything is written: a shout the dugout has no room for
+    # should leave no trace of having been half-taken.
+    if not request.app.state.chain.has_room(room["id"], team):
+        raise HTTPException(429, "give the squad a moment - two of your calls "
+                                 "are still going out")
+    said = _say(request.app, connection, room, team, words, player["display_name"])
+    ahead = request.app.state.chain.submit(
+        room, team, said["seq"], words, player["display_name"])
+    return {**said, "ahead": ahead}
+
+
+def _say(fastapi_app, connection, room, team, text, actor, preset=None):
+    """Log what a manager said and tell the room, before anything acts on it."""
+    said = {"team": team, "text": text, "preset": preset, "actor": actor}
     seq = rooms.append_event(connection, room["id"], "shout.sent", said)
-    request.app.state.bus.publish(
+    fastapi_app.state.bus.publish(
         room_topic(room["code"]),
         {"type": "event", "seq": seq, "kind": "shout.sent", "match_ms": None,
          "payload": said},
     )
-
-    for result in presets.apply(connection, room["id"], team, chip["name"]):
-        _record_patch(request.app, connection, room, team, result,
-                      reason=chip["phrase"], actor="preset", shout_seq=seq)
-    return {"seq": seq, **said}
+    return {"seq": seq, "ahead": 0, **said}
 
 
 @app.post("/api/rooms/{code}/start")
@@ -469,8 +513,12 @@ async def patch_profile(code: str, team: str, role: str, body: ProfilePatchReque
     except profiles.Rejected as refusal:
         raise HTTPException(422, {"problems": refusal.problems}) from refusal
 
+    # A specialist writing through this route cannot name the shout it is
+    # answering, and a manager must not be able to. The arena knows which
+    # instruction it is carrying for this dugout, so it says so itself.
     seq = _record_patch(request.app, connection, room, team, result,
-                        reason=body.reason, actor=body.actor)
+                        reason=body.reason, actor=body.actor,
+                        shout_seq=request.app.state.chain.caused_by(room["id"], team))
     return {**result, "seq": seq}
 
 
@@ -542,7 +590,7 @@ def _require_profile_writer(request, connection, room_id, team):
         return
     player_id = identity.verify_token(request.cookies.get(COOKIE), SESSION_SECRET)
     if player_id is None or rooms.get_player(connection, player_id) is None:
-        raise HTTPException(401, "join first -- your phone has no session")
+        raise HTTPException(401, "join first - your phone has no session")
     _require_own_seat(connection, room_id, team, player_id)
 
 

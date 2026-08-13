@@ -175,8 +175,8 @@ body.phone.fixed .pscreen{height:100%;min-height:0}
    THE RELAY -- the signature element.
    One shout travels out and the squad answers. Drawn as a signal on a
    wiring diagram, because the fan-out is real: captain.py:53 is a
-   ParallelAgent. Until the chain is wired in, the branches carry what
-   each preset moved.
+   ParallelAgent. A chip moves the squad on its own and has no trunk; words
+   go coach, captain, then four branches that resolve independently.
    ══════════════════════════════════════════════════════════════════ */
 .relay{
   background:var(--panel-2);border:1px solid var(--line);border-radius:12px;
@@ -209,14 +209,59 @@ body.phone.fixed .pscreen{height:100%;min-height:0}
 .said.away .tag{color:#fca5a5}
 .said q{font-size:.86rem;line-height:1.45;quotes:'"' '"'}
 
+/* The trunk: coach to captain, before the signal fans out. */
+.chain{list-style:none;position:relative;padding:12px 0 0 26px;margin:0}
+.chain::before{
+  content:'';position:absolute;left:7px;top:6px;bottom:6px;width:2px;
+  background:rgba(255,255,255,.1);border-radius:2px;
+}
+.rung{position:relative;padding:0 0 12px}
+.rung:last-child{padding-bottom:0}
+.rung::before{
+  content:'';position:absolute;left:-24px;top:3px;width:12px;height:12px;border-radius:50%;
+  background:var(--bg-2);border:2px solid rgba(255,255,255,.16);
+}
+.rung.done::before{background:var(--emerald);border-color:var(--emerald);box-shadow:0 0 12px rgba(16,185,129,.6)}
+.rung.live::before{background:var(--gold);border-color:var(--gold);box-shadow:0 0 14px rgba(255,204,0,.7);animation:blip 1.1s ease-in-out infinite}
+.rung.failed::before{background:#c0392b;border-color:#c0392b}
+.rung-row{display:flex;align-items:baseline;gap:9px}
+.rung-who{
+  font-family:'Outfit',system-ui,sans-serif;font-weight:700;font-size:.72rem;
+  letter-spacing:.14em;text-transform:uppercase;color:var(--ink);flex:none;
+}
+.rung-what{font-size:.76rem;color:var(--mute);flex:1;line-height:1.4;min-width:0}
+.rung.failed .rung-what{color:#fca5a5}
+@keyframes blip{0%,100%{opacity:1}50%{opacity:.25}}
+
+/* The fan-out: four branches from one trunk, resolving independently. */
 .fan{position:relative;padding:2px 0 0;margin:0 0 4px;display:grid;gap:7px}
+/* Inside a chain the fan sits in the last rung, so the four branches hang off
+   the same wire the coach and the captain sit on. A chip has no chain behind
+   it: its fan is a plain list of what moved, and the connector stubs below
+   would be drawn back to a trunk that is not there. */
+.chain .fan{padding:0;margin:8px 0 0}
 .branch{
   position:relative;display:flex;align-items:flex-start;gap:9px;
   border:1px solid var(--line-2);border-radius:var(--r-md);
   background:rgba(255,255,255,.02);padding:8px 10px;
 }
+.chain .branch::before{
+  content:'';position:absolute;left:-19px;top:16px;width:19px;height:2px;
+  background:rgba(255,255,255,.12);
+}
+.chain .branch::after{
+  content:'';position:absolute;left:-23px;top:12px;width:10px;height:10px;border-radius:50%;
+  background:var(--bg-2);border:2px solid rgba(255,255,255,.16);
+}
 .branch.done{border-color:rgba(16,185,129,.28);background:rgba(16,185,129,.05)}
+.chain .branch.done::after{background:var(--emerald);border-color:var(--emerald)}
+.chain .branch.done::before{background:rgba(16,185,129,.4)}
 .branch.live{border-color:rgba(255,204,0,.35);background:rgba(255,204,0,.05)}
+.chain .branch.live::after{background:var(--gold);border-color:var(--gold);animation:blip 1.1s ease-in-out infinite}
+.chain .branch.live::before{background:rgba(255,204,0,.45)}
+/* Grey, not red: a player who never answered is a link that went quiet, and
+   the huddle completes on three. */
+.branch.missing{opacity:.55}
 .br-role{
   font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:.68rem;font-weight:600;
   letter-spacing:.06em;color:var(--mute);flex:none;width:34px;padding-top:1px;

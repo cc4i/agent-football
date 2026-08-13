@@ -21,6 +21,12 @@ DEFAULT_ROOM = "WRKS"
 DEFAULT_TEAM = "blue"
 TIMEOUT_SECONDS = 5
 
+# The session keys a write to the arena is made of. The arena opens the coach's
+# session with these, and they have to survive the hop to the captain's server,
+# which runs a session of its own. Named here because both ends of that hop
+# have to agree on them and this is the module that spends them.
+DUGOUT_KEYS = ("room_code", "team", "actor", "reason")
+
 
 class ArenaError(Exception):
     """The arena refused, or could not be reached. The text is fit for a manager."""

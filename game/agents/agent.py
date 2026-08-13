@@ -30,6 +30,23 @@ from agents.specialist_agents.tools import restore_baseline_profiles
 
 
 from google.adk.agents.remote_a2a_agent import RemoteA2aAgent, AGENT_CARD_WELL_KNOWN_PATH
+from agents.specialist_agents.arena_client import DUGOUT_KEYS
+
+
+def carry_the_dugout(context, message):
+    """Send the room and the dugout along with the shout, as request metadata.
+
+    The captain runs in a server of its own and answers on a session of its
+    own, so the state the arena opened this session with does not follow the
+    shout over the wire. Without it every specialist behind the captain falls
+    back to the workshop room, and two matches in the venue move one squad.
+
+    Metadata rather than words in the shout: a language model asked to relay an
+    identifier will eventually relay the wrong one, and a manager could type
+    another room's code into the box and be believed.
+    """
+    state = context.session.state if context.session else {}
+    return {key: state[key] for key in DUGOUT_KEYS if state.get(key)}
 
 
 CAPTAIN_A2A_URL = os.environ.get("CAPTAIN_A2A_URL", f"http://localhost:8001{AGENT_CARD_WELL_KNOWN_PATH}")
@@ -37,6 +54,7 @@ team_captain_remote = RemoteA2aAgent(
     name="team_captain",
     description="The team captain, reachable over the A2A protocol.",
     agent_card=CAPTAIN_A2A_URL,
+    a2a_request_meta_provider=carry_the_dugout,
 )
 
 

@@ -155,3 +155,6 @@ arena/arena.db-shm
 # Injuries and substitution requests, written per room while a match runs.
 # Profiles used to live here too; they belong to the arena now.
 game/frontend/public/player_state/
+
+# Screenshots and console logs from browser-driven checks.
+.playwright-mcp/

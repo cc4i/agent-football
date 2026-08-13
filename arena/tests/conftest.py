@@ -1,5 +1,6 @@
 """Shared fixtures. Every test gets its own throwaway database file."""
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -28,6 +29,24 @@ def client(db_path, monkeypatch):
 
     with TestClient(app) as test_client:
         yield test_client
+
+
+@pytest.fixture
+async def arena(db_path, monkeypatch):
+    """The app on the test's own event loop, for anything with a chain in it.
+
+    TestClient drives the app from a thread of its own, which is right for a
+    test that only makes requests and wrong for one whose background chain has
+    to make requests back while the test waits. Both ends share a loop here.
+    """
+    monkeypatch.setenv("ARENA_DB", str(db_path))
+    from app import app
+
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                     base_url="http://arena.test") as caller:
+            caller.app = app
+            yield caller
 
 
 @pytest.fixture
