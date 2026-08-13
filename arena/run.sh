@@ -29,14 +29,11 @@ if ! command -v uv >/dev/null 2>&1; then
     exit 1
 fi
 
-# The salt fixes every email hash for good and the secret signs every phone's
-# session, so both must survive a restart. A dev default for the salt lets the
-# arena start without it, but reusing that salt at a real event loses everyone's
-# board history. The secret now randomises if unset; sessions won't survive a restart.
-if [ -z "${ARENA_EMAIL_SALT:-}" ] || [ -z "${ARENA_SECRET:-}" ]; then
-    echo "WARNING: ARENA_EMAIL_SALT and/or ARENA_SECRET are unset." >&2
-    echo "         Set both before a real event to preserve player identity and sessions." >&2
-fi
+# Nothing is checked here. The arena reads its own configuration from the
+# environment and from .env, so it is the only thing that knows whether the
+# salt, the secret and the service token were set, and it warns about each of
+# them on the way up. A copy of that check in this script would be a second
+# answer to the same question, and it would be the one that was wrong.
 
 echo "--> Syncing python environment with uv..."
 uv sync --all-groups

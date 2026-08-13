@@ -19,12 +19,19 @@ from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
 
 import segno
+from dotenv import load_dotenv
 from fastapi import (Depends, FastAPI, HTTPException, Request, Response, WebSocket,
                      WebSocketDisconnect)
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator, model_validator
 from uvicorn.protocols.utils import ClientDisconnected
+
+# Before the imports below rather than after them: `chain` and `coach` read
+# their limits from the environment as they are imported, so a file read any
+# later is a file they never see. A value already exported into the shell wins,
+# which is what lets one `ARENA_SERVICE_TOKEN` cover all three processes.
+load_dotenv()
 
 import attributes
 import board
@@ -70,6 +77,9 @@ class _RedactClientId(logging.Filter):
 # change on restart and players would lose their history. SESSION_SECRET must never
 # fall back to a public literal, even if that means sessions don't survive a restart.
 EMAIL_SALT = os.environ.get("ARENA_EMAIL_SALT", "arena-dev-salt")
+if "ARENA_EMAIL_SALT" not in os.environ:
+    logger.warning("ARENA_EMAIL_SALT unset; set it before a real event or every "
+                   "returning player is a stranger the next time you change it")
 if "ARENA_SECRET" in os.environ:
     SESSION_SECRET = os.environ["ARENA_SECRET"]
 else:

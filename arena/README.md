@@ -20,6 +20,11 @@ uv run pytest
 
 ## Environment
 
+`cp .env.example .env` and edit it, or export the same names in the shell. The
+shell wins where both say something, which is what lets one exported
+`ARENA_SERVICE_TOKEN` cover all three processes. `HOST` and `PORT` are read by
+`run.sh` rather than by the arena, so they only work from the shell.
+
 | Variable | Default | What it does |
 |---|---|---|
 | `ARENA_DB` | `arena/arena.db` | The SQLite file. Tests point it at a throwaway path. |
@@ -28,6 +33,11 @@ uv run pytest
 | `ARENA_SERVICE_TOKEN` | unset | Lets a server-side caller patch profiles without a phone session. Unset refuses every such call. The specialist agents need the same value. |
 | `ARENA_PUBLIC_URL` | `http://localhost:8003` | What the QR codes encode. A phone on the venue wifi cannot reach the laptop's loopback, so a real event sets this to the machine's LAN name or a tunnel. |
 | `ARENA_PITCH_URL` | `http://localhost:5173` | Where the pitch is served from. The big screen frames it. |
+| `ARENA_COACH_URL` | `http://127.0.0.1:8000` | The ADK server a shout is carried to. |
+| `ARENA_COACH_APP` | `agents` | The application name `adk web .` registers for the package beside it. |
+| `ARENA_COACH_IDLE_SECONDS` | `90` | How long one hop of the chain may go quiet. The slowest specialist sets it. |
+| `ARENA_CHAIN_LIMIT` | `4` | How many shouts may be talking to Gemini at once, across every room. The quota belongs to the venue, not to a room. |
+| `ARENA_CHAIN_SECONDS` | `150` | The whole chain, slot to huddle. A match is three minutes long. |
 
 ## Pages
 

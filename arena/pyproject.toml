@@ -11,6 +11,9 @@ dependencies = [
     "segno==1.6.6",
     # Streaming the coach's server-sent events back out onto the room's bus.
     "httpx==0.28.1",
+    # Reading `.env`, so the salt and the secret can live in a file the way the
+    # game's and the dugout's already do.
+    "python-dotenv==1.2.2",
 ]
 
 # app.py imports `rooms`, `bus` and `db` as top-level modules from this
