@@ -175,7 +175,7 @@ export class SoccerGameScene extends Phaser.Scene {
     // 1. Pitch background (grass, goals, flags, and crowd integrated)
     this.add.image(width / 2, height / 2, 'pitch');
 
-    // 3. Goals — geometry shared by the drawn nets, the collision walls and
+    // 3. Goals - geometry shared by the drawn nets, the collision walls and
     //    the goal-line scoring test in checkGoals().
     this.goalMouthTop = 262;
     this.goalMouthBottom = 498;
@@ -377,7 +377,7 @@ export class SoccerGameScene extends Phaser.Scene {
     this.ball.setBounce(0.78);
     this.ball.body.setCircle(170, 532, 214);
 
-    // Bounds — match the visible playfield (kept clear of the crowd strips)
+    // Bounds - match the visible playfield (kept clear of the crowd strips)
     this.physics.world.setBounds(0, 150, width, 540);
 
     this.physics.add.collider(this.ball, this.postsGroup, () => {
@@ -611,11 +611,11 @@ export class SoccerGameScene extends Phaser.Scene {
 
     // Rolling friction: a loose ball decelerates and settles. The possessor
     // dribbles by setting velocity directly, so keep its drag light to avoid
-    // fighting the glue. (Damping is enabled — drag is a per-second retention
+    // fighting the glue. (Damping is enabled - drag is a per-second retention
     // coefficient, lower = more friction.)
     this.ball.body.drag.set(this.possessor ? 0.9 : 0.55);
 
-    // Visual roll — spin the sprite in the travel direction, scaled by speed.
+    // Visual roll - spin the sprite in the travel direction, scaled by speed.
     const v = this.ball.body.velocity;
     const speed = Math.hypot(v.x, v.y);
     const dir = Math.abs(v.x) > 1 ? Math.sign(v.x) : (Math.abs(v.y) > 1 ? Math.sign(v.y) : 0);
@@ -631,7 +631,7 @@ export class SoccerGameScene extends Phaser.Scene {
 
   handleAutoPlayerSwitching(time) {
     // When a team has the ball, control is pinned to the dribbler by
-    // updatePossession() — don't let the chase heuristic override it.
+    // updatePossession() - don't let the chase heuristic override it.
     const possTeam = this.possessor ? this.possessor.getData('team') : 0;
     if (possTeam !== 1) {
       this.activeBlueIdx = this.resolveActivePlayer(
@@ -1245,7 +1245,7 @@ export class SoccerGameScene extends Phaser.Scene {
     const teammates = teamNum === 1 ? this.bluePlayers : this.redPlayers;
     const passTarget = this.findTeammateInDirection(player, teammates, kdx, kdy);
 
-    // The ball always rolls along the ground (no loft) — players can't jump, and
+    // The ball always rolls along the ground (no loft) - players can't jump, and
     // a vertical hop only distorts the apparent travel direction in this top-down
     // view. Keep it grounded so kicks read true in every direction.
     if (passTarget) {
@@ -1808,7 +1808,7 @@ export class SoccerGameScene extends Phaser.Scene {
     }));
   }
 
-  // Full reset for a rematch — re-enables physics bodies, resets score/clock
+  // Full reset for a rematch - re-enables physics bodies, resets score/clock
   // and positions. Called from the DOM "REMATCH" button in main.js.
   restartMatch() {
     this.score1 = 0;

@@ -771,7 +771,7 @@ function getActiveScene() {
 }
 
 // Build a short per-role tiredness note from match progress (matchTime counts
-// down from 90s). No real stamina model — this just gives the player agents
+// down from 90s). No real stamina model - this just gives the player agents
 // something to reason about so injuries/subs can emerge late in a match.
 function getFitnessReport() {
   const scene = getActiveScene();
@@ -787,7 +787,7 @@ function getFitnessReport() {
     else level = 'exhausted';
     return `${role}: ${level}`;
   });
-  return `Fitness report (relay each player's condition note to them) — ${notes.join('; ')}.`;
+  return `Fitness report (relay each player's condition note to them) - ${notes.join('; ')}.`;
 }
 
 // Periodically ask the team to self-report condition (autonomous injuries/subs),
@@ -858,7 +858,7 @@ async function primeSubstitutions() {
       if (data[role] && data[role].ts) lastSubTs[role] = data[role].ts;
     });
   } catch (err) {
-    // No file yet — nothing to prime.
+    // No file yet - nothing to prime.
   }
 }
 
