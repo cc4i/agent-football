@@ -1,4 +1,4 @@
-"""The pages the arena serves: the phone's two, and the big screen's one."""
+"""The pages the arena serves: the phone's two, and the two on a screen."""
 
 import codes
 
@@ -44,10 +44,24 @@ def test_the_big_screen_is_served(client):
     assert response.headers["content-type"].startswith("text/html")
 
 
+def test_the_standings_are_served(client):
+    response = client.get("/board")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/html")
+
+
 def test_the_pages_share_one_stylesheet(client):
     response = client.get("/static/app.css")
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/css")
+
+
+def test_a_screen_left_running_picks_up_a_fixed_stylesheet(client):
+    # A browser given no Cache-Control invents one, and it invents hours. The
+    # wall screen at a venue is never reloaded with the cache bypassed, so the
+    # answer has to be revalidated rather than guessed at.
+    for path in ("/static/app.css", "/static/board.js"):
+        assert client.get(path).headers["cache-control"] == "no-cache"
 
 
 def test_the_static_mount_cannot_be_walked_out_of(client):

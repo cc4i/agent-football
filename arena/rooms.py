@@ -172,12 +172,18 @@ def append_event(conn, room_id, kind, payload, match_ms=None):
 
 
 def events(conn, room_id):
-    """The room's whole log, oldest first, payloads decoded."""
+    """The room's whole log, oldest first, payloads decoded.
+
+    `wall_ts` is the arena's own stamp on the entry. Scoring measures the
+    window after a shout with it rather than with the host's match clock,
+    because the host is not trusted for scoring and because a profile write has
+    no match clock to carry.
+    """
     return [
         {"seq": row["seq"], "kind": row["kind"], "match_ms": row["match_ms"],
-         "payload": json.loads(row["payload_json"])}
+         "wall_ts": row["wall_ts"], "payload": json.loads(row["payload_json"])}
         for row in conn.execute(
-            "SELECT seq, kind, payload_json, match_ms FROM event "
+            "SELECT seq, kind, payload_json, match_ms, wall_ts FROM event "
             "WHERE room_id = ? ORDER BY seq",
             (room_id,),
         )
@@ -228,6 +234,27 @@ def live(conn):
             "GROUP BY r.id ORDER BY r.created_at"
         )
     ]
+
+
+def unrank(conn, room_id):
+    """Take this match off the boards, for good.
+
+    One direction only. A host that reported 1.5x speed for a single frame
+    distorted the whole match, and letting a later 1.0x put it back would make
+    the rule trivial to walk around.
+    """
+    conn.execute("UPDATE room SET ranked = 0 WHERE id = ?", (room_id,))
+    conn.commit()
+
+
+def seated(conn, room_id):
+    """Who is in this room's dugouts, with the ids scoring needs."""
+    return conn.execute(
+        "SELECT s.team, s.player_id, s.philosophy, p.display_name, p.email_masked "
+        "FROM seat s JOIN player p ON p.id = s.player_id "
+        "WHERE s.room_id = ? ORDER BY s.team",
+        (room_id,),
+    ).fetchall()
 
 
 def seat_owner(conn, room_id, team):

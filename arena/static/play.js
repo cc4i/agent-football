@@ -15,6 +15,8 @@ const ROLE_TAGS = { defender: "DEF", midfielder: "MID", forward: "FWD", goalkeep
 // Front to back, which is the order a manager reads a squad in.
 const ROLES = ["forward", "midfielder", "defender", "goalkeeper"];
 const SIDE_LABEL = { blue: "Blue", red: "Red" };
+const OUTCOME = { won: "won", drew: "drew", lost: "lost" };
+const MEDALS = ["🥇", "🥈", "🥉"];
 // The trunk of the chain, top to bottom, with what each hop says before it has
 // anything of its own to report.
 const RUNGS = [
@@ -27,6 +29,7 @@ const el = (id) => document.getElementById(id);
 const problem = el("problem");
 const lobby = el("lobby");
 const live = el("live");
+const sheet = el("result");
 const relay = el("relay");
 const seats = el("seats");
 const go = el("go");
@@ -39,6 +42,8 @@ let lastSeq = 0;      // the log entry we have drawn up to
 let shouting = false; // a shout of ours is on its way to the arena
 let held = 0;         // the shout the notice under the composer is about
 let crowded = false;  // the banner is holding a refusal about the queue
+let earned = null;    // the arena's word on what this match was worth
+let asking = false;   // that word is on its way
 const shouts = new Map();  // shout seq -> the block of the relay it owns
 const dots = [];
 
@@ -95,18 +100,25 @@ function draw(snapshot) {
   room = snapshot;
   const seat = snapshot.seats[mine];
   const started = snapshot.status !== "lobby";
+  const over = started && snapshot.status !== "live";
+  const abandoned = snapshot.status === "abandoned";
   // "Ready" only means something while there is still something to be ready
   // for; once the whistle has gone the chip says what is happening instead.
   const note = started ? "" : (seat && seat.ready ? " · ready" : "");
-  el("side").textContent = `${SIDE_LABEL[mine]}${note}`;
+  // The result screen puts the scoreline in the chip, and it knows the
+  // scoreline; until then the chip is just the side this phone is holding.
+  if (sheet.hidden) el("side").textContent = `${SIDE_LABEL[mine]}${note}`;
   el("side").className = `side-chip ${mine === "blue" ? "b" : "r"}`;
 
   lobby.hidden = started;
-  live.hidden = !started;
-  el("ft").hidden = snapshot.status === "live";
-  el("mini-tag").textContent = snapshot.status === "live" ? "LIVE" : "FULL TIME";
+  live.hidden = !started || !sheet.hidden;
+  el("ft").hidden = !over;
+  el("ft").textContent = abandoned ? "Abandoned" : "Full time";
+  el("mini-tag").textContent = snapshot.status === "live" ? "LIVE"
+    : abandoned ? "ABANDONED" : "FULL TIME";
   el("composer").hidden = snapshot.status !== "live";
   if (!started) drawLobby(snapshot);
+  if (over) settle();
 }
 
 function drawLobby(snapshot) {
@@ -493,6 +505,114 @@ function queue(team, seq, words) {
   if (seq !== held) return;
   held = 0;
   notice.hidden = true;
+}
+
+/* ── Full time ──────────────────────────────────────────────────────── */
+
+/**
+ * Ask the arena what the match was worth, once, and show it.
+ *
+ * The phone computes nothing here. Every number and every line of the
+ * breakdown was worked out on the server from this room's own log at the
+ * whistle and stored, so a manager who reloads this screen sees the same total
+ * they saw the first time.
+ */
+async function settle() {
+  if (earned || asking) return;
+  asking = true;
+  try {
+    earned = await get(`/api/rooms/${CODE}/result`);
+  } catch (failure) {
+    // The scoreline and the relay are still behind this, so a result that will
+    // not load is a missing panel rather than a dead page.
+    return complain(failure);
+  } finally {
+    asking = false;
+  }
+  const yours = earned.results[mine];
+  // An abandoned match was scored for nobody. The live view stays up with the
+  // badge saying what happened, because there is no sheet to put over it.
+  if (yours) drawResult(earned, yours);
+}
+
+function drawResult(result, yours) {
+  el("side").textContent =
+    `${SIDE_LABEL[mine]} · ${OUTCOME[yours.outcome]} ${yours.goals_for}-${yours.goals_against}`;
+  el("r-mode").textContent = result.mode === "solo" ? "Score attack" : "Head to head";
+  el("r-points").textContent = figure(yours.points);
+  el("r-rank").textContent = standing(result, yours);
+  el("r-breakdown").replaceChildren(...yours.breakdown.map(brow));
+  el("r-top").replaceChildren(
+    ...result.top.map((row, place) => leader(row, place, result.mode, yours.player_id)));
+  el("r-top").hidden = result.top.length === 0;
+  el("r-hint").textContent = aside(result, yours);
+
+  live.hidden = true;
+  sheet.hidden = false;
+}
+
+function standing(result, yours) {
+  // The workshop and anything the host ran fast still earn a breakdown, because
+  // what a practice run was worth is worth reading. They just rank nowhere, and
+  // saying so is kinder than leaving the line blank.
+  if (!result.ranked) return "A practice run - it earns points but no place on the board";
+  const where = result.standing[mine];
+  if (!where) return "";
+  const best = result.mode !== "solo" ? ""
+    : where.best ? " · new personal best" : " · your best run still stands";
+  const rating = yours.rating === null ? "" : ` · rating ${Math.round(yours.rating)}`;
+  return `${ordinal(where.rank)} of ${where.of}${best}${rating}`;
+}
+
+function brow(row) {
+  const line = document.createElement("div");
+  line.className = `brow ${row.points > 0 ? "plus" : row.points < 0 ? "minus" : "zero"}`;
+  line.append(Object.assign(document.createElement("span"), { textContent: row.label }),
+              Object.assign(document.createElement("b"), { textContent: signed(row.points) }));
+  return line;
+}
+
+function leader(row, place, mode, you) {
+  const line = document.createElement("div");
+  const yours = row.player_id === you;
+  line.className = `mrow${yours ? " you" : ""}`;
+  const who = document.createElement("span");
+  who.append(icon(MEDALS[place]), `${row.name}${yours ? " (you)" : ""}`);
+  const score = document.createElement("b");
+  // The head to head board is not ranked on points, so showing a total beside
+  // a name there would be showing the wrong number.
+  score.textContent = mode === "solo" ? figure(row.points)
+                                      : `${row.won}-${row.drew}-${row.lost}`;
+  line.append(who, score);
+  return line;
+}
+
+function aside(result, yours) {
+  const rule = result.mode === "solo"
+    ? "Only your best run counts - scan the code on the screen for another go."
+    : "Rating is shown but does not sort the board: one match is not a rating.";
+  return `${rule} ${shoutsAside(yours)}`;
+}
+
+function shoutsAside(yours) {
+  if (!yours.shouts) {
+    return "You made no calls. A shout followed by a goal inside 45 seconds is worth 100.";
+  }
+  const landed = `${yours.shouts} shout${yours.shouts === 1 ? "" : "s"}`;
+  if (!yours.effective) return `${landed} landed, none followed by a goal inside 45 seconds.`;
+  if (yours.shouts === 1) return "Your one shout was followed by a goal inside 45 seconds.";
+  return `${landed} landed, ${yours.effective} followed by a goal inside 45 seconds.`;
+}
+
+const figure = (points) => points.toLocaleString("en-GB");
+const signed = (points) =>
+  (points ? `${points > 0 ? "+" : "-"}${figure(Math.abs(points))}` : "0");
+
+function ordinal(place) {
+  // 11th, 12th and 13th, which the last-digit rule below gets wrong.
+  const teens = place % 100;
+  if (teens >= 11 && teens <= 13) return `${place}th`;
+  return `${place}${["th", "st", "nd", "rd"][place % 10] || "th"}`;
 }
 
 /* ── Saying what went wrong ─────────────────────────────────────────── */

@@ -74,6 +74,27 @@
       <div class="chips" id="chips"></div>
     </div>
   </section>
+
+  <!-- What it was worth. Every number here was computed by the arena from the
+       match's own log, breakdown included, so the sum on this screen and the
+       total on the board cannot come apart. -->
+  <section class="stack sheet" id="result" hidden>
+    <div class="ft-badge">Full time</div>
+
+    <div class="total">
+      <span class="eyebrow" id="r-mode">Score attack</span>
+      <div class="pts" id="r-points">0</div>
+      <div class="rank" id="r-rank"></div>
+      <div class="breakdown" id="r-breakdown"></div>
+    </div>
+
+    <div class="mini-board" id="r-top"></div>
+    <p class="hint" id="r-hint"></p>
+
+    <div class="after">
+      <a class="btn ghost" href="/board">See the full board</a>
+    </div>
+  </section>
 </main>
 <script type="module" src="/static/play.js"></script>
 </body>

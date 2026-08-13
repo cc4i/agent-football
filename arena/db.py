@@ -18,8 +18,8 @@ CREATE TABLE IF NOT EXISTS player (
     created_at   REAL    NOT NULL
 );
 
--- `ranked` covers the reserved workshop room and, from step 5, a host that
--- reported a speed other than 1.0. Abandonment is read from `status`.
+-- `ranked` covers the reserved workshop room and a host that reported a speed
+-- other than 1.0. Abandonment is read from `status`.
 CREATE TABLE IF NOT EXISTS room (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
     code           TEXT    NOT NULL UNIQUE,
@@ -67,7 +67,34 @@ CREATE TABLE IF NOT EXISTS profile (
     PRIMARY KEY (room_id, team, role)
 );
 
+-- One row per dugout of a finished match, written once at the whistle from
+-- that room's own log. The columns the two boards rank and render on are their
+-- own columns rather than keys inside the JSON, so a board is a query. The
+-- JSON holds the breakdown exactly as the results screen shows it, so the
+-- screen never has to re-derive the point table and disagree with the total.
+CREATE TABLE IF NOT EXISTS result (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    room_id        INTEGER NOT NULL REFERENCES room(id),
+    player_id      INTEGER NOT NULL REFERENCES player(id),
+    team           TEXT    NOT NULL,
+    points         INTEGER NOT NULL,
+    outcome        TEXT    NOT NULL,
+    goals_for      INTEGER NOT NULL,
+    goals_against  INTEGER NOT NULL,
+    first_goal_ms  INTEGER,
+    shouts         INTEGER NOT NULL,
+    effective      INTEGER NOT NULL,
+    -- The player's Elo after this match, head to head only. Kept here rather
+    -- than on the player so that a rating is always a match's own record and
+    -- the whole ladder can be replayed from the results that made it.
+    rating         REAL,
+    breakdown_json TEXT    NOT NULL,
+    computed_at    REAL    NOT NULL,
+    UNIQUE (room_id, player_id)
+);
+
 CREATE INDEX IF NOT EXISTS room_by_status ON room (status);
+CREATE INDEX IF NOT EXISTS result_by_player ON result (player_id);
 """
 
 

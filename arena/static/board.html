@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#07090e">
+<title>Standings - Futsal WorldCup</title>
+<link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700;800&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body class="big">
+<main class="screen">
+  <div class="screen-bar">
+    <div class="screen-id">
+      <h1>Standings</h1>
+      <span class="where" id="where">arena · board</span>
+    </div>
+    <div class="bar-right"><span class="eyebrow">Updates at every whistle</span></div>
+  </div>
+
+  <p class="problem" id="problem" hidden></p>
+
+  <div class="board-tabs" role="tablist">
+    <button class="board-tab" role="tab" type="button" id="tab-solo"
+            aria-selected="true" aria-controls="view-solo">Score attack</button>
+    <button class="board-tab" role="tab" type="button" id="tab-versus"
+            aria-selected="false" aria-controls="view-versus">Head to head</button>
+  </div>
+  <!-- How long until the boards swap. A wall screen with no bar reads as
+       frozen the moment somebody looks at it between cycles. -->
+  <div class="board-tick" id="tick"><i></i></div>
+
+  <section class="board-view" id="view-solo" role="tabpanel" aria-labelledby="tab-solo">
+    <p class="board-why">Solo runs against the house side. Best run per manager.</p>
+    <div class="podium" id="podium-solo"></div>
+    <div id="table-solo"></div>
+  </section>
+
+  <section class="board-view" id="view-versus" role="tabpanel" aria-labelledby="tab-versus" hidden>
+    <p class="board-why">Manager against manager. Sorted by wins, then goal difference.
+      Rating is shown but does not sort - one match is not a rating.</p>
+    <div class="podium" id="podium-versus"></div>
+    <div id="table-versus"></div>
+  </section>
+</main>
+<script type="module" src="/static/board.js"></script>
+</body>
+</html>

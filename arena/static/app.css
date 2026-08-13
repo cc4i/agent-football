@@ -1,5 +1,5 @@
 /* ══════════════════════════════════════════════════════════════════
-   The arena's three pages: /join, /play and /arena.
+   The arena's four pages: /join, /play, /arena and /board.
 
    Tokens and class names come from docs/leaderboard_ui_mockup.html, which
    in turn inherits game/frontend/src/style.css, so the phone, the pitch and
@@ -331,6 +331,35 @@ body.phone.fixed .pscreen{height:100%;min-height:0}
   padding:5px 14px;border-radius:999px;margin-bottom:11px;text-transform:uppercase;
 }
 
+/* ── Full time ───────────────────────────────────────────────────── */
+/* The total and every line it is made of. The server sends both, so the sum
+   on the screen and the number on the board cannot come apart. */
+.total{
+  background:linear-gradient(170deg,rgba(255,204,0,.14),rgba(3,6,14,.9));
+  border:1px solid rgba(255,204,0,.45);border-radius:14px;padding:15px;text-align:center;flex:none;
+  box-shadow:0 8px 26px rgba(255,204,0,.13);
+}
+.total .eyebrow{display:block;margin-bottom:5px}
+.total .pts{
+  font-family:'Outfit',system-ui,sans-serif;font-size:2.5rem;font-weight:800;
+  color:var(--gold);line-height:1;font-variant-numeric:tabular-nums;
+}
+.total .rank{font-size:.82rem;color:#93c5fd;font-weight:700;margin-top:7px}
+.breakdown{display:flex;flex-direction:column;gap:3px;margin-top:13px;text-align:left}
+.brow{
+  display:flex;justify-content:space-between;gap:10px;
+  background:rgba(0,0,0,.32);border-radius:5px;padding:5px 9px;font-size:.71rem;color:var(--mute);
+}
+.brow b{
+  color:#fff;font-weight:600;
+  font-family:'IBM Plex Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums;
+}
+.brow.plus b{color:var(--emerald)}
+.brow.minus b{color:#fca5a5}
+/* A line worth nothing still shows: "no clean sheet" is part of the story of
+   the match, and a table that hid its zeroes would read as a shorter match. */
+.brow.zero{opacity:.5}
+
 .mini-board{
   background:rgba(0,0,0,.34);border:1px solid var(--line);border-radius:10px;
   padding:6px;margin-top:11px;flex:none;
@@ -341,6 +370,16 @@ body.phone.fixed .pscreen{height:100%;min-height:0}
 .mrow b{font-family:'IBM Plex Mono',ui-monospace,monospace;color:var(--ink);font-weight:600}
 .mrow.you{background:var(--blue-dim);border-radius:5px;color:#fff;font-weight:600}
 .mrow.you b{color:var(--gold)}
+
+/* Six breakdown rows, three leaders and a hint do not fit a 667px handset with
+   a button pinned under them, so the sheet scrolls and the button rides down
+   with it rather than the total being cropped. */
+.sheet{overflow-y:auto;-webkit-overflow-scrolling:touch;scrollbar-width:thin}
+
+/* The way off the results screen. An anchor rather than a button, because the
+   board is a page: a long press should offer to open it, not do nothing. */
+.after{margin-top:auto;padding-top:14px;display:grid;gap:7px}
+.after .btn{display:block;text-align:center;text-decoration:none;line-height:1.2}
 
 /* ══════════════════════════════════════════════════════════════════
    The big screen: /arena
@@ -463,7 +502,133 @@ body.big{padding:24px}
   background:#05070f;box-shadow:inset 0 0 70px rgba(0,0,0,.85);
 }
 
+/* ══════════════════════════════════════════════════════════════════
+   The standings: /board
+
+   Two boards that never merge, on one page. It hangs on a wall unattended
+   most of the time, so it cycles between them on its own and refetches at
+   every whistle rather than waiting for somebody to reload it.
+   ══════════════════════════════════════════════════════════════════ */
+/* The gap under the tabs is wide enough that the bar below cannot be mistaken
+   for an underline on whichever tab is up. */
+.board-tabs{display:flex;gap:6px;justify-content:center;margin-bottom:14px;flex:none}
+.board-tab{
+  background:rgba(255,255,255,.03);border:1px solid var(--line);color:var(--mute);
+  font-family:'Outfit',system-ui,sans-serif;font-weight:700;font-size:.84rem;
+  padding:9px 20px;border-radius:9px;cursor:pointer;
+}
+.board-tab[aria-selected="true"]{background:var(--blue-dim);border-color:var(--blue);color:#fff}
+.board-tab:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+.board-why{text-align:center;font-size:.76rem;color:var(--faint);margin:10px 0 22px}
+/* The bar the page fills while it waits to swap boards. It is the only thing
+   telling a passer-by that the screen is alive rather than stuck.
+
+   Deliberately much narrower than the two tabs above it: at the same width it
+   finishes as a straight blue line under them and reads as an underline on
+   whichever tab is up. Straddling the gap between them, it cannot. */
+.board-tick{
+  height:2px;border-radius:2px;background:rgba(255,255,255,.07);
+  overflow:hidden;margin:0 auto 4px;width:150px;flex:none;
+}
+.board-tick i{
+  display:block;height:100%;background:var(--blue);
+  transform-origin:left;transform:scaleX(0);
+}
+@keyframes tick{from{transform:scaleX(0)}to{transform:scaleX(1)}}
+.board-view{flex:1;min-height:0;overflow-y:auto;scrollbar-width:thin}
+
+.podium{display:flex;justify-content:center;align-items:flex-end;gap:16px;margin:6px 0 30px}
+.pod{
+  width:228px;border-radius:14px 14px 6px 6px;padding:18px 15px;text-align:center;
+  display:flex;flex-direction:column;align-items:center;background:var(--panel);
+}
+.pod .medal{font-size:1.9rem;line-height:1;margin-bottom:8px}
+.pod .nm{font-family:'Outfit',system-ui,sans-serif;font-size:1.16rem;font-weight:800;line-height:1.2}
+.pod .em{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:.64rem;color:var(--faint);margin-top:3px}
+.pod .st{font-size:.72rem;color:var(--mute);margin-top:9px;line-height:1.5}
+.pod .sc{
+  margin-top:auto;font-family:'Outfit',system-ui,sans-serif;font-size:1.55rem;
+  font-weight:800;color:var(--gold);font-variant-numeric:tabular-nums;
+}
+.pod .sc small{
+  display:block;font-size:.56rem;letter-spacing:.18em;color:var(--faint);
+  font-weight:700;text-transform:uppercase;margin-top:2px;
+}
+/* Gold in the middle and taller, which is what makes it a podium rather than
+   three cards. `order` does the swap so the markup stays 1, 2, 3. */
+.pod.g{height:262px;order:2;border:1px solid rgba(255,204,0,.6);background:linear-gradient(180deg,rgba(255,204,0,.2),rgba(11,15,28,.96));box-shadow:0 0 34px rgba(255,204,0,.22)}
+.pod.s{height:226px;order:1;border:1px solid rgba(148,163,184,.5);background:linear-gradient(180deg,rgba(148,163,184,.14),rgba(11,15,28,.96))}
+.pod.br{height:198px;order:3;border:1px solid rgba(180,83,9,.6);background:linear-gradient(180deg,rgba(180,83,9,.16),rgba(11,15,28,.96))}
+
+.table{
+  width:100%;border-collapse:collapse;background:var(--panel);
+  border:1px solid var(--line);border-radius:12px;overflow:hidden;
+}
+.table th{
+  background:rgba(255,255,255,.035);font-size:.63rem;
+  text-transform:uppercase;letter-spacing:.16em;color:var(--faint);font-weight:700;
+  padding:11px 16px;text-align:left;white-space:nowrap;
+}
+.table td{padding:12px 16px;border-top:1px solid var(--line-2);font-size:.88rem;vertical-align:middle}
+.table tbody tr:hover{background:rgba(59,130,246,.06)}
+.rk{font-family:'IBM Plex Mono',ui-monospace,monospace;font-weight:600;font-size:1rem;color:var(--mute);width:52px}
+.rk.top{color:var(--gold)}
+/* A heading over the number the board is ordered by. It takes the alignment
+   from the column and nothing else -- the row is loud, the heading is not. */
+.table th.tot{text-align:right;font-family:inherit;font-size:.63rem;color:var(--faint)}
+.who-cell b{display:block;font-family:'Outfit',system-ui,sans-serif;font-size:.95rem;font-weight:700}
+.who-cell span{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:.66rem;color:var(--faint)}
+.num{font-family:'IBM Plex Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums}
+.tot{
+  font-family:'Outfit',system-ui,sans-serif;font-weight:800;font-size:1.12rem;
+  color:var(--gold);text-align:right;font-variant-numeric:tabular-nums;
+}
+.tag{
+  display:inline-block;font-size:.62rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;
+  border-radius:4px;padding:2px 7px;
+}
+.tag.w{background:rgba(16,185,129,.14);border:1px solid rgba(16,185,129,.4);color:#6ee7b7}
+.tag.l{background:var(--red-dim);border:1px solid var(--red-line);color:#fca5a5}
+.tag.d{background:rgba(255,255,255,.05);border:1px solid var(--line);color:var(--mute)}
+
+/* A board nobody has played on yet, which is what the wall shows all morning
+   before the first match. It says how to get on it. */
+.board-empty{
+  text-align:center;padding:60px 20px;border:1px dashed rgba(255,255,255,.12);
+  border-radius:var(--r-lg);
+}
+.board-empty b{display:block;font-family:'Outfit',system-ui,sans-serif;font-size:1.15rem;margin-bottom:7px}
+.board-empty span{font-size:.85rem;color:var(--faint)}
+
+@media (max-width:940px){
+  .podium{flex-wrap:wrap}
+  .pod{height:auto!important;min-height:190px;width:100%;max-width:280px}
+  /* Stacked, there is no middle to put the gold in, and the reordering that
+     built the podium is left printing 2nd, 1st, 3rd down the screen. */
+  .pod.g,.pod.s,.pod.br{order:0}
+}
+
 @media (max-width:860px){
   .lobby-grid{grid-template-columns:1fr}
   .seats{flex-direction:column;gap:14px}
 }
+
+@media (max-width:640px){
+  body.big{padding:10px}
+  .screen{padding:14px;border-radius:14px;min-height:calc(100vh - 20px)}
+  /* The heading and the note sit on one line on a wall and fight over three
+     words each on a handset. */
+  .screen-bar{flex-direction:column;align-items:flex-start;gap:7px;margin-bottom:14px}
+  .screen-id{flex-wrap:wrap;gap:4px 10px}
+  /* One scroll on a phone rather than a page holding a scrolling box. A
+     handset's `100vh` counts the strip the address bar sits over, so a nested
+     scroller inside it puts its last rows somewhere nobody can reach. */
+  .board-view{flex:none;overflow:visible}
+  /* Eight columns on a 375px screen either shrink past reading or scroll
+     sideways under a page that already scrolls down. Rank, who and the figure
+     the board is ordered by survive, which is the board. */
+  .table .det{display:none}
+  .table th,.table td{padding:11px 12px}
+}
+
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}

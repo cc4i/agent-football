@@ -25,6 +25,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator, model_validator
 from uvicorn.protocols.utils import ClientDisconnected
 
+import board
 import chain
 import codes
 import db
@@ -88,6 +89,11 @@ MAX_CHANGES = 64
 # How much of a room's log one catch-up read may return. A three-minute match
 # produces tens of events, so this only bites on a room somebody has left open.
 MAX_REPLAY_EVENTS = 500
+
+# How many rows of either board go out in one response. A venue's board is tens
+# of rows; the cap is here so that a long-running instance cannot turn the page
+# into a several-megabyte download.
+MAX_BOARD_ROWS = 100
 
 # What a QR code should encode. A phone on the venue wifi cannot reach the
 # laptop's loopback address, so a real event sets this to the machine's LAN
@@ -253,6 +259,12 @@ async def arena_page():
     return _page("arena.html")
 
 
+@app.get("/board")
+async def board_page():
+    """The standings. The same page on a wall-mounted screen and on a phone."""
+    return _page("board.html")
+
+
 @app.get("/api/venue")
 async def read_venue():
     """Where the other halves of the venue live, for the pages to link to."""
@@ -339,6 +351,32 @@ async def read_events(code: str, request: Request, since: int = 0):
     connection, room = _profile_room(request, code)
     log = [entry for entry in rooms.events(connection, room["id"]) if entry["seq"] > since]
     return {"events": log[-MAX_REPLAY_EVENTS:]}
+
+
+@app.get("/api/rooms/{code}/result")
+async def read_result(code: str, request: Request):
+    """What each dugout earned here, and where it leaves them.
+
+    Empty until the whistle, and it stays a read: the points were computed and
+    stored once, when the match ended, so refreshing the results screen cannot
+    produce a different total from the one the manager first saw.
+    """
+    connection, room = _profile_room(request, code)
+    results = board.read(connection, room["id"])
+    return {"code": room["code"], "mode": room["mode"], "status": room["status"],
+            "ranked": bool(room["ranked"]),
+            "results": results,
+            "standing": board.placing(connection, room, results),
+            "top": board.top(connection, room["mode"])}
+
+
+@app.get("/api/board")
+async def read_board(request: Request):
+    """Both boards. They are returned together because the page shows both."""
+    connection = request.app.state.conn
+    return {"solo": board.solo(connection)[:MAX_BOARD_ROWS],
+            "versus": board.versus(connection)[:MAX_BOARD_ROWS],
+            "managers": board.managers(connection)}
 
 
 @app.get("/api/rooms/{code}/qr.svg")
@@ -719,6 +757,7 @@ def _handle_from_host(message, connection, match_bus, room, client_id):
 
     topic = room_topic(room["code"])
     if kind == "host.state":
+        _watch_the_clock(connection, current, payload)
         match_bus.publish(topic, {**payload, "type": "state"})
         # Server keys go last so a host cannot forge type or another room's code.
         match_bus.publish(WALL, {**payload, "type": "wall.state", "code": room["code"]})
@@ -743,13 +782,42 @@ def _handle_from_host(message, connection, match_bus, room, client_id):
     match_bus.publish(topic, {"type": "event", "seq": seq, "kind": event_kind,
                               "match_ms": match_ms, "payload": payload})
 
-    if event_kind == "full_time":
-        # The host is trusted for physics and not for scoring, and when the
-        # match ended is physics. Everything the points are computed from is
-        # already in the log above; this only closes the room.
-        rooms.finish_match(connection, room["id"])
-        match_bus.publish(topic, {"type": "room", **_snapshot(connection, room["id"])})
-        match_bus.publish(WALL, {"type": "wall", "rooms": rooms.live(connection)})
+    if event_kind in ("full_time", "abandoned"):
+        _end_match(connection, match_bus, room, event_kind)
+
+
+def _watch_the_clock(connection, room, payload):
+    """Take a room off the boards if its host ever reports anything but 1x.
+
+    Time to first goal is worth up to 500 points, so a match played at 3x is
+    not comparable with one played straight. The room stays perfectly playable
+    and its managers still get their breakdown; it simply stops being ranked,
+    and it never comes back, because a slider nudged for one frame and put back
+    would otherwise be free.
+    """
+    speed = payload.get("speed")
+    if not room["ranked"] or isinstance(speed, bool) or not isinstance(speed, (int, float)):
+        return
+    if speed != 1.0:
+        logger.info("room %s unranked: host reported speed %s", room["code"], speed)
+        rooms.unrank(connection, room["id"])
+
+
+def _end_match(connection, match_bus, room, event_kind):
+    """Close the room the host says is over, and pay out if it was played out.
+
+    The host is trusted for physics and not for scoring, and when a match ended
+    is physics. Everything the points are computed from is already in the log;
+    scoring only reads it back. An abandoned match is scored by nobody -- it has
+    no full time, so there is no result to have earned.
+    """
+    status = "finished" if event_kind == "full_time" else "abandoned"
+    rooms.finish_match(connection, room["id"], status)
+    if status == "finished":
+        board.record(connection, rooms.by_code(connection, room["code"]))
+    match_bus.publish(room_topic(room["code"]),
+                      {"type": "room", **_snapshot(connection, room["id"])})
+    match_bus.publish(WALL, {"type": "wall", "rooms": rooms.live(connection)})
 
 
 @app.websocket("/ws/wall")
@@ -789,5 +857,23 @@ async def _until_closed(socket):
         return
 
 
+class Revalidated(StaticFiles):
+    """Static files a browser has to ask about before reusing.
+
+    Without a Cache-Control header a browser is free to guess how long a file
+    stays fresh, and it guesses in hours. The pages already say `no-cache`, so
+    the guessing lands on exactly the files that change -- the stylesheet and
+    the scripts -- and a wall screen keeps serving last week's board until
+    somebody finds the reload-with-cache-bypass shortcut. `no-cache` is not
+    `no-store`: the file is still cached, still revalidated by ETag, and still
+    answered with a 304, which on a venue's own network costs nothing.
+    """
+
+    def file_response(self, *args, **kwargs):
+        response = super().file_response(*args, **kwargs)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
 # Mounted last so no page or API path can ever be shadowed by a file on disk.
-app.mount("/static", StaticFiles(directory=STATIC), name="static")
+app.mount("/static", Revalidated(directory=STATIC), name="static")

@@ -1,18 +1,27 @@
 /**
- * A room socket that survives a phone going to sleep.
+ * Sockets that survive a phone going to sleep.
  *
  * A venue's wifi drops, a handset backgrounds itself, a laptop lid closes. The
- * arena's log is gapless and every client re-reads the room on connect, so
- * reconnecting is always safe -- which makes giving up the wrong default.
+ * arena's log is gapless and every client re-reads what it is watching on
+ * connect, so reconnecting is always safe -- which makes giving up the wrong
+ * default.
  */
 
 const FIRST_WAIT_MS = 500;
 const LONGEST_WAIT_MS = 8000;
 
-export function openRoom(code, { clientId = "", onMessage, onOpen, onDrop } = {}) {
-  const scheme = location.protocol === "https:" ? "wss" : "ws";
+export function openRoom(code, { clientId = "", ...handlers } = {}) {
   const query = clientId ? `?client_id=${encodeURIComponent(clientId)}` : "";
-  const address = `${scheme}://${location.host}/ws/rooms/${encodeURIComponent(code)}${query}`;
+  return open(`/ws/rooms/${encodeURIComponent(code)}${query}`, handlers);
+}
+
+export function openWall(handlers = {}) {
+  return open("/ws/wall", handlers);
+}
+
+function open(path, { onMessage, onOpen, onDrop } = {}) {
+  const scheme = location.protocol === "https:" ? "wss" : "ws";
+  const address = `${scheme}://${location.host}${path}`;
 
   let socket = null;
   let wait = FIRST_WAIT_MS;

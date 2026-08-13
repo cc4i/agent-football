@@ -1,4 +1,6 @@
 import json
+import time
+
 import pytest
 
 import codes
@@ -251,12 +253,15 @@ def test_events_are_numbered_from_one_within_each_room(conn, alex, sam):
 
 def test_an_event_payload_comes_back_the_way_it_went_in(conn, alex):
     room = live_solo(conn, alex)
+    opened = time.time()
     rooms.append_event(conn, room["id"], "goal",
                        {"team": "blue", "scorer": "forward"}, match_ms=27400)
-    assert rooms.events(conn, room["id"]) == [
-        {"seq": 1, "kind": "goal", "match_ms": 27400,
-         "payload": {"team": "blue", "scorer": "forward"}}
-    ]
+    [entry] = rooms.events(conn, room["id"])
+    # The stamp is the one thing the caller did not supply. Scoring measures the
+    # window after a shout with it, so it has to come back out.
+    assert entry.pop("wall_ts") >= opened
+    assert entry == {"seq": 1, "kind": "goal", "match_ms": 27400,
+                     "payload": {"team": "blue", "scorer": "forward"}}
 
 
 def test_a_room_with_nothing_logged_has_an_empty_log(conn, alex):
