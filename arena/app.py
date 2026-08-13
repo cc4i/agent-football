@@ -14,6 +14,7 @@ import logging
 import os
 import re
 import secrets
+import time
 from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
 
@@ -95,6 +96,18 @@ MAX_REPLAY_EVENTS = 500
 # into a several-megabyte download.
 MAX_BOARD_ROWS = 100
 
+# How long a live room may go without a word from the screen running it before
+# the arena gives up on it. Backgrounding a tab stops its frames, so this is
+# also the grace a host gets to come back: long enough to answer the door,
+# short enough that the wall is not full of matches nobody is playing.
+HOST_GONE_SECONDS = 30
+# How often to look. A dead room should leave the wall while somebody is still
+# standing in front of it, and the sweep costs one query.
+SWEEP_SECONDS = 5
+# What the phones are told. It goes in the log with the event, so a manager who
+# reloads afterwards is still told why their match stopped.
+HOST_GONE_REASON = "The screen running this match stopped reporting, so it was abandoned."
+
 # What a QR code should encode. A phone on the venue wifi cannot reach the
 # laptop's loopback address, so a real event sets this to the machine's LAN
 # name or its tunnel. The default is right for one person testing alone.
@@ -119,10 +132,23 @@ async def lifespan(fastapi_app: FastAPI):
     fastapi_app.state.conn = connection
     fastapi_app.state.bus = Bus()
     fastapi_app.state.chain = chain.Chain(fastapi_app.state.bus)
+    # When each live room was last heard from, by code. In memory on purpose:
+    # a restart has lost every host anyway, and the sweep below treats a room
+    # it has never heard from the same as one that has gone quiet.
+    fastapi_app.state.heard = {}
     # Install filter to redact client_id from access logs.
     access_logger = logging.getLogger("uvicorn.access")
     access_logger.addFilter(_RedactClientId())
+    # uvicorn gives its own loggers a handler and leaves the root without one,
+    # so everything this module says below WARNING has been going nowhere: a
+    # room unranked for running fast, a host given up on. Borrow the handler.
+    server_logger = logging.getLogger("uvicorn")
+    if server_logger.handlers and not logger.handlers:
+        logger.handlers = server_logger.handlers
+        logger.setLevel(logging.INFO)
+    watchdog = asyncio.create_task(_watch_for_the_missing(fastapi_app))
     yield
+    watchdog.cancel()
     # Chains first: one still talking to the coach would otherwise come back to
     # a closed database when its specialists write.
     await fastapi_app.state.chain.close()
@@ -699,7 +725,8 @@ async def room_socket(socket: WebSocket, code: str, client_id: str = ""):
                 message = await socket.receive_json()
             except (ValueError, KeyError):
                 continue
-            _handle_from_host(message, connection, match_bus, room, client_id)
+            _handle_from_host(message, connection, match_bus, room, client_id,
+                              socket.app.state.heard)
     except WebSocketDisconnect:
         pass
     finally:
@@ -726,7 +753,7 @@ def _wire_bytes(value):
         return None
 
 
-def _handle_from_host(message, connection, match_bus, room, client_id):
+def _handle_from_host(message, connection, match_bus, room, client_id, heard):
     """Apply one up-message, if the sender is the client holding physics."""
     if not isinstance(message, dict):
         return
@@ -744,6 +771,10 @@ def _handle_from_host(message, connection, match_bus, room, client_id):
     # or the wall until a manager has actually kicked off.
     if current["status"] != "live":
         return
+    # The host is here. That is worth recording before the message is picked
+    # over, because a frame the arena goes on to refuse is still proof that
+    # somebody is on the other end of the socket running this match.
+    heard[room["code"]] = time.monotonic()
 
     payload = message.get("payload")
     if payload is not None and not isinstance(payload, dict):
@@ -818,6 +849,52 @@ def _end_match(connection, match_bus, room, event_kind):
     match_bus.publish(room_topic(room["code"]),
                       {"type": "room", **_snapshot(connection, room["id"])})
     match_bus.publish(WALL, {"type": "wall", "rooms": rooms.live(connection)})
+
+
+def _give_up_on_the_missing(connection, match_bus, heard, now):
+    """Abandon live rooms whose host has stopped reporting. Returns their codes.
+
+    A room only leaves "live" when somebody blows a whistle on it, and a laptop
+    closed mid-match never does. Without this, one shut lid leaves a frozen
+    tile on every wall in the venue for the rest of the evening, and the two
+    managers watch a clock that has stopped and are never told why.
+
+    A room nobody has been heard on yet is timed from the first sweep that sees
+    it rather than from kick-off, which is the same rule one sweep late. That
+    is what makes a restart safe: rooms left live by the process that died are
+    unreachable, and thirty seconds later they are marked as what they are.
+    """
+    playing = {room["code"] for room in rooms.live(connection)}
+    for code in [code for code in heard if code not in playing]:
+        del heard[code]
+
+    gone = []
+    for code in sorted(playing):
+        if now - heard.setdefault(code, now) <= HOST_GONE_SECONDS:
+            continue
+        room = rooms.by_code(connection, code)
+        del heard[code]
+        said = {"reason": HOST_GONE_REASON}
+        seq = rooms.append_event(connection, room["id"], "abandoned", said)
+        match_bus.publish(room_topic(code), {"type": "event", "seq": seq, "kind": "abandoned",
+                                             "match_ms": None, "payload": said})
+        _end_match(connection, match_bus, room, "abandoned")
+        logger.info("room %s abandoned: nothing from its host in %ss", code, HOST_GONE_SECONDS)
+        gone.append(code)
+    return gone
+
+
+async def _watch_for_the_missing(fastapi_app):
+    """Run the sweep above for as long as the arena is up."""
+    while True:
+        await asyncio.sleep(SWEEP_SECONDS)
+        try:
+            _give_up_on_the_missing(fastapi_app.state.conn, fastapi_app.state.bus,
+                                    fastapi_app.state.heard, time.monotonic())
+        except Exception:
+            # One bad sweep must not take the watchdog down for the life of the
+            # process: every room after it would then hang live forever.
+            logger.exception("the sweep for missing hosts failed")
 
 
 @app.websocket("/ws/wall")

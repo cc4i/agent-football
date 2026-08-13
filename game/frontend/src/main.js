@@ -17,7 +17,7 @@ import Phaser from 'phaser';
 import { SoccerGameScene, GAME_DURATION_SEC, STATUS_CHECK_MS } from './game';
 import { Sound } from './audio';
 import { createStatusHook } from './status.js';
-import { room, isHost, isViewer, opposite, readProfiles, connect } from './arena.js';
+import { room, isHost, isViewer, opposite, readProfiles, connect, keepAwake } from './arena.js';
 
 let gameInstance = null;
 let currentProfiles = {};
@@ -731,6 +731,7 @@ function startPhaserGame() {
         // happened. Everyone else in the room is drawing these frames.
         scene.frameSink = feed.state;
         scene.reporter = feed.event;
+        keepAwake();
       }
     }
   });

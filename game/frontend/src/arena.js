@@ -54,6 +54,41 @@ export const isHost = () => room.as === 'host' && Boolean(room.clientId);
  */
 export const isViewer = () => room.inMatch && !isHost();
 
+/**
+ * Ask the screen to stay awake while this tab is the one running a match.
+ *
+ * Physics lives here, so a screen that dims and sleeps takes the match with
+ * it: frames stop, and after half a minute of silence the arena marks the room
+ * abandoned. That is the right thing to do to a host that has gone, and the
+ * wrong thing to do to one sitting in front of an idle laptop, so the host
+ * asks not to be left. Browsers drop the lock whenever the page is hidden,
+ * which is why it is taken again on the way back rather than only once.
+ *
+ * The lock is held for as long as the page is: this pitch exists only while
+ * its match does, and there is nothing left to keep awake once it is gone.
+ * Settles once the first attempt has been answered, one way or the other.
+ */
+export async function keepAwake(navigation = navigator, page = document) {
+  if (!navigation.wakeLock) return;
+  let held = null;
+
+  const take = async () => {
+    if (held || page.visibilityState !== 'visible') return;
+    try {
+      held = await navigation.wakeLock.request('screen');
+      // The browser can revoke it without telling this code twice.
+      held.addEventListener('release', () => { held = null; });
+    } catch {
+      // Refused: no user gesture yet, a policy against it, or a flat battery.
+      // None of those are worth interrupting a match over, and the arena's own
+      // thirty seconds of grace is the backstop either way.
+    }
+  };
+
+  page.addEventListener('visibilitychange', take);
+  await take();
+}
+
 /** The other dugout. A host drives both of them. */
 export const opposite = (team = room.team) => (team === 'red' ? 'blue' : 'red');
 

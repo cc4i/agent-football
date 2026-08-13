@@ -35,6 +35,7 @@ let held = 0;         // the shout the notice under the composer is about
 let crowded = false;  // the banner is holding a refusal about the queue
 let earned = null;    // the arena's word on what this match was worth
 let asking = false;   // that word is on its way
+let painted = false;  // a frame from the host has been on this screen
 const dots = [];
 // Both dugouts in the one feed: a manager wants to see what they are up
 // against, and on a handset there is no room for a second column of it. Opened
@@ -118,9 +119,18 @@ function draw(snapshot) {
   live.hidden = !started || !sheet.hidden;
   el("ft").hidden = !over;
   el("ft").textContent = abandoned ? "Abandoned" : "Full time";
+  el("ft").className = abandoned ? "ft-badge gone" : "ft-badge";
   el("mini-tag").textContent = snapshot.status === "live" ? "LIVE"
     : abandoned ? "ABANDONED" : "FULL TIME";
   el("composer").hidden = snapshot.status !== "live";
+  // The composer goes when the match does, and an empty relay saying "make a
+  // call below" would then be pointing at a box that is no longer there. A
+  // room never comes back to life, so this is never put back.
+  if (over) relay.dataset.empty = "Nothing was said in this one.";
+  // Frames are never stored, so a phone opened after an abandonment has no
+  // clock to show and the three minutes it was born with is not one: that
+  // reads as a match that never kicked off. Full time has 00:00 from the log.
+  if (abandoned && !painted) el("clock").textContent = "--:--";
   if (!started) drawLobby(snapshot);
   if (over) settle();
 }
@@ -195,6 +205,7 @@ go.addEventListener("click", async () => {
 /* ── The match ──────────────────────────────────────────────────────── */
 
 function paint(frame) {
+  painted = true;
   if (Array.isArray(frame.score)) showScore(frame.score);
   if (typeof frame.clock === "number") el("clock").textContent = mmss(frame.clock);
   place(frame);
@@ -245,6 +256,13 @@ function record(message) {
   const payload = message.payload || {};
   if (Array.isArray(payload.score)) showScore(payload.score);
   if (message.kind === "full_time") el("clock").textContent = mmss(0);
+  // A match that stopped without a whistle owes both dugouts an explanation.
+  // It comes out of the log rather than the socket, so a phone that reloads
+  // afterwards is told the same thing as one that was watching at the time.
+  if (message.kind === "abandoned") {
+    problem.textContent = payload.reason || "This match was abandoned.";
+    problem.hidden = false;
+  }
   feed.event(message);
 }
 
