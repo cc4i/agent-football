@@ -1,5 +1,6 @@
 import psycopg
 import pytest
+from psycopg import conninfo, sql
 
 import db
 
@@ -22,9 +23,6 @@ def test_connect_creates_a_database_that_is_not_there_yet():
     # The one instruction a contributor should need is `brew services start
     # postgresql@18`. Homebrew's psql is keg-only and suffixed, so `createdb`
     # is not on anybody's PATH and the arena makes its own.
-    from psycopg import conninfo, sql
-    import psycopg
-
     target = "postgresql:///arena_bootstrap_probe"
     admin = conninfo.make_conninfo(target, dbname="postgres")
     name = conninfo.conninfo_to_dict(target)["dbname"]
@@ -70,6 +68,10 @@ def test_two_rooms_cannot_share_a_code(conn):
     with pytest.raises(psycopg.errors.UniqueViolation):
         conn.execute("INSERT INTO room (code, mode, status, ranked, created_at) "
                      "VALUES ('K7F2', 'versus', 'lobby', 1, 0)")
+    # A refused statement aborts the whole transaction, so anything this test
+    # went on to do would fail for the wrong reason. This is what the arena
+    # does after a constraint refuses it, and it is what a test has to do too.
+    db.finish(conn)
 
 
 def test_one_dugout_holds_one_player(conn):
@@ -86,6 +88,7 @@ def test_one_dugout_holds_one_player(conn):
     with pytest.raises(psycopg.errors.UniqueViolation):
         conn.execute("INSERT INTO seat (room_id, team, player_id, philosophy, ready, joined_at) "
                      "VALUES (1, 'blue', 2, 'counter', 0, 0)")
+    db.finish(conn)
 
 
 def test_a_room_cannot_reuse_a_sequence_number(conn):
@@ -96,3 +99,4 @@ def test_a_room_cannot_reuse_a_sequence_number(conn):
     with pytest.raises(psycopg.errors.UniqueViolation):
         conn.execute("INSERT INTO event (room_id, seq, kind, payload_json, match_ms, wall_ts) "
                      "VALUES (1, 1, 'goal', '{}', 100, 0)")
+    db.finish(conn)

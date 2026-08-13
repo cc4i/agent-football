@@ -33,6 +33,22 @@ def test_an_empty_name_is_refused(client):
                        json={"display_name": "", "email": "a@b.com"}).status_code == 422
 
 
+def test_a_nul_in_a_name_is_refused_rather_than_bound(client):
+    # psycopg will not bind a NUL into a text column, so one that got as far as
+    # create_player would be a 500 handed out for unauthenticated input.
+    assert client.post("/api/players",
+                       json={"display_name": "Al\x00ex",
+                             "email": "a@b.com"}).status_code == 422
+
+
+def test_a_nul_in_an_address_is_refused_too(client):
+    # The mask keeps the first and last character of the local part and the
+    # whole domain, so a NUL on the right of the @ reaches email_masked intact.
+    assert client.post("/api/players",
+                       json={"display_name": "Alex Rivera",
+                             "email": "alex@exa\x00mple.com"}).status_code == 422
+
+
 def test_opening_a_room_returns_a_code_and_two_empty_dugouts(client):
     body = client.post("/api/rooms", json={"mode": "versus"}).json()
     assert body["status"] == "lobby"

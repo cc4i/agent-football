@@ -35,7 +35,7 @@ These were checked against a live PostgreSQL 18 and psycopg 3.3.4 while writing 
 | Multi-statement `execute()` for the schema, no params | Works |
 | `row_factory=dict_row` on the connection propagates to implicit cursors | Yes, rows are plain `dict`, so every `row["name"]` keeps working |
 | `cursor.rowcount` after `Connection.execute()` | Works, needed by `rooms.set_ready` |
-| SQLite `REAL` -> Postgres `REAL` round-trips a Python float | Yes |
+| SQLite `REAL` -> Postgres `REAL` round-trips a Python float | **No.** Postgres `REAL` is `float4`: at today's epoch its ULP is 128 s, so `1786636435.95` reads back `1786636416.0`. Every float column is `DOUBLE PRECISION`. |
 | Today's `append_event` SQL on 4 concurrent connections | 1 success, **3 `UniqueViolation`** |
 | Same, with `SELECT ... FOR UPDATE` on the room row first | seq 1, 2, 3, 4 |
 | `conn.commit()` when `autocommit=True` | No-op, does not raise |

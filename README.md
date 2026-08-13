@@ -116,8 +116,10 @@ that push rather than from a poll, which is why a change shows up mid-match.
 
 ## Running it
 
-You need [uv](https://docs.astral.sh/uv/), Node, and the Antigravity CLI with
-`agy login` done.
+You need [uv](https://docs.astral.sh/uv/), Node, the Antigravity CLI with
+`agy login` done, and a Postgres for the arena to keep its history in -
+`brew services start postgresql@18`, or your platform's equivalent. The arena
+makes its own database on the way up.
 
 ```bash
 cp game/.env.example   game/.env      # then set GOOGLE_CLOUD_PROJECT

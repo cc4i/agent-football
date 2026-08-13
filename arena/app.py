@@ -174,10 +174,35 @@ async def lifespan(fastapi_app: FastAPI):
 app = FastAPI(title="Arena", lifespan=lifespan)
 
 
+@app.middleware("http")
+async def put_the_connection_back(request: Request, call_next):
+    """End every request on an idle connection, including one that raised.
+
+    One request is one unit of work against the one shared connection, and this
+    is the only place that is true of every route at once. The sockets are not
+    covered by this -- middleware does not wrap a WebSocket route -- so they
+    call `db.finish` for themselves.
+    """
+    try:
+        return await call_next(request)
+    finally:
+        db.finish(request.app.state.conn)
+
+
 class JoinRequest(BaseModel):
     display_name: str = Field(min_length=1, max_length=40)
     # RFC 5321 caps email addresses at 254 octets.
     email: str = Field(max_length=254)
+
+    @field_validator("display_name", "email")
+    @classmethod
+    def bindable_as_text(cls, value):
+        # Both of these end up in a text column, and psycopg refuses to bind a
+        # NUL. Unrefused it would be a 500 handed out for unauthenticated
+        # input. The address keeps its own mask, but the mask keeps the domain.
+        if "\x00" in value:
+            raise ValueError("that cannot contain a NUL character")
+        return value
 
     @field_validator("email")
     @classmethod
@@ -587,6 +612,7 @@ async def read_profiles(code: str, team: str, request: Request):
 async def read_profile(code: str, team: str, role: str, request: Request):
     connection, room = _profile_room(request, code)
     _known_team(team)
+    _known_role(role)
     found = profiles.read_one(connection, room["id"], team, role)
     if found is None:
         raise HTTPException(404, f"this room has no {team} {role}")
@@ -691,6 +717,17 @@ def _known_team(team):
         raise HTTPException(404, f"there is no {team} dugout")
 
 
+def _known_role(role):
+    """Refuse a role name before it is used to look anything up.
+
+    Most unknown roles are harmless, because the lookup simply finds no row.
+    One is not: psycopg will not bind a NUL at all, so a role carrying one has
+    to be turned away here rather than by the query.
+    """
+    if role not in attributes.ROLES:
+        raise HTTPException(404, f"there is no {role} in this squad")
+
+
 def _require_own_seat(connection, room_id, team, player_id):
     owner = rooms.seat_owner(connection, room_id, team)
     if owner is None or owner != player_id:
@@ -787,6 +824,10 @@ async def room_socket(socket: WebSocket, code: str, client_id: str = ""):
 
     await socket.accept()
     await socket.send_json({"type": "room", **_snapshot(connection, room["id"])})
+    # The snapshot is a read, and a read opens a transaction like anything
+    # else. A viewer that never says a word would otherwise hold one open for
+    # as long as its tab is.
+    db.finish(connection)
 
     subscription = match_bus.subscribe(room_topic(code))
     pump = asyncio.create_task(_pump(socket, subscription))
@@ -796,8 +837,14 @@ async def room_socket(socket: WebSocket, code: str, client_id: str = ""):
                 message = await socket.receive_json()
             except (ValueError, KeyError):
                 continue
-            _handle_from_host(message, connection, match_bus, room, client_id,
-                              socket.app.state.heard)
+            try:
+                _handle_from_host(message, connection, match_bus, room, client_id,
+                                  socket.app.state.heard)
+            finally:
+                # One message is one unit of work. No middleware reaches a
+                # WebSocket route, so this socket puts the connection back
+                # itself, after every message including one that raised.
+                db.finish(connection)
     except WebSocketDisconnect:
         pass
     finally:
@@ -871,8 +918,11 @@ def _handle_from_host(message, connection, match_bus, room, client_id, heard):
     if not isinstance(event_kind, str) or len(event_kind) > 100:
         return
     # `kind` is bound into SQL and echoed to every viewer, so it needs the same
-    # encodability check the payload gets.
-    if _wire_bytes(event_kind) is None:
+    # encodability check the payload gets, and one the payload does not: a NUL
+    # survives json.dumps and the UTF-8 encode, and psycopg refuses to bind it.
+    # Only `kind` is exposed, because a NUL inside the payload is escaped to six
+    # harmless characters on its way into payload_json.
+    if _wire_bytes(event_kind) is None or "\x00" in event_kind:
         return
     if match_ms is not None:
         if not isinstance(match_ms, int) or isinstance(match_ms, bool):
@@ -974,6 +1024,10 @@ async def wall_socket(socket: WebSocket):
     match_bus = socket.app.state.bus
     await socket.accept()
     await socket.send_json({"type": "wall", "rooms": rooms.live(socket.app.state.conn)})
+    # The wall's only statement is that one read, and it then sits there all
+    # evening. Nothing else here touches the database, so this is the whole of
+    # what it owes the connection.
+    db.finish(socket.app.state.conn)
 
     subscription = match_bus.subscribe(WALL, maxsize=128)
     tasks = [asyncio.create_task(_pump(socket, subscription)),

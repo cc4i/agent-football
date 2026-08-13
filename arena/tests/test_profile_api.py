@@ -53,6 +53,14 @@ def test_a_role_cannot_walk_out_of_the_room(client, phones):
     assert response.status_code == 404
 
 
+def test_a_role_carrying_a_nul_is_a_404_rather_than_a_500(client, phones):
+    # Unlike every other unknown role, this one does not survive as far as
+    # finding no row: psycopg refuses to bind a NUL at all.
+    code = open_room(client, phones)
+    response = client.get(f"/api/rooms/{code}/teams/blue/profiles/defen%00der")
+    assert response.status_code == 404
+
+
 def seat_and_start(client, phones, code, team="blue"):
     """Sit the current phone in a dugout and kick off."""
     client.post(f"/api/rooms/{code}/seats/{team}", json={"philosophy": "high press"})

@@ -330,6 +330,22 @@ def test_a_lone_surrogate_in_an_event_kind_does_not_kill_the_socket(client, live
     assert frame == {"type": "state", "clock": 9}
 
 
+def test_a_nul_in_an_event_kind_does_not_kill_the_socket(client, live_room):
+    # The surrogate's sibling, and the one the encodability check waves through:
+    # a NUL survives json.dumps and the UTF-8 encode, and psycopg refuses to
+    # bind it. A payload never carries one, because json.dumps escapes it.
+    code, host_token = live_room()
+    with client.websocket_connect(f"/ws/rooms/{code}") as viewer:
+        viewer.receive_json()
+        with client.websocket_connect(f"/ws/rooms/{code}?client_id={host_token}") as host:
+            host.receive_json()
+            host.send_json({"type": "host.event", "kind": "go\x00al",
+                            "match_ms": 100, "payload": {}})
+            host.send_json({"type": "host.state", "payload": {"clock": 11}})
+            frame = viewer.receive_json()
+    assert frame == {"type": "state", "clock": 11}
+
+
 def test_a_lone_surrogate_in_host_state_does_not_kill_the_wall(client, live_room):
     # The wall is shared across tenants: a crash here takes down every live match.
     code, host_token = live_room()

@@ -119,6 +119,15 @@ CREATE INDEX IF NOT EXISTS result_by_player ON result (player_id);
 # tests; nothing in the arena itself reads it.
 TABLES = ("result", "event", "profile", "seat", "room", "player")
 
+# What `init_db` holds while it runs SCHEMA. `CREATE TABLE IF NOT EXISTS` is
+# not atomic in Postgres: two of them at once collide on pg_type and one side
+# crashes. A Cloud Run rollout starts the new instance while the old one is
+# still serving, so booting twice at once is the ordinary case here rather than
+# the rare one. The number is arbitrary and only has to be the same in every
+# instance; advisory locks share one space per database, so it spells ARENASCH
+# to keep it clear of whatever else might one day take a lock here.
+SCHEMA_LOCK = 0x4152454E41534348
+
 
 def connect(dsn=None):
     """Open the arena database, creating it if the server has no such database.
@@ -166,6 +175,26 @@ def _ensure_database(dsn):
 
 
 def init_db(connection):
-    """Create every table. Safe to call against a database that already has them."""
+    """Create every table. Safe to call against a database that already has them.
+
+    Safe to call from two instances at once as well, which is what the lock is
+    for. It is transaction-scoped, so the commit below is what releases it.
+    """
+    connection.execute("SELECT pg_advisory_xact_lock(%s)", (SCHEMA_LOCK,))
     connection.execute(SCHEMA)
     connection.commit()
+
+
+def finish(connection):
+    """Return the connection to a clean idle state at the end of a unit of work.
+
+    psycopg opens a transaction on the first statement of any kind, reads
+    included, and one connection is shared by everything. Left alone a read
+    holds a transaction open for the life of the instance, which pins the
+    vacuum horizon on a leaderboard meant to last weeks; and a write that hit a
+    constraint leaves the transaction aborted, so every later statement in the
+    process fails until somebody restarts it. Rolling back costs nothing after
+    a commit and is the difference between one failed request and a dead arena.
+    """
+    if connection.info.transaction_status != psycopg.pq.TransactionStatus.IDLE:
+        connection.rollback()
