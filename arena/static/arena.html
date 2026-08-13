@@ -20,6 +20,7 @@
     </div>
     <div class="bar-right">
       <button class="btn ghost slim" id="again" type="button" hidden>New room</button>
+      <span class="dir-chip" id="director" hidden><i></i><span id="directing">Auto</span></span>
       <span class="role-chip" id="role"><i></i>Hosting</span>
       <span class="roomcode"><span>Room</span><b id="code">····</b></span>
     </div>
@@ -27,11 +28,13 @@
 
   <p class="problem" id="problem" hidden></p>
 
-  <!-- Before the whistle: how to get in, and who already is -->
+  <!-- Before the whistle: how to get in, who already is, and the standings
+       for everyone walking past in the meantime -->
   <div class="lobby-grid" id="lobby" hidden>
     <div class="pitch-stack">
       <div class="lobby-badge"><i></i><span id="badge">Waiting for a manager</span></div>
       <div class="seats" id="seats"></div>
+      <iframe class="board-frame" id="board" title="The standings" loading="lazy"></iframe>
     </div>
 
     <aside class="join-card">
@@ -46,11 +49,50 @@
     </aside>
   </div>
 
-  <!-- After it: the pitch, at the size of the room -->
-  <div class="court" id="court" hidden>
-    <iframe class="court-frame" id="pitch" title="The match"
-            allow="autoplay; screen-wake-lock"></iframe>
+  <!-- After it: the match at the size of the room, and both relays beside it -->
+  <div class="court-grid" id="court" hidden>
+    <div class="court">
+      <iframe class="court-frame" id="pitch" title="The match"
+              allow="autoplay; screen-wake-lock"></iframe>
+    </div>
+
+    <aside class="rail">
+      <section class="relay rail-feed b">
+        <div class="relay-hd">
+          <span class="eyebrow">Blue dugout</span>
+          <span class="elapsed" id="who-blue"></span>
+        </div>
+        <div class="relay-scroll" id="relay-blue"></div>
+      </section>
+
+      <section class="relay rail-feed r">
+        <div class="relay-hd">
+          <span class="eyebrow">Red dugout</span>
+          <span class="elapsed" id="who-red"></span>
+        </div>
+        <div class="relay-scroll" id="relay-red"></div>
+      </section>
+
+      <!-- Somebody else's match is on the screen, so the way into this one has
+           to stay on it -->
+      <div class="join-mini" id="join-mini" hidden>
+        <div class="qr" id="qr-mini"></div>
+        <div>
+          <span class="eyebrow">Scan to manage</span>
+          <b id="code-3">····</b>
+        </div>
+      </div>
+    </aside>
   </div>
+
+  <!-- Always: what else is going on right now -->
+  <section class="wall" id="wall">
+    <div class="wall-hd">
+      <span class="eyebrow">Also on now</span>
+      <span class="wall-hint" id="wall-hint">Click a match to put it on the big screen · Esc for auto</span>
+    </div>
+    <div class="wall-strip" id="tiles"></div>
+  </section>
 </main>
 <script type="module" src="/static/arena.js"></script>
 </body>

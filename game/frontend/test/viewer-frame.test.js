@@ -260,3 +260,51 @@ describe('the viewer path', () => {
     expect(scene.scoreText1.words).toBe('');
   });
 });
+
+describe('the manager nameplates', () => {
+  let scene;
+  let plates;
+
+  beforeEach(() => {
+    scene = new SoccerGameScene({ role: 'viewer' });
+    // create() hands back a setter per plate rather than the Phaser objects, so
+    // a test needs nothing more than two functions to know what the crowd reads.
+    plates = { blue: '', red: '' };
+    scene.nameBlue = (words) => { plates.blue = words; };
+    scene.nameRed = (words) => { plates.red = words; };
+  });
+
+  it('puts both managers in their own corners', () => {
+    scene.nameManagers({ mode: 'versus',
+                         seats: { blue: { name: 'Mara Bell' }, red: { name: 'Dee Okafor' } } });
+
+    expect(plates).toEqual({ blue: 'Mara Bell', red: 'Dee Okafor' });
+  });
+
+  it('gives a solo run the house side to play against', () => {
+    scene.nameManagers({ mode: 'solo', seats: { blue: { name: 'Sol Amari' } } });
+
+    expect(plates).toEqual({ blue: 'Sol Amari', red: 'The house side' });
+  });
+
+  it('falls back to the colours in a room nobody has sat down in', () => {
+    scene.nameManagers({ mode: 'versus', seats: {} });
+
+    expect(plates).toEqual({ blue: 'BLUE', red: 'RED' });
+  });
+
+  it('cuts a name long enough to push its own plate off the touchline', () => {
+    scene.nameManagers({ mode: 'versus', seats: { blue: { name: 'Bartholomew Fotheringay' } } });
+
+    expect(plates.blue).toBe('Bartholomew Fotheri…');
+  });
+
+  it('holds the room until there are plates to write it on', () => {
+    // The socket connects before Phaser boots, so the first snapshot routinely
+    // arrives with nothing to draw it on. create() applies it once there is.
+    const early = new SoccerGameScene({ role: 'viewer' });
+
+    expect(() => early.nameManagers({ mode: 'solo', seats: {} })).not.toThrow();
+    expect(early.managers).toEqual({ mode: 'solo', seats: {} });
+  });
+});

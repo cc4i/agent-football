@@ -92,6 +92,9 @@ export class SoccerGameScene extends Phaser.Scene {
     this.reporter = null;
     this.kickOffAt = 0;
     this.lastFrameAt = 0;
+    // The room as the arena last described it. Arrives on connect, which may be
+    // before the scene has plates to write the managers' names on.
+    this.managers = null;
   }
 
   preload() {
@@ -1790,6 +1793,13 @@ export class SoccerGameScene extends Phaser.Scene {
     this.report('kickoff', {});
   }
 
+  /**
+   * A coach's plate, and the way to change what it says.
+   *
+   * The plate is sized to its words, so renaming it is redrawing it. Returns
+   * the setter rather than the objects: whoever learns the manager's name has
+   * no business knowing a nameplate is two Phaser objects in a trench coat.
+   */
   addCoachNameplate(x, y, label, color) {
     const text = this.add.text(x, y, label, {
       fontFamily: '"Outfit", "Inter", Arial, sans-serif',
@@ -1797,19 +1807,29 @@ export class SoccerGameScene extends Phaser.Scene {
       color: '#0b1220',
       fontStyle: 'bold'
     }).setOrigin(0.5);
-
-    const w = text.width + 20;
-    const h = text.height + 8;
-    // Both plates sit in the bottom corners, so keep them inside the canvas.
-    const cx = Phaser.Math.Clamp(x, w / 2 + 10, this.scale.width - w / 2 - 10);
-    text.setX(cx);
-
     const plate = this.add.graphics();
-    plate.fillStyle(color, 1);
-    plate.lineStyle(2, 0x0b1220, 0.9);
-    plate.fillRoundedRect(cx - w / 2, y - h / 2, w, h, 5);
-    plate.strokeRoundedRect(cx - w / 2, y - h / 2, w, h, 5);
-    this.children.bringToTop(text);
+
+    const draw = () => {
+      const w = text.width + 20;
+      const h = text.height + 8;
+      // Both plates sit in the bottom corners, so keep them inside the canvas.
+      const cx = Phaser.Math.Clamp(x, w / 2 + 10, this.scale.width - w / 2 - 10);
+      text.setX(cx);
+
+      plate.clear();
+      plate.fillStyle(color, 1);
+      plate.lineStyle(2, 0x0b1220, 0.9);
+      plate.fillRoundedRect(cx - w / 2, y - h / 2, w, h, 5);
+      plate.strokeRoundedRect(cx - w / 2, y - h / 2, w, h, 5);
+      this.children.bringToTop(text);
+    };
+
+    draw();
+    return (words) => {
+      if (text.text === words) return;
+      text.setText(words);
+      draw();
+    };
   }
 
   setupKitPortraits() {
@@ -1845,7 +1865,7 @@ export class SoccerGameScene extends Phaser.Scene {
 
   setupCoaches() {
     this.coach1 = this.add.image(60, 715, 'coach_portrait').setScale(0.10);
-    this.addCoachNameplate(62, 744, 'YOU · BLUE', 0x60a5fa);
+    this.nameBlue = this.addCoachNameplate(62, 744, 'YOU · BLUE', 0x60a5fa);
     this.shoutGraphics1 = this.add.graphics().setAlpha(0);
     this.shoutText1 = this.add.text(160, 668, '', {
       fontFamily: 'monospace',
@@ -1856,7 +1876,8 @@ export class SoccerGameScene extends Phaser.Scene {
 
     // y is nudged 6px so the opponent's cropped torso lines up with coach 1's.
     this.coach2 = this.add.image(1348, 721, 'opponent_coach_portrait').setScale(0.10);
-    this.addCoachNameplate(1346, 744, 'OPPONENT · RED', 0xf87171);
+    this.nameRed = this.addCoachNameplate(1346, 744, 'OPPONENT · RED', 0xf87171);
+    if (this.managers) this.nameManagers(this.managers);
     this.shoutGraphics2 = this.add.graphics().setAlpha(0);
     this.shoutText2 = this.add.text(1248, 668, '', {
       fontFamily: 'monospace',
@@ -1864,6 +1885,30 @@ export class SoccerGameScene extends Phaser.Scene {
       color: '#000000',
       fontStyle: 'bold'
     }).setOrigin(0.5).setAlpha(0);
+  }
+
+  /**
+   * Put the managers' names on the two plates.
+   *
+   * A match on the big screen belongs to two people whose names are on the
+   * phones in their hands, and "YOU · BLUE" is nobody on a screen the whole
+   * room is looking at. The workshop keeps the defaults: there is no room, no
+   * seats and nobody but whoever is at the keyboard.
+   */
+  nameManagers(snapshot) {
+    this.managers = snapshot;
+    if (!this.nameBlue || !this.nameRed) return;   // not built yet; create() applies it
+    const seats = snapshot.seats || {};
+    const named = (team, fallback) => {
+      const seat = seats[team];
+      const name = seat && seat.name ? String(seat.name) : '';
+      // The plate is clamped to the canvas, so a very long name would push its
+      // own text out of the corner it belongs in rather than overflow.
+      if (name.length > 20) return `${name.slice(0, 19)}…`;
+      return name || fallback;
+    };
+    this.nameBlue(named('blue', 'BLUE'));
+    this.nameRed(named('red', snapshot.mode === 'solo' ? 'The house side' : 'RED'));
   }
 
   showCoachShout(coachNum, message, isAngry = false) {

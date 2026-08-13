@@ -698,6 +698,11 @@ function startPhaserGame() {
     width: 1408,
     height: 768,
     parent: 'phaser-container',
+    // A match is framed inside the big screen, and this page takes no keyboard
+    // in one: both dugouts are driven from phones. Grabbing focus on boot would
+    // swallow the operator's Esc and tile numbers inside the iframe. The lab is
+    // the opposite -- somebody there is playing with the arrow keys.
+    autoFocus: !room.inMatch,
     physics: {
       default: 'arcade',
       arcade: {
@@ -718,6 +723,7 @@ function startPhaserGame() {
     const scene = gameInstance.scene.getScene('SoccerGameScene');
     if (scene) {
       applyProfilesToScene();
+      nameTheManagers();
       const speedVal = parseFloat(document.getElementById('sim-speed-input').value);
       scene.setSimulationSpeed(speedVal);
       if (isHost()) {
@@ -868,10 +874,24 @@ async function checkSubstitutions() {
   }
 }
 
+// The room as the arena last described it. Held here because it arrives on
+// connect and Phaser takes a moment longer to boot than a socket does.
+let seated = null;
+
+function nameTheManagers() {
+  const scene = gameInstance && gameInstance.scene.getScene('SoccerGameScene');
+  if (scene && seated) scene.nameManagers(seated);
+}
+
 // The room's feed. Profile moves arrive on it, and when this pitch holds the
 // host token, frames and events leave on it. Open before anything is loaded so
 // nothing said between the read and the connect is missed.
 const feed = connect({
+  // Who is in the two dugouts, which is what the nameplates on the pitch say.
+  onRoom: (message) => {
+    seated = message;
+    nameTheManagers();
+  },
   onEvent: (message) => {
     if (message.kind === 'profile.patch') return applyPatch(message.payload);
     const watching = gameInstance && gameInstance.scene.getScene('SoccerGameScene');
