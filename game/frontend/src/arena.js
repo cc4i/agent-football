@@ -55,6 +55,18 @@ export const isHost = () => room.as === 'host' && Boolean(room.clientId);
 export const isViewer = () => room.inMatch && !isHost();
 
 /**
+ * Whether this pitch should run the autonomous "are you tired?" check.
+ *
+ * Each one wakes a coach, a captain and four specialists, about three
+ * times in a three-minute match. Multiplied by a venue full of rooms that
+ * is hundreds of model calls a minute nobody asked for, queued in front of
+ * the shouts managers actually typed. The workshop is long-lived and has
+ * an audience watching for exactly this kind of autonomous behaviour, so
+ * it is the one place that keeps it.
+ */
+export const shouldRunStatusCheck = (r = room) => !r.inMatch;
+
+/**
  * Ask the screen to stay awake while this tab is the one running a match.
  *
  * Physics lives here, so a screen that dims and sleeps takes the match with

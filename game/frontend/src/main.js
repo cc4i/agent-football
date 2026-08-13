@@ -17,7 +17,7 @@ import Phaser from 'phaser';
 import { SoccerGameScene, GAME_DURATION_SEC, STATUS_CHECK_MS } from './game';
 import { Sound } from './audio';
 import { createStatusHook } from './status.js';
-import { room, isHost, isViewer, opposite, readProfiles, connect, keepAwake } from './arena.js';
+import { room, isHost, isViewer, shouldRunStatusCheck, opposite, readProfiles, connect, keepAwake } from './arena.js';
 
 let gameInstance = null;
 let currentProfiles = {};
@@ -928,15 +928,21 @@ if (room.inMatch) {
   sendInstructionToAgent("RESTORE_BASELINE", { showHuddle: false }).then(loadProfiles);
 }
 
-// The squad's own housekeeping, and the workshop's alone. A viewer is a
-// picture of a match somebody else is running: asking its specialists how
-// tired they feel would put four agents to work on behalf of a screen, and
-// then act on the answer in a room this tab does not hold the physics for.
+// The squad's own housekeeping. A viewer is a picture of a match somebody else
+// is running: polling its specialists would put four agents to work on behalf
+// of a screen, and act on the answer in a room this tab does not hold physics
+// for. A shout can injure somebody, so a real match still watches for toasts.
 if (!isViewer()) {
-  // Poll for player condition events (injuries / sub requests) and toast them.
   primeSubstitutions().then(() => setInterval(checkSubstitutions, 2000));
+}
 
-  // Periodic team condition self-check so injuries/subs can happen autonomously.
+// The autonomous "are you tired?" chain, and the workshop alone. It fires
+// about three times per three-minute match, and each one wakes a coach, a
+// captain and four specialists. At fifty rooms that is hundreds of Gemini
+// calls a minute nobody asked for, queued in front of the shouts managers
+// actually typed. The workshop is long-lived and has an audience watching for
+// exactly this kind of autonomous behaviour, so it keeps it.
+if (shouldRunStatusCheck()) {
   setInterval(runStatusCheck, STATUS_CHECK_MS);
 }
 
