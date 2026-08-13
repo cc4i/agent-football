@@ -316,7 +316,7 @@ def test_a_lone_surrogate_in_host_event_does_not_kill_the_socket(client, live_ro
 
 
 def test_a_lone_surrogate_in_an_event_kind_does_not_kill_the_socket(client, live_room):
-    # `kind` reaches SQLite as a bind parameter and the viewers as a frame, so it
+    # `kind` reaches Postgres as a bind parameter and the viewers as a frame, so it
     # needs the same encodability check the payload gets.
     code, host_token = live_room()
     with client.websocket_connect(f"/ws/rooms/{code}") as viewer:

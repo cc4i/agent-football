@@ -42,7 +42,7 @@ Three processes. The arena owns the state; everything else asks it.
   | the Antigravity   |------>| rooms, seats, profiles, the event log,      |
   | agent, in process |<------| scoring, the live match bus                 |
   | four tuner        |  ws   |                                             |
-  | subagents         |       | FastAPI + SQLite                            |
+  | subagents         |       | FastAPI + Postgres                          |
   +-------------------+       +---------------------------------------------+
                                  |   ^                            ^
                     a shout,     |   |  PATCH the profiles        |  host frames

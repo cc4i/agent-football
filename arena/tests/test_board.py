@@ -129,7 +129,9 @@ def test_a_rating_is_a_matchs_own_record_and_the_player_row_holds_none(conn, ale
     # The whole ladder can be replayed from the results that made it, which is
     # why nothing is stored on the player.
     played(conn, "versus", {"blue": alex, "red": sam}, [(10, "blue")])
-    columns = {row[1] for row in conn.execute("PRAGMA table_info(player)")}
+    columns = {row["name"] for row in conn.execute(
+        "SELECT column_name AS name FROM information_schema.columns "
+        "WHERE table_schema = 'public' AND table_name = 'player'")}
     assert "rating" not in columns
 
 

@@ -137,7 +137,7 @@ def test_a_workshop_somebody_has_closed_is_not_shouted_at(client, monkeypatch):
     import app as arena_app
     monkeypatch.setattr(arena_app, "SERVICE_TOKEN", SERVICE)
     connection = client.app.state.conn
-    connection.execute("UPDATE room SET status = 'abandoned' WHERE code = ?",
+    connection.execute("UPDATE room SET status = 'abandoned' WHERE code = %s",
                        (codes.WORKSHOP,))
     connection.commit()
 

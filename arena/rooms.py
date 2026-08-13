@@ -35,31 +35,31 @@ def create_player(conn, display_name, email, salt):
     """Insert or find a player, keyed on the hashed email. Returns the id."""
     email_hash = identity.hash_email(email, salt)
     existing = conn.execute(
-        "SELECT id FROM player WHERE email_hash = ?", (email_hash,)
+        "SELECT id FROM player WHERE email_hash = %s", (email_hash,)
     ).fetchone()
     if existing:
         # A repeat player keeps one row so the board keeps one entry for them,
         # but they may well have typed a different name this time.
-        conn.execute("UPDATE player SET display_name = ? WHERE id = ?",
+        conn.execute("UPDATE player SET display_name = %s WHERE id = %s",
                      (display_name, existing["id"]))
         conn.commit()
         return existing["id"]
 
-    cursor = conn.execute(
+    row = conn.execute(
         "INSERT INTO player (display_name, email_hash, email_masked, created_at) "
-        "VALUES (?, ?, ?, ?)",
+        "VALUES (%s, %s, %s, %s) RETURNING id",
         (display_name, email_hash, identity.mask_email(email), time.time()),
-    )
+    ).fetchone()
     conn.commit()
-    return cursor.lastrowid
+    return row["id"]
 
 
 def get_player(conn, player_id):
-    return conn.execute("SELECT * FROM player WHERE id = ?", (player_id,)).fetchone()
+    return conn.execute("SELECT * FROM player WHERE id = %s", (player_id,)).fetchone()
 
 
 def by_code(conn, code):
-    return conn.execute("SELECT * FROM room WHERE code = ?", (code,)).fetchone()
+    return conn.execute("SELECT * FROM room WHERE code = %s", (code,)).fetchone()
 
 
 def create_room(conn, mode, code=None):
@@ -77,7 +77,7 @@ def create_room(conn, mode, code=None):
     # only client it is ever handed to, and no player can take it from them.
     conn.execute(
         "INSERT INTO room (code, mode, status, ranked, host_client_id, created_at) "
-        "VALUES (?, ?, 'lobby', ?, ?, ?)",
+        "VALUES (%s, %s, 'lobby', %s, %s, %s)",
         (code, mode, 0 if code == codes.WORKSHOP else 1,
          secrets.token_urlsafe(16), time.time()),
     )
@@ -100,16 +100,16 @@ def take_seat(conn, room_id, team, player_id, philosophy):
         raise RoomError("a solo room has only a blue dugout")
     if philosophy not in PHILOSOPHIES:
         raise RoomError(f"philosophy must be one of {', '.join(PHILOSOPHIES)}")
-    if conn.execute("SELECT 1 FROM seat WHERE room_id = ? AND team = ?",
+    if conn.execute("SELECT 1 FROM seat WHERE room_id = %s AND team = %s",
                     (room_id, team)).fetchone():
         raise RoomError(f"the {team} dugout is taken")
-    if conn.execute("SELECT 1 FROM seat WHERE room_id = ? AND player_id = ?",
+    if conn.execute("SELECT 1 FROM seat WHERE room_id = %s AND player_id = %s",
                     (room_id, player_id)).fetchone():
         raise RoomError("you already have a dugout in this match")
 
     conn.execute(
         "INSERT INTO seat (room_id, team, player_id, philosophy, ready, joined_at) "
-        "VALUES (?, ?, ?, ?, 0, ?)",
+        "VALUES (%s, %s, %s, %s, 0, %s)",
         (room_id, team, player_id, philosophy, time.time()),
     )
     conn.commit()
@@ -117,7 +117,7 @@ def take_seat(conn, room_id, team, player_id, philosophy):
 
 def set_ready(conn, room_id, team, ready):
     changed = conn.execute(
-        "UPDATE seat SET ready = ? WHERE room_id = ? AND team = ?",
+        "UPDATE seat SET ready = %s WHERE room_id = %s AND team = %s",
         (1 if ready else 0, room_id, team),
     ).rowcount
     if not changed:
@@ -131,7 +131,7 @@ def can_kick_off(conn, room_id):
     if room["status"] != "lobby":
         return False
     ready = {row["team"] for row in conn.execute(
-        "SELECT team FROM seat WHERE room_id = ? AND ready = 1", (room_id,))}
+        "SELECT team FROM seat WHERE room_id = %s AND ready = 1", (room_id,))}
     return set(required_teams(room["mode"])) <= ready
 
 
@@ -141,7 +141,7 @@ def start_match(conn, room_id):
         raise RoomError("a match needs a host")
     if not can_kick_off(conn, room_id):
         raise RoomError("not every dugout is ready")
-    conn.execute("UPDATE room SET status = 'live' WHERE id = ?", (room_id,))
+    conn.execute("UPDATE room SET status = 'live' WHERE id = %s", (room_id,))
     conn.commit()
 
 
@@ -150,7 +150,7 @@ def finish_match(conn, room_id, status="finished"):
         raise RoomError("a match ends finished or abandoned")
     if _room(conn, room_id)["status"] != "live":
         raise RoomError("only a live match can end")
-    conn.execute("UPDATE room SET status = ?, finished_at = ? WHERE id = ?",
+    conn.execute("UPDATE room SET status = %s, finished_at = %s WHERE id = %s",
                  (status, time.time(), room_id))
     conn.commit()
 
@@ -163,7 +163,7 @@ def append_event(conn, room_id, kind, payload, match_ms=None):
     """
     row = conn.execute(
         "INSERT INTO event (room_id, seq, kind, payload_json, match_ms, wall_ts) "
-        "SELECT ?, COALESCE(MAX(seq), 0) + 1, ?, ?, ?, ? FROM event WHERE room_id = ? "
+        "SELECT %s, COALESCE(MAX(seq), 0) + 1, %s, %s, %s, %s FROM event WHERE room_id = %s "
         "RETURNING seq",
         (room_id, kind, json.dumps(payload), match_ms, time.time(), room_id),
     ).fetchone()
@@ -184,7 +184,7 @@ def events(conn, room_id):
          "wall_ts": row["wall_ts"], "payload": json.loads(row["payload_json"])}
         for row in conn.execute(
             "SELECT seq, kind, payload_json, match_ms, wall_ts FROM event "
-            "WHERE room_id = ? ORDER BY seq",
+            "WHERE room_id = %s ORDER BY seq",
             (room_id,),
         )
     ]
@@ -196,7 +196,7 @@ def snapshot(conn, room_id):
     seated = conn.execute(
         "SELECT s.team, s.ready, s.philosophy, p.display_name, p.email_masked "
         "FROM seat s JOIN player p ON p.id = s.player_id "
-        "WHERE s.room_id = ? ORDER BY s.team",
+        "WHERE s.room_id = %s ORDER BY s.team",
         (room_id,),
     ).fetchall()
     taken = {row["team"] for row in seated}
@@ -243,7 +243,7 @@ def unrank(conn, room_id):
     distorted the whole match, and letting a later 1.0x put it back would make
     the rule trivial to walk around.
     """
-    conn.execute("UPDATE room SET ranked = 0 WHERE id = ?", (room_id,))
+    conn.execute("UPDATE room SET ranked = 0 WHERE id = %s", (room_id,))
     conn.commit()
 
 
@@ -252,7 +252,7 @@ def seated(conn, room_id):
     return conn.execute(
         "SELECT s.team, s.player_id, s.philosophy, p.display_name, p.email_masked "
         "FROM seat s JOIN player p ON p.id = s.player_id "
-        "WHERE s.room_id = ? ORDER BY s.team",
+        "WHERE s.room_id = %s ORDER BY s.team",
         (room_id,),
     ).fetchall()
 
@@ -260,7 +260,7 @@ def seated(conn, room_id):
 def seat_owner(conn, room_id, team):
     """Return the player_id in this team's dugout, or None if empty."""
     row = conn.execute(
-        "SELECT player_id FROM seat WHERE room_id = ? AND team = ?", (room_id, team)
+        "SELECT player_id FROM seat WHERE room_id = %s AND team = %s", (room_id, team)
     ).fetchone()
     return row["player_id"] if row else None
 
@@ -268,7 +268,7 @@ def seat_owner(conn, room_id, team):
 def team_of(conn, room_id, player_id):
     """Which dugout this player holds in this room, or None if they hold none."""
     row = conn.execute(
-        "SELECT team FROM seat WHERE room_id = ? AND player_id = ?", (room_id, player_id)
+        "SELECT team FROM seat WHERE room_id = %s AND player_id = %s", (room_id, player_id)
     ).fetchone()
     return row["team"] if row else None
 
@@ -279,7 +279,7 @@ def is_seated(conn, room_id, player_id):
 
 
 def _room(conn, room_id):
-    room = conn.execute("SELECT * FROM room WHERE id = ?", (room_id,)).fetchone()
+    room = conn.execute("SELECT * FROM room WHERE id = %s", (room_id,)).fetchone()
     if room is None:
         raise RoomError(f"there is no room {room_id}")
     return room

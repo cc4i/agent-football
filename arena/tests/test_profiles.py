@@ -31,7 +31,7 @@ def test_two_rooms_do_not_share_a_defender(conn):
     second = rooms.create_room(conn, "solo")
     conn.execute(
         "UPDATE profile SET attributes_json = '{\"aggression\": 0.1}' "
-        "WHERE room_id = ? AND team = 'blue' AND role = 'defender'",
+        "WHERE room_id = %s AND team = 'blue' AND role = 'defender'",
         (first["id"],),
     )
     conn.commit()

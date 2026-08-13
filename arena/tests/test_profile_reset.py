@@ -91,7 +91,7 @@ def test_a_finished_match_cannot_be_reset(client, phones):
     code = seated(client, phones, mode="solo")
     client.post(f"/api/rooms/{code}/seats/blue/ready", json={"ready": True})
     client.post(f"/api/rooms/{code}/start")
-    client.app.state.conn.execute("UPDATE room SET status = 'finished' WHERE code = ?",
+    client.app.state.conn.execute("UPDATE room SET status = 'finished' WHERE code = %s",
                                   (code,))
     client.app.state.conn.commit()
     assert client.post(f"/api/rooms/{code}/teams/blue/profiles/reset").status_code == 409

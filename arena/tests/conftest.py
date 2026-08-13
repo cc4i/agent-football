@@ -1,30 +1,62 @@
-"""Shared fixtures. Every test gets its own throwaway database file."""
+"""Shared fixtures. One throwaway database, emptied between tests."""
+
+import os
 
 import httpx
+import psycopg
 import pytest
 from fastapi.testclient import TestClient
+from psycopg import conninfo, sql
 
 import db
 
 
-@pytest.fixture
-def db_path(tmp_path):
-    return tmp_path / "arena.db"
+@pytest.fixture(scope="session")
+def dsn():
+    """A database of the suite's own, dropped and remade once per run.
+
+    One database rather than one per test: creating a database costs about a
+    tenth of a second and there are hundreds of tests, so they share one and
+    the autouse fixture below empties it. `WITH (FORCE)` because a test that
+    failed mid-connection would otherwise leave the drop blocked.
+    """
+    target = os.environ.get("ARENA_TEST_DB", "postgresql:///arena_test")
+    name = conninfo.conninfo_to_dict(target)["dbname"]
+    admin = conninfo.make_conninfo(target, dbname="postgres")
+    with psycopg.connect(admin, autocommit=True) as maintenance:
+        maintenance.execute(
+            sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(sql.Identifier(name)))
+        maintenance.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(name)))
+    connection = db.connect(target)
+    db.init_db(connection)
+    connection.close()
+    return target
+
+
+@pytest.fixture(autouse=True)
+def empty_tables(dsn):
+    """Every test starts on an empty database, including the workshop room.
+
+    RESTART IDENTITY so that a test asserting on a player id of 1 is not
+    written against whichever tests happened to run before it.
+    """
+    with psycopg.connect(dsn, autocommit=True) as scrub:
+        scrub.execute(f"TRUNCATE {', '.join(db.TABLES)} RESTART IDENTITY CASCADE")
 
 
 @pytest.fixture
-def conn(db_path):
-    connection = db.connect(db_path)
+def conn(dsn):
+    connection = db.connect(dsn)
     db.init_db(connection)
     yield connection
     connection.close()
 
 
 @pytest.fixture
-def client(db_path, monkeypatch):
+def client(dsn, monkeypatch):
     # The app reads ARENA_DB when its lifespan runs, which TestClient triggers
-    # on __enter__, so each test opens the app against its own database file.
-    monkeypatch.setenv("ARENA_DB", str(db_path))
+    # on __enter__, so each test opens the app against the test database.
+    monkeypatch.setenv("ARENA_DB", dsn)
     from app import app
 
     with TestClient(app) as test_client:
@@ -32,14 +64,14 @@ def client(db_path, monkeypatch):
 
 
 @pytest.fixture
-async def arena(db_path, monkeypatch):
+async def arena(dsn, monkeypatch):
     """The app on the test's own event loop, for anything with a chain in it.
 
     TestClient drives the app from a thread of its own, which is right for a
     test that only makes requests and wrong for one whose background chain has
     to make requests back while the test waits. Both ends share a loop here.
     """
-    monkeypatch.setenv("ARENA_DB", str(db_path))
+    monkeypatch.setenv("ARENA_DB", dsn)
     from app import app
 
     async with app.router.lifespan_context(app):

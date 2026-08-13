@@ -139,7 +139,7 @@ STATIC = Path(__file__).parent / "static"
 
 @asynccontextmanager
 async def lifespan(fastapi_app: FastAPI):
-    connection = db.connect(os.environ.get("ARENA_DB", db.DB_PATH))
+    connection = db.connect()
     db.init_db(connection)
     # The workshop is where the dugout tunes profiles with nobody in a dugout
     # seat, so it is opened here rather than by a phone.
@@ -815,7 +815,7 @@ def _wire_bytes(value):
     """Serialise for the wire, or None if it cannot go out.
 
     A lone UTF-16 surrogate survives json.dumps but not the UTF-8 encode that
-    send_json and the SQLite bind both perform. Left unchecked, one such frame
+    send_json and the Postgres bind both perform. Left unchecked, one such frame
     kills the pump -- and on the shared wall topic, every tenant's tile with it.
     """
     try:
@@ -877,7 +877,7 @@ def _handle_from_host(message, connection, match_bus, room, client_id, heard):
     if match_ms is not None:
         if not isinstance(match_ms, int) or isinstance(match_ms, bool):
             return
-        # SQLite INTEGER is 8-byte signed: -2^63 to 2^63-1.
+        # Postgres BIGINT is 8-byte signed: -2^63 to 2^63-1.
         if not (-9223372036854775808 <= match_ms <= 9223372036854775807):
             return
     seq = rooms.append_event(connection, room["id"], event_kind, payload, match_ms)

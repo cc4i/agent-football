@@ -43,7 +43,7 @@ def record(conn, room):
             "INSERT INTO result (room_id, player_id, team, points, outcome,"
             "                    goals_for, goals_against, first_goal_ms, shouts,"
             "                    effective, rating, breakdown_json, computed_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
             (room["id"], seat["player_id"], seat["team"], scored["points"],
              mine["outcome"], mine["goals_for"], mine["goals_against"],
              mine["first_goal_ms"], mine["shouts"], mine["effective"],
@@ -73,7 +73,7 @@ def _new_ratings(conn, room, seats, facts):
 def rating(conn, player_id):
     """This player's Elo going into their next duel."""
     row = conn.execute(
-        "SELECT rating FROM result WHERE player_id = ? AND rating IS NOT NULL "
+        "SELECT rating FROM result WHERE player_id = %s AND rating IS NOT NULL "
         "ORDER BY computed_at DESC, id DESC LIMIT 1",
         (player_id,),
     ).fetchone()
@@ -93,7 +93,7 @@ def read(conn, room_id):
                 "JOIN room ON room.id = r.room_id "
                 "JOIN player p ON p.id = r.player_id "
                 "LEFT JOIN seat s ON s.room_id = r.room_id AND s.team = r.team "
-                "WHERE r.room_id = ? ORDER BY r.team",
+                "WHERE r.room_id = %s ORDER BY r.team",
                 (room_id,),
             )}
 

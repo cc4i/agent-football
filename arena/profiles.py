@@ -29,12 +29,16 @@ def seed(conn, room_id, teams):
     moved to since.
     """
     now = time.time()
-    conn.executemany(
-        "INSERT OR IGNORE INTO profile "
-        "(room_id, team, role, attributes_json, updated_at) VALUES (?, ?, ?, ?, ?)",
-        [(room_id, team, role, json.dumps(attributes.baseline_for(role)), now)
-         for team in teams for role in attributes.ROLES],
-    )
+    # psycopg puts executemany on the cursor rather than the connection, which
+    # is the one place the driver swap is visible in this file.
+    with conn.cursor() as cursor:
+        cursor.executemany(
+            "INSERT INTO profile "
+            "(room_id, team, role, attributes_json, updated_at) VALUES (%s, %s, %s, %s, %s) "
+            "ON CONFLICT DO NOTHING",
+            [(room_id, team, role, json.dumps(attributes.baseline_for(role)), now)
+             for team in teams for role in attributes.ROLES],
+        )
     conn.commit()
 
 
@@ -44,7 +48,7 @@ def read_all(conn, room_id, team):
         row["role"]: json.loads(row["attributes_json"])
         for row in conn.execute(
             "SELECT role, attributes_json FROM profile "
-            "WHERE room_id = ? AND team = ? ORDER BY role",
+            "WHERE room_id = %s AND team = %s ORDER BY role",
             (room_id, team),
         )
     }
@@ -53,7 +57,7 @@ def read_all(conn, room_id, team):
 def read_one(conn, room_id, team, role):
     """One role's current attributes, or None if this dugout has no such role."""
     row = conn.execute(
-        "SELECT attributes_json FROM profile WHERE room_id = ? AND team = ? AND role = ?",
+        "SELECT attributes_json FROM profile WHERE room_id = %s AND team = %s AND role = %s",
         (room_id, team, role),
     ).fetchone()
     return json.loads(row["attributes_json"]) if row else None
@@ -79,8 +83,8 @@ def reset(conn, room_id, team):
         if not changed:
             continue
         conn.execute(
-            "UPDATE profile SET attributes_json = ?, updated_at = ? "
-            "WHERE room_id = ? AND team = ? AND role = ?",
+            "UPDATE profile SET attributes_json = %s, updated_at = %s "
+            "WHERE room_id = %s AND team = %s AND role = %s",
             (json.dumps(baseline), now, room_id, team, role),
         )
         results.append({"role": role, "attributes": baseline, "changed": changed})
@@ -107,8 +111,8 @@ def patch(conn, room_id, team, role, changes):
     changed = {key: value for key, value in changes.items() if current.get(key) != value}
     current.update(changes)
     conn.execute(
-        "UPDATE profile SET attributes_json = ?, updated_at = ? "
-        "WHERE room_id = ? AND team = ? AND role = ?",
+        "UPDATE profile SET attributes_json = %s, updated_at = %s "
+        "WHERE room_id = %s AND team = %s AND role = %s",
         (json.dumps(current), time.time(), room_id, team, role),
     )
     conn.commit()

@@ -165,7 +165,7 @@ def test_a_patch_reaches_everyone_watching_the_room(client, phones):
 def test_profiles_cannot_be_moved_after_the_final_whistle(client, phones):
     code = open_room(client, phones, mode="solo")
     seat_and_start(client, phones, code)
-    client.app.state.conn.execute("UPDATE room SET status = 'finished' WHERE code = ?",
+    client.app.state.conn.execute("UPDATE room SET status = 'finished' WHERE code = %s",
                                   (code,))
     client.app.state.conn.commit()
     response = client.patch(f"/api/rooms/{code}/teams/blue/profiles/defender",
@@ -194,7 +194,7 @@ def test_the_workshop_room_has_profiles_to_patch(client):
     assert set(body["profiles"]) == set(attributes.ROLES)
 
 
-def test_the_workshop_room_is_not_reopened_on_the_next_restart(client, db_path):
+def test_the_workshop_room_is_not_reopened_on_the_next_restart(client, dsn):
     # The arena will be restarted plenty of times during a tournament.
     import codes
     from fastapi.testclient import TestClient

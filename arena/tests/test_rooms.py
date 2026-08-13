@@ -60,7 +60,7 @@ def test_the_workshop_room_is_never_ranked(conn):
 def test_opening_a_room_gives_it_profiles(conn):
     room = rooms.create_room(conn, "versus")
     seeded = conn.execute(
-        "SELECT COUNT(*) AS n FROM profile WHERE room_id = ?", (room["id"],)
+        "SELECT COUNT(*) AS n FROM profile WHERE room_id = %s", (room["id"],)
     ).fetchone()["n"]
     assert seeded == 8  # four roles, two dugouts
 
@@ -84,7 +84,7 @@ def test_a_solo_room_needs_only_the_blue_dugout(conn):
 def test_taking_a_seat_records_the_philosophy_and_leaves_them_not_ready(conn, alex):
     room = rooms.create_room(conn, "solo")
     rooms.take_seat(conn, room["id"], "blue", alex, "high press")
-    seat = conn.execute("SELECT * FROM seat WHERE room_id = ?", (room["id"],)).fetchone()
+    seat = conn.execute("SELECT * FROM seat WHERE room_id = %s", (room["id"],)).fetchone()
     assert (seat["team"], seat["player_id"]) == ("blue", alex)
     assert seat["philosophy"] == "high press"
     assert seat["ready"] == 0
@@ -194,7 +194,7 @@ def test_a_match_cannot_start_without_somebody_holding_physics(conn, alex):
     room = rooms.create_room(conn, "solo")
     rooms.take_seat(conn, room["id"], "blue", alex, "counter")
     rooms.set_ready(conn, room["id"], "blue", True)
-    conn.execute("UPDATE room SET host_client_id = NULL WHERE id = ?", (room["id"],))
+    conn.execute("UPDATE room SET host_client_id = NULL WHERE id = %s", (room["id"],))
     with pytest.raises(rooms.RoomError, match="needs a host"):
         rooms.start_match(conn, room["id"])
 

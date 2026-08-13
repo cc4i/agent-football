@@ -9,6 +9,9 @@ than one person can play at once.
 
 ## Running it
 
+Needs a Postgres to talk to - `brew services start postgresql@18`, or your
+platform's equivalent. The arena makes its own database.
+
 ```bash
 cd arena
 ./run.sh                 # syncs, then serves on :8003; HOST and PORT override
@@ -27,7 +30,7 @@ shell wins where both say something, which is what lets one exported
 
 | Variable | Default | What it does |
 |---|---|---|
-| `ARENA_DB` | `arena/arena.db` | The SQLite file. Tests point it at a throwaway path. |
+| `ARENA_DB` | `postgresql:///arena` | The Postgres connection string. Tests point it at a throwaway database. |
 | `ARENA_EMAIL_SALT` | `arena-dev-salt` | Salts the email hash. Keeps a literal default on purpose: change it and every returning player loses their history. |
 | `ARENA_SECRET` | random per start | Signs session cookies. Unset means sessions do not survive a restart - set it in anything longer-lived than a demo. |
 | `ARENA_SERVICE_TOKEN` | unset | Lets a server-side caller patch profiles without a phone session. Unset refuses every such call. The specialist agents need the same value. |
