@@ -6,36 +6,47 @@ workshop repo is worse than no test.
 Prerequisites: `agy login` completed, `dugout/.env` has GOOGLE_CLOUD_PROJECT
 and GOOGLE_CLOUD_LOCATION, and `game/.env` exists too (`cp game/.env.example
 game/.env`). The game's own ADK coach needs its own credentials. Without them
-the pitch still renders and steps 1 to 9 all pass, but every call into the
+the pitch still renders and steps 1 to 10 all pass, but every call into the
 coach fails with "No API key was provided", which breaks the shout chain in
-step 8 and the baseline restore in step 10.
+step 9 and the baseline restore in step 11.
+
+Export `ARENA_SERVICE_TOKEN` in all three shells, the same value in each. The
+squad lives in the arena now, and the arena refuses a write from a caller with
+no token: the dugout's tuners and the game's four player agents both carry it
+instead of a phone session. Get it wrong in one shell only and the symptom is
+quiet, a squad that reads fine and never moves.
 
 The agent runs shell commands unrestricted, by design, so that it can launch
 the Playwright script it writes in stage 2. Run this on your own machine.
 
-1. `cd game && ./run.sh`, wait for Vite on :5173.
-2. `cd dugout && ./run.sh`, open http://localhost:8002.
-3. Header shows Antigravity lit amber and three green game dots. No red banner.
+1. `cd arena && ./run.sh`, wait for :8003. It owns the squad, so it goes up
+   first.
+2. `cd game && ./run.sh`, wait for Vite on :5173.
+3. `cd dugout && ./run.sh`, open http://localhost:8002.
+4. Header shows Antigravity lit amber and four green game dots, arena among
+   them. No red banner.
    - If a red banner appears, it prints the precise reason. The most likely cause
      is a missing Antigravity login. Run `agy login` in a terminal, then reload
      the page. The composer stays disabled until the agent is reachable, so being
      unable to type is expected and not a second fault.
-4. Team sheet lists five stages (rebrand, take the field, read the game, tune
+5. Team sheet lists five stages (rebrand, take the field, read the game, tune
    the squad, shout to the bench), none marked done after a fresh dugout
    launch. Every stage keeps its
    suggested line whether or not it is done, so any of them can be run again;
    a done stage offers "Run it again". Tweaking and re-running is the point.
-   Stage completion is session-relative: a filesystem write only counts if it
-   is newer than the session start. That is what makes the quest replayable, since nobody has to
-   reset files by hand.
+   Stage completion is session-relative: the tools record what they were used
+   for, and a sprite only counts if it is newer than the session start. That
+   is what makes the quest replayable, since nobody has to reset anything by
+   hand. Take the field is the exception and reads the present tense: a match
+   being played right now.
    - Press Start over to begin a new session without restarting the server.
      It blanks the quest, clears the log and gives the agent a fresh
-     conversation, leaving the kit and the squad on disk alone.
+     conversation, leaving the kit on disk and the squad in the arena alone.
    - Do press it if you open the page onto a quest someone else was halfway
      through. A dugout left running keeps counting yesterday's work, and
      because each stage is judged independently you can otherwise arrive at
      something incoherent, like stage 4 done while stage 3 has not been run.
-5. Send "Kit us out in black and gold with a wolf crest."
+6. Send "Kit us out in black and gold with a wolf crest."
    - Trajectory shows a thought, then CALLED generate_team_avatars.
    - The log ends with the generated strip itself, outfield sheet and keeper,
      on a checkered background so a transparent cut-out is obvious. A green
@@ -45,7 +56,7 @@ the Playwright script it writes in stage 2. Run this on your own machine.
      the pitch, and in the portrait in the top left corner. The players are a
      few pixels tall mid-match, so that portrait is where you actually read
      the strip; the opponent's sits in the top right for comparison.
-6. Send "Now get us on the pitch."
+7. Send "Now get us on the pitch."
    - Antigravity writes a Playwright script and runs it.
    - A Chrome window opens in front of you and plays the match, muted. This is
      the point of the stage: if it comes up headless, the script is wrong.
@@ -56,75 +67,84 @@ the Playwright script it writes in stage 2. Run this on your own machine.
    - /tmp/futsal_status.json appears and updates, and
      http://localhost:9222/json/version answers, which is how later turns
      reach this same window.
-7. Send "How are we doing?" and confirm it reports a real score.
-8. Send "Tell the lads to push up and press high." This is stage 5 on the team
+8. Send "How are we doing?" and confirm it reports a real score, and the
+   squad's real attributes with the band each one has to stay inside. Those
+   come from the arena, so they are the same numbers the game is playing with.
+9. Send "Tell the lads to push up and press high." This is stage 5 on the team
    sheet, the other way to change the team.
-   - One call to shout_to_the_team, not a script it writes itself. It attaches
-     to the match window already on screen rather than opening a second one.
-     Watch the window: the shout appears in the trace panel.
+   - One call to shout_to_the_team, not a script it writes itself. It goes to
+     the arena over HTTP, so nothing opens a second window and the match on
+     screen is not touched.
    - The chain runs coach, then team captain over A2A on :8001, then the four
-     specialists, and each player answers in #terminal-body. The tool waits for
-     all four and Antigravity reports them back, so it should call it once.
+     specialists. Each answer comes back down the workshop's own socket and the
+     tool waits for the captain's huddle, which always arrives, so Antigravity
+     should call it once and report what it heard.
    - A second panel appears, headed "The game's agents", in cyan. It shows
      the same bars for whatever the four player agents changed. The
      shout_to_the_team call above it stays amber and named Antigravity,
      because Antigravity made the call; the panel is cyan, because the
      game's agents chose the numbers.
-   - A value they picked outside its allowed band draws as a red bar hard
-     against the end of the track, not as a dot sitting quietly at the edge.
-   - Stage 5 ticks, stage 4 does not. Both routes rewrite the same role files,
-     so a shout that also ticked "tune the squad" would be claiming the
-     subagents ran when they did not.
-   - Shout before taking the field and it comes back no_match_window, which
-     should send Antigravity to kick off first.
-   - Out-of-range or invented attributes come back as "Rejected: ..." and the
-     specialist corrects itself. Nothing should crash.
-9. Send "They keep breaking through the middle. Tighten it up."
-   - Four subagents run. Each tool call is attributed to its own role, so the
-     gutter reads DEFENDER, MIDFIELDER, FORWARD, GOALKEEPER rather than
-     Antigravity four times.
-   - One panel appears, headed "Antigravity subagents", with a lane per role
-     in the role's own colour. A lane opens as soon as its tuner starts and
-     shows a pulsing "working" until it reports, so the four are visibly
-     running at once rather than appearing one at a time.
-   - Each changed attribute is one row: the name, the old value, the new
-     value, and a bar underneath. On the bar, a faint tick is the shipped
-     baseline, a hollow dot is the value before this call, and the filled dot
-     is where it landed. The tuner's reason sits at the foot of its lane.
-   - Nothing renders a line of raw JSON. The tune call itself reads only
-     "Called tune_defender", because the panel carries the numbers.
-   - A tuner that changes the same attribute twice keeps one row, still
-     measured from the first value it moved off.
-   - The winning-the-match skill is listed on this stage. Click it to read
-     exactly what Antigravity was told about the simulation.
-   - All four role files are rewritten within a few seconds of each other.
-   - Any out-of-range attempt comes back as a violation list, not a crash.
-   - A match is three minutes at 1x and a tuning turn takes three to five, so
-     expect full time before the changes land. That is the honest default.
-   - To watch them land instead, drag the simulation speed down to 0.5x before
-     kick-off, which buys six minutes. Then watch the window rather than the
-     dugout: the back line tightens within about two seconds of the files
-     changing, because the game re-reads player_state every two seconds and
-     pushes it straight into the running match.
-10. Refresh http://localhost:5173 in the tab you already had open: baselines
-   restore and the squad is clean again. Two things to know. It must be the
-   same tab, because the restore is keyed on sessionStorage and a new tab or
-   window counts as a first load, which backs the current attributes up as the
-   new baseline instead. And it goes through the game's ADK coach, so it needs
-   game/.env; check the browser console if the files do not change.
+   - Every lane names the room, the dugout and the player it moved:
+     WRKS/blue/forward. Both this stage and stage 4 write there, which is the
+     point of the room being reserved.
+   - Stage 5 ticks, stage 4 does not. Both routes move the same attributes
+     through the same arena, so a shout that also ticked "tune the squad"
+     would be claiming the subagents ran when they did not.
+   - Shout with no match on screen and it still goes through, because the
+     squad lives in the arena rather than in the page. The answer says so and
+     tells you to take the field to watch the difference.
+   - Out-of-range or invented attributes are refused by the arena, so they
+     never reach the squad: the specialist is told which ones and why, and
+     corrects itself. Nothing should crash.
+   - Stop the arena and shout again. It comes back naming :8003 rather than
+     failing silently, and the arena dot in the header goes red.
+10. Send "They keep breaking through the middle. Tighten it up."
+    - Four subagents run. Each tool call is attributed to its own role, so the
+      gutter reads DEFENDER, MIDFIELDER, FORWARD, GOALKEEPER rather than
+      Antigravity four times.
+    - One panel appears, headed "Antigravity subagents", with a lane per role
+      in the role's own colour. A lane opens as soon as its tuner starts and
+      shows a pulsing "working" until it reports, so the four are visibly
+      running at once rather than appearing one at a time.
+    - Each changed attribute is one row: the name, the old value, the new
+      value, and a bar underneath. On the bar, a faint tick is the shipped
+      baseline, a hollow dot is the value before this call, and the filled dot
+      is where it landed. The tuner's reason sits at the foot of its lane.
+    - Nothing renders a line of raw JSON. The tune call itself reads only
+      "Called tune_defender", because the panel carries the numbers.
+    - A tuner that changes the same attribute twice keeps one row, still
+      measured from the first value it moved off.
+    - The winning-the-match skill is listed on this stage. Click it to read
+      exactly what Antigravity was told about the simulation.
+    - All four lanes land within a few seconds of each other, each headed
+      `WRKS/blue/<role>`, and the arena's room log has the four profile.patch
+      events to match.
+    - Any out-of-range attempt comes back as a violation list, not a crash. The
+      arena refuses the whole write and names every problem at once, so the
+      tuner can correct them in one go.
+    - A match is three minutes at 1x and a tuning turn takes three to five, so
+      expect full time before the changes land. That is the honest default.
+    - To watch them land instead, drag the simulation speed down to 0.5x before
+      kick-off, which buys six minutes. Then watch the window rather than the
+      dugout: the back line tightens almost at once, because the arena
+      tells the pitch what moved down the same socket and the scene picks it up
+      on its next frame.
+11. Refresh http://localhost:5173: the squad is clean again. The workshop page
+    asks for the shipped baseline on every load, which is what makes the stages
+    repeatable in a room that outlives them. It goes through the game's ADK
+    coach, so it needs game/.env; check the browser console if the numbers do
+    not move back.
 
-Afterwards, run `git status`. A smoke run dirties tracked files and some of it
-is not obvious: the sprites are regenerated, the four role files are tuned,
-and the `*_baseline.json` files get rewritten too, because the game captures
-whatever is on disk as the new baseline on a first page load. Committing that
-would ship a tuned squad as the starting eleven. Restore
-`game/frontend/public/player_state/` and `game/frontend/public/assets/sprites/`
-unless you meant to keep them, and delete the scripts the agent wrote at the
-repository root.
+Afterwards, run `git status`. A smoke run dirties tracked files: the sprites
+are regenerated, so restore `game/frontend/public/assets/sprites/` unless you
+meant to keep the new kit, and delete the scripts the agent wrote at the
+repository root. The squad itself is no longer among them, since it lives in
+the arena's database rather than in the working tree.
 
-Failure to check on purpose: stop the game stack and send a message. The three
-game dots go red within about four seconds, since the header polls rather than
-reading once at load. The agent has shell access, so it does not just report
+Failure to check on purpose: stop the game stack and send a message. Its three
+dots go red within about four seconds while the arena stays green, since the
+header polls each of them rather than reading once at load. The agent has
+shell access, so it does not just report
 game_not_running: it reads the logs, brings the stack back up with
 game/run.sh and restarts the match. That self-repair is worth watching. Give
 it about forty seconds; all three dots should go green, not just the pitch.
