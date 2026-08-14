@@ -1,6 +1,10 @@
 """Shared fixtures. One throwaway database, emptied between tests."""
 
+import asyncio
+import contextlib
+import json
 import logging
+import math
 import os
 import socket
 import threading
@@ -10,6 +14,7 @@ import httpx
 import psycopg
 import pytest
 import uvicorn
+import websockets
 from fastapi.testclient import TestClient
 from psycopg import conninfo, sql
 
@@ -100,6 +105,18 @@ def real_arena_server(dsn, monkeypatch):
     monkeypatch.setenv("ARENA_DB", dsn)
     from app import app
 
+    with _serving(app) as url:
+        yield url
+
+
+@contextlib.contextmanager
+def _serving(fastapi_app):
+    """This app, on a port of its own, until the block ends.
+
+    Its own function rather than only the fixture above, because the wall's E2E
+    needs the same server around a different app -- one reloaded with the pitch
+    mounted -- and a second copy of this would be a second thing to get wrong.
+    """
     # Bind to 127.0.0.1:0 so the OS picks an available port.
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.bind(("127.0.0.1", 0))
@@ -115,7 +132,7 @@ def real_arena_server(dsn, monkeypatch):
     # sansio implementation rather than plain `websockets`: the latter imports
     # `websockets.legacy` and the two deprecation warnings that come with it,
     # and this suite is held at one warning.
-    config = uvicorn.Config(app, host=host, port=port, log_level="error",
+    config = uvicorn.Config(fastapi_app, host=host, port=port, log_level="error",
                             log_config=None, ws="websockets-sansio")
     server = uvicorn.Server(config)
 
@@ -217,3 +234,180 @@ def live_room(client, conn, phones, grounds_connected):
         return code, physics_token(conn, code)
 
     return _live_room
+
+
+# ── A venue, and somebody standing in front of the big screen ──────────
+
+# The number in the spec, and the number the wall was rebuilt for.
+FIFTY = 50
+# One of the fifty is played out to its last half-minute and the other
+# forty-nine are not. `worth()` on the wall gives that one three points nobody
+# else can have, so the director's choice is that room from the first frame to
+# the last. Fifty identical matches would leave it picking whichever arrived
+# first, and these tests asserting on a coin toss.
+ENDGAME_ROOM = 0
+BUILT_PITCH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__)))), "game", "frontend", "dist")
+
+
+@pytest.fixture
+def wall_server(dsn, monkeypatch):
+    """The arena serving the pitch it ships with, on a socket a browser can use.
+
+    Reloaded rather than configured, because `ARENA_PITCH_DIR` is read when the
+    module is imported -- see `test_pitch_mount.py`, which does the same for the
+    same reason. Without it `/api/venue` sends the browser to the Vite dev
+    server, and a wall E2E watching centre court fail to load would be testing
+    the error path.
+    """
+    import importlib
+
+    if not os.path.exists(os.path.join(BUILT_PITCH, "viewer.js")):
+        pytest.skip(f"no built pitch at {BUILT_PITCH}: run `npm run build` in game/frontend")
+    monkeypatch.setenv("ARENA_PITCH_DIR", BUILT_PITCH)
+    monkeypatch.setenv("ARENA_DB", dsn)
+    import app as app_module
+
+    importlib.reload(app_module)
+    with _serving(app_module.app) as url:
+        yield url
+    # Delete the variable before restoring, or the reload re-reads it: pytest
+    # unwinds monkeypatch after this fixture, not during it.
+    monkeypatch.delenv("ARENA_PITCH_DIR", raising=False)
+    importlib.reload(app_module)
+
+
+@pytest.fixture
+async def fifty_live_rooms(wall_server):
+    """Fifty matches being played, each reported by a stand-in for its grounds.
+
+    Not fifty browsers. What is under test is a wall with more matches on it
+    than fit on a screen; fifty real simulations would be a test of Chromium's
+    scheduler, and the arena cannot tell the difference -- a host is whatever
+    holds the room's physics token and sends frames.
+    """
+    import app as app_module
+
+    farm = connect_grounds(app_module.app, capacity=FIFTY + 4)
+    codes = []
+    async with httpx.AsyncClient(base_url=wall_server, timeout=30) as phone:
+        for index in range(FIFTY):
+            # One cookie jar per room, because a manager may hold one seat.
+            phone.cookies.clear()
+            await phone.post("/api/players",
+                             json={"display_name": f"Manager {index:02d}", "email": ""})
+            opened = await phone.post("/api/rooms", json={"mode": "solo"})
+            code = opened.json()["code"]
+            await phone.post(f"/api/rooms/{code}/seats/blue",
+                             json={"philosophy": "high press"})
+            await phone.post(f"/api/rooms/{code}/seats/blue/ready", json={"ready": True})
+            (await phone.post(f"/api/rooms/{code}/start")).raise_for_status()
+            codes.append(code)
+
+    # The physics tokens went down the control socket at kick-off and nowhere
+    # else, which is the whole point of the split: the stand-ins read them from
+    # the grounds they are standing in for.
+    tokens = {sent["code"]: sent["token"] for sent in farm.assignments}
+    assert set(tokens) == set(codes), "the arena did not assign every room a pitch"
+
+    socket_url = wall_server.replace("http://", "ws://", 1)
+    stop = asyncio.Event()
+    reporting = []
+    hosts = [asyncio.create_task(_a_stand_in_host(socket_url, code, tokens[code],
+                                                  index, stop, reporting))
+             for index, code in enumerate(codes)]
+    try:
+        await _until(lambda: len(reporting) == FIFTY,
+                     f"only {{}} of {FIFTY} rooms reported a frame", reporting)
+        yield codes
+    finally:
+        stop.set()
+        await asyncio.gather(*hosts, return_exceptions=True)
+
+
+async def _until(done, complaint, watching, patience=20.0):
+    """Hold until it is true, then say what was missing if it never was."""
+    deadline = time.monotonic() + patience
+    while not done():
+        if time.monotonic() > deadline:
+            raise AssertionError(complaint.format(len(watching)))
+        await asyncio.sleep(0.1)
+
+
+async def _a_stand_in_host(url, code, token, index, stop, reporting):
+    """One room's physics, as far as the arena can tell: frames, and nothing else."""
+    async with websockets.connect(f"{url}/ws/rooms/{code}?client_id={token}") as wire:
+        await wire.recv()                       # the opening room snapshot
+        # A host socket is subscribed to its own room like any other listener.
+        # Fifty that never read would fill fifty send buffers and manufacture
+        # drops a browser -- which does read -- would never produce.
+        reader = asyncio.create_task(_swallow(wire))
+        try:
+            tick = 0
+            while not stop.is_set():
+                await wire.send(json.dumps({"type": "host.state",
+                                            "payload": _a_frame(index, tick)}))
+                if not tick:
+                    reporting.append(code)
+                tick += 1
+                # The rate the wall thins to anyway. Ten a second from fifty
+                # rooms would be the load rehearsal, which is its own test.
+                await asyncio.sleep(0.25)
+        finally:
+            reader.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await reader
+
+
+async def _swallow(wire):
+    """Read and throw away. Something has to, or the buffer becomes the test."""
+    while True:
+        await wire.recv()
+
+
+def _a_frame(index, tick):
+    """Ten dots and a ball, moving, so a tile is a match rather than a picture."""
+    turn = tick / 8 + index
+    spot = (lambda seat, side: [round(0.5 + side * (0.1 + 0.07 * seat) * math.cos(turn + seat), 4),
+                                round(0.5 + (0.1 + 0.07 * seat) * math.sin(turn + seat), 4)])
+    return {
+        # Level, so every match is worth watching and only the clock separates
+        # them. See ENDGAME_ROOM.
+        "score": [1, 1],
+        "clock": 20 if index == ENDGAME_ROOM else 120,
+        "blue": [spot(seat, -1) for seat in range(5)],
+        "red": [spot(seat, 1) for seat in range(5)],
+        "ball": [round(0.5 + 0.3 * math.cos(turn * 1.7), 4),
+                 round(0.5 + 0.2 * math.sin(turn * 1.3), 4)],
+    }
+
+
+@pytest.fixture
+async def wall_page(wall_server, fifty_live_rooms):
+    """A browser in front of the big screen, with the venue already playing.
+
+    1920 by 1080 because how many tiles fit across is the thing under test, and
+    that is the screen the wall is hung on.
+    """
+    from playwright.async_api import async_playwright
+
+    async with async_playwright() as driving:
+        browser = await driving.chromium.launch()
+        page = await browser.new_page(viewport={"width": 1920, "height": 1080})
+        complaints = []
+        page.on("console",
+                lambda note: complaints.append(note.text) if note.type == "error" else None)
+        page.on("pageerror", lambda blew_up: complaints.append(str(blew_up)))
+        await page.goto(f"{wall_server}/arena")
+        # A tile appears as soon as the roster lands, which is before a single
+        # frame has. The screen is only up when the director has framed a match:
+        # until then every room is still on the strip, because none of them is
+        # the one being watched.
+        await page.wait_for_selector(".tile[data-code]", timeout=30_000)
+        await page.wait_for_function("() => document.querySelector('#court').dataset.showing",
+                                     timeout=30_000)
+        yield page
+        await browser.close()
+    # After the browser is shut, so a test that fails on its own terms fails on
+    # its own terms. A wall runs all evening: a console error is a defect.
+    assert not complaints, f"the wall logged errors: {complaints}"

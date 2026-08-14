@@ -709,16 +709,19 @@ body.big{padding:24px}
    The wall: every other match in the venue, at a glance.
 
    One socket feeds the lot at 4 Hz. Tiles are a canvas rather than a pitch --
-   six framed games beside a real one would spend the whole screen's budget on
-   thumbnails, and at this size a match is ten dots and a ball anyway.
+   twelve framed games beside a real one would spend the whole screen's budget
+   on thumbnails, and at this size a match is ten dots and a ball anyway.
    ══════════════════════════════════════════════════════════════════ */
 .wall{flex:none;margin-top:16px;padding-top:14px;border-top:1px solid var(--line)}
 .wall-hd{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:10px}
 .wall-hint{font-size:.68rem;color:var(--faint)}
-.wall-strip{display:flex;gap:12px;align-items:stretch}
-.wall-none{font-size:.78rem;color:var(--faint);padding:6px 0}
+/* One row of twelve, however few are on: a tile that grows to fill the row is
+   a tile that changes size when a match ends, and the eye reads that as
+   something having happened. The row is the shape; the page fills what it can. */
+.wall-strip{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:10px;align-items:stretch}
+.wall-none{grid-column:1/-1;font-size:.78rem;color:var(--faint);padding:6px 0}
 .tile{
-  flex:0 0 176px;display:flex;flex-direction:column;gap:6px;padding:8px;
+  display:flex;flex-direction:column;gap:5px;padding:7px;min-width:0;
   background:var(--panel-2);border:1px solid var(--line);border-radius:10px;
   color:var(--mute);text-align:left;cursor:pointer;font:inherit;
   transition:border-color .15s,transform .15s;
@@ -727,25 +730,47 @@ body.big{padding:24px}
    where it stops being a tile. The chip in the bar says which one it is. */
 .tile:hover{border-color:var(--blue-line);transform:translateY(-2px)}
 .tile:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
-.tile-top{display:flex;align-items:center;gap:7px;font-size:.6rem;letter-spacing:.1em}
+.tile-top{display:flex;align-items:center;gap:5px;font-size:.58rem;letter-spacing:.06em}
 .tile-no{
-  width:15px;height:15px;border-radius:4px;flex:none;
+  min-width:15px;height:15px;padding:0 3px;border-radius:4px;flex:none;
   display:grid;place-items:center;font-weight:700;
   background:rgba(255,255,255,.07);color:var(--mute);
 }
-.tile-code{font-family:'IBM Plex Mono',ui-monospace,monospace;color:var(--gold);letter-spacing:.16em}
+.tile-code{font-family:'IBM Plex Mono',ui-monospace,monospace;color:var(--gold);letter-spacing:.1em}
 .tile-clock{margin-left:auto;font-family:'IBM Plex Mono',ui-monospace,monospace;color:var(--faint)}
 .tile-pitch{
   width:100%;height:auto;display:block;border-radius:6px;
   background:radial-gradient(circle at 50% 50%,#12402f,#071a13);
 }
-.tile-line{display:flex;align-items:center;gap:7px;font-size:.68rem}
+.tile-line{display:flex;align-items:center;gap:5px;font-size:.62rem}
 .tile-line .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .tile-line .nm.b{color:#93c5fd}
 .tile-line .nm.r{color:#fca5a5;text-align:right}
 .tile-line .sc{
   flex:none;font-family:'IBM Plex Mono',ui-monospace,monospace;
   font-weight:600;color:var(--ink);
+}
+
+/* Which twelve of the fifty. Sat in the wall's header rather than under the
+   tiles, because a row of controls below them would come out of centre court's
+   height, and the match is still the thing people are watching. */
+.pages{display:flex;align-items:center;gap:5px}
+/* Sized for a finger rather than a cursor: this is a screen on a wall, and the
+   people in front of it are standing up. */
+.pages button{
+  min-width:28px;height:28px;padding:0 7px;border-radius:7px;
+  border:1px solid var(--line);background:var(--panel-2);color:var(--mute);
+  font:inherit;font-size:.68rem;font-weight:600;line-height:1;cursor:pointer;
+  transition:border-color .15s,color .15s,background .15s;
+}
+.pages button:hover:not(:disabled){border-color:var(--blue-line);color:var(--ink)}
+.pages button:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+/* The ends of the run. Kept in place rather than hidden, so the numbers do not
+   shift sideways under the finger that is stepping through them. */
+.pages button:disabled{opacity:.3;cursor:default}
+.pages .page-step{font-size:.9rem;color:var(--faint)}
+.pages .page-no.on{
+  border-color:rgba(255,204,0,.45);background:rgba(255,204,0,.1);color:var(--gold);
 }
 
 /* Who is choosing what is on the big screen. It is only ever the director or
@@ -924,9 +949,15 @@ body.paper{display:flex;flex-direction:column;align-items:center;padding:26px 16
   .court-grid{grid-template-columns:1fr;grid-template-rows:minmax(0,1fr) auto}
   .rail{flex-direction:row;flex:none;max-height:34vh}
   .join-mini{flex:none;flex-direction:column;text-align:center;gap:8px}
-  /* Six tiles no longer fit across. Wrapping them into a second row would push
-     centre court off the screen, so the wall scrolls sideways instead. */
-  .wall-strip{overflow-x:auto;padding-bottom:6px;scrollbar-width:thin}
+  /* Twelve tiles no longer fit across. Wrapping them into a second row would
+     push centre court off the screen, so the row keeps a width a tile can be
+     read at and scrolls sideways instead -- which needs columns of a fixed
+     size, since a grid of twelve equal fractions can only ever shrink. */
+  .wall-strip{
+    grid-template-columns:none;grid-auto-flow:column;grid-auto-columns:148px;
+    overflow-x:auto;padding-bottom:6px;scrollbar-width:thin;
+  }
+  .wall-none{grid-column:auto}
 }
 
 @media (max-width:940px){

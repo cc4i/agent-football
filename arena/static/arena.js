@@ -28,10 +28,14 @@ const params = new URLSearchParams(location.search);
 const MODE = params.get("mode") === "versus" ? "versus" : "solo";
 
 const HOUSE = "The house side";
-// Six tiles fit across a wall-mounted screen at a size you can read from the
-// back of a room. A seventh match rotates through rather than shrinking them.
-const TILES = 6;
+// Six was sized to be read from the back of a room. A grid somebody walks up to
+// and clicks is a different budget: twelve fits a 1080p wall at a size a thumb
+// can hit, and puts fifty matches on five pages rather than nine.
+const TILES = 12;
 const ROTATE_MS = 12000;
+// The carousel is for when nobody is there. The moment somebody pages or pins
+// it stops, and it starts again once they have stopped touching it.
+const BROWSING_MS = 30000;
 // The least time a match holds centre court. Without it, two rooms trading
 // goals would strobe the screen between them.
 const DWELL_MS = 8000;
@@ -47,11 +51,6 @@ const STALE_MS = 15000;
 // second, so silence from a room the arena has just named as live means its
 // screen is gone rather than that it is between frames.
 const SILENT_MS = 4000;
-// How often this screen tells the arena it is still holding its room. The
-// pitch reports for itself once a match is running, but it is not even loaded
-// until somebody takes a seat, so for the whole of the lobby this is the only
-// thing between an open room and a room that only looks open.
-const STILL_HERE_MS = 10000;
 // How long a result stands before the screen opens the lobby for the next
 // match. Long enough to read a scoreline from the back of a room, short enough
 // that the queue on the other side of it is not waiting on anybody.
@@ -65,8 +64,10 @@ let ours = null;            // this screen's own room, as the arena last told us
 let showing;
 let pinned = null;          // the operator's choice, which outlives the director's
 let framedAt = 0;
-let turned = 0;             // the first tile of the strip's current page
+let page = 0;               // which page of the strip is up
+let browsing = null;        // running while somebody is working the wall by hand
 let stripped = "";          // the page the strip is drawing, so it is redrawn once
+let paged = "";             // the same, for the page buttons under it
 let courtRoom = null;       // somebody else's room, open only while they are on
 let pitch = null;           // centre court's canvas, once /pitch has been loaded
 let leaving = false;        // this page is on its way out to a room that works
@@ -100,18 +101,17 @@ async function start() {
     // lobby learns a seat filled and how the whistle gets here. While our own
     // match is the one on centre court it carries the relay too, so the usual
     // case is one room socket rather than two.
-    let held = null;
-    // A room is only as real as the tab holding it: the physics token lives in
+    // A room is only as real as the tab holding it: the screen token lives in
     // this tab's sessionStorage and dies with it, so a lobby whose screen has
     // closed can never be run by anybody, ever. Left unsaid, the arena had no
     // way to tell that room from a screen waiting patiently in front of a
-    // queue, and went on offering it to every phone in the building.
-    const stillHere = () => screenToken() && held && held.send({ type: "host.here" });
-
-    held = openRoom(code, {
-      // The token goes on this socket so the screen can vouch for its own room
-      // before there is a pitch to do it. A tab that is only watching has no
-      // token and sends nothing, which is what it is.
+    // queue, and went on offering it to every phone in the building. Saying so
+    // is this socket being open, and nothing else: a tab the browser has put to
+    // sleep still answers a ping from its network stack, which is more than can
+    // be said for anything on a timer.
+    openRoom(code, {
+      // The token goes on this socket so the screen can vouch for its own room.
+      // A tab that is only watching has no token, which is what it is.
       clientId: screenToken(),
       onMessage(message) {
         if (message.type === "room") return mine(message);
@@ -119,13 +119,9 @@ async function start() {
       },
       onOpen() {
         if (showing === code) replay(code);
-        // On every connect, not only the first: a reconnect is the one moment
-        // the arena is most likely to have been counting silence.
-        stillHere();
       },
       onDrop: (reason, permanent) => permanent && say(reason),
     });
-    setInterval(stillHere, STILL_HERE_MS);
     openWall({ onMessage: wall });
     setInterval(direct, TICK_MS);
     direct();
@@ -372,20 +368,25 @@ const onNow = (room, now) =>
 const elsewhere = (now = Date.now()) =>
   [...live.values()].filter((room) => room.code !== showing && onNow(room, now));
 
+/** How many pages of tiles the matches on now come to. Never fewer than one. */
+const pageCount = (count) => Math.max(1, Math.ceil(count / TILES));
+
 function strip() {
   const others = elsewhere();
-  // Pages are full or there is nothing to fill them: with seven rooms the last
-  // page starts at the second, not at the seventh with five empty slots after.
-  const last = Math.max(0, others.length - TILES);
-  if (turned > last) turned = 0;
-  const visible = others.slice(turned, turned + TILES);
+  const pages = pageCount(others.length);
+  // Pages do not overlap, because a numbered page that shares half its tiles
+  // with the one before it is a page nobody can hold in their head. The last
+  // one is short instead, and a page that emptied under somebody -- matches do
+  // end -- hands them the last page there is rather than a blank one.
+  if (page >= pages) page = pages - 1;
+  const visible = others.slice(page * TILES, page * TILES + TILES);
 
   // Redrawn only when the page itself changes. The strip is repainted on every
-  // director tick, and rebuilding six canvases each time would blank them until
-  // their next frame -- a wall that flickers every two seconds.
-  const page = visible.map((room) => room.code).join(" ");
-  if (page !== stripped) {
-    stripped = page;
+  // director tick, and rebuilding twelve canvases each time would blank them
+  // until their next frame -- a wall that flickers every two seconds.
+  const shown = visible.map((room) => room.code).join(" ");
+  if (shown !== stripped) {
+    stripped = shown;
     tiles.clear();
     el("wall-hint").hidden = visible.length === 0;
     el("tiles").replaceChildren(...visible.map((room, index) => tileFor(room, index + 1)));
@@ -394,13 +395,67 @@ function strip() {
                               "No other matches right now. Scan the code to start one."));
     }
   }
+  pager(pages);
   for (const room of visible) paintTile(room);
+}
+
+/**
+ * One button per page, with an arrow either side.
+ *
+ * Rebuilt only when the numbers or the page change, for the same reason the
+ * tiles are: this runs every couple of seconds, and a button replaced under a
+ * finger is a press that lands on nothing.
+ */
+function pager(pages) {
+  const shape = `${pages} ${page}`;
+  if (shape === paged) return;
+  paged = shape;
+  const box = el("pages");
+  box.hidden = pages < 2;
+  // One page is every match already, so a control for choosing it says nothing.
+  if (pages < 2) return box.replaceChildren();
+
+  const step = (words, label, to) => {
+    const button = text("button", "page-step", words);
+    button.type = "button";
+    button.title = label;
+    button.setAttribute("aria-label", label);
+    button.disabled = to < 0 || to >= pages;
+    button.addEventListener("click", () => goToPage(to));
+    return button;
+  };
+  const numbers = Array.from({ length: pages }, (_, index) => {
+    const on = index === page;
+    const button = text("button", `page-no${on ? " on" : ""}`, String(index + 1));
+    button.type = "button";
+    button.dataset.page = String(index);
+    button.title = `Page ${index + 1} of ${pages}`;
+    button.setAttribute("aria-current", on ? "true" : "false");
+    button.addEventListener("click", () => goToPage(index));
+    return button;
+  });
+  box.replaceChildren(step("‹", "Previous page", page - 1),
+                      ...numbers,
+                      step("›", "Next page", page + 1));
+}
+
+/** Somebody is working the wall by hand. The carousel gets out of their way. */
+function browsingNow() {
+  clearTimeout(browsing);
+  browsing = setTimeout(() => { browsing = null; }, BROWSING_MS);
+}
+
+function goToPage(next) {
+  page = Math.max(0, Math.min(next, pageCount(elsewhere().length) - 1));
+  browsingNow();
+  strip();
 }
 
 function tileFor(room, number) {
   const tile = document.createElement("button");
   tile.type = "button";
   tile.className = "tile";
+  tile.dataset.code = room.code;
   tile.title = `Put ${room.code} on the big screen`;
   tile.addEventListener("click", () => pin(room.code));
 
@@ -418,8 +473,12 @@ function tileFor(room, number) {
   const names = document.createElement("div");
   names.className = "tile-line";
   names.append(text("span", "nm b", room.blue || "Open"),
-               text("b", "sc", scoreline(room)),
-               text("span", "nm r", room.red || (room.mode === "solo" ? HOUSE : "Open")));
+               text("b", "sc", scoreline(room)));
+  // The house side is on the other end of every solo match in the building, so
+  // saying so on a tile is a third of its width spent on "The hou...". A name
+  // is what somebody scans a wall of twelve for, and this is the room to print
+  // one in. Head to head has two of them and prints both.
+  if (room.mode !== "solo") names.append(text("span", "nm r", room.red || "Open"));
 
   tile.append(top, canvas, names);
   tiles.set(room.code, { tile, canvas, clock: top.lastChild, score: names.children[1] });
@@ -581,6 +640,10 @@ function cutTo(wanted, now) {
   framedAt = now;
   lobby.hidden = Boolean(wanted);
   court.hidden = !wanted;
+  // What is framed, said out loud in the DOM. Nothing on the page reads it --
+  // it is for the test that drives fifty matches past this screen, and for
+  // anybody with the inspector open wondering which room they are looking at.
+  court.dataset.showing = wanted || "";
   // The lobby carries its own way in. The rail only needs one when the screen
   // has given the room over to somebody else's match.
   el("join-mini").hidden = !wanted || wanted === code;
@@ -678,20 +741,32 @@ async function replay(wanted) {
 function pin(wanted) {
   problem.hidden = true;
   pinned = wanted === pinned ? null : wanted;
+  // Somebody is at the wall. Whether they pinned a match or let one go, the
+  // page under their hand is not to slide out from under it.
+  browsingNow();
   direct();
 }
 
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
+    // The one gesture that hands the screen back, so it hands back all of it:
+    // the carousel starts again on the next turn rather than in half a minute.
     pinned = null;
+    clearTimeout(browsing);
+    browsing = null;
     problem.hidden = true;
     return direct();
   }
   // Cmd-1 and Ctrl-1 belong to the browser's tabs, and an operator reaching for
   // one of those is not asking for a match.
   if (event.metaKey || event.ctrlKey || event.altKey) return;
+  if (event.key === "ArrowLeft") return goToPage(page - 1);
+  if (event.key === "ArrowRight") return goToPage(page + 1);
+  // One key, so the last three tiles on a page have a number and no shortcut.
+  // The mouse reaches them, the arrows page past them, and a two-key sequence
+  // to save a click on a wall screen would be worse than either.
   const number = Number(event.key);
-  if (!Number.isInteger(number) || number < 1 || number > TILES) return;
+  if (!Number.isInteger(number) || number < 1 || number > 9) return;
   // Off the strip as drawn rather than the list behind it, so the number on a
   // tile is the number that puts it up whatever the rotation is doing.
   const wanted = [...tiles.keys()][number - 1];
@@ -746,13 +821,15 @@ for (const mode of ["solo", "versus"]) {
   el(`mode-${mode}`).addEventListener("click", () => chooseMode(mode));
 }
 
-// A seventh match is a real venue, and the six on the strip must not be the
-// same six all evening.
+// A thirteenth match is a real venue, and the twelve on the strip must not be
+// the same twelve all evening. Not while somebody is working the wall: paging
+// under a hand that is reaching for a tile is the wall taking the screen back
+// off the person standing in front of it.
 setInterval(() => {
-  const others = elsewhere();
-  if (others.length <= TILES) return;
-  const last = others.length - TILES;
-  turned = turned >= last ? 0 : Math.min(turned + TILES, last);
+  if (browsing || pinned) return;
+  const pages = pageCount(elsewhere().length);
+  if (pages < 2) return;
+  page = (page + 1) % pages;
   strip();
 }, ROTATE_MS);
 

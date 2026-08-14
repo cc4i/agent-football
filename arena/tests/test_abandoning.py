@@ -13,7 +13,6 @@ saying "nobody in it yet".
 """
 
 import asyncio
-import re
 import time
 
 import app as arena
@@ -411,17 +410,21 @@ def test_the_workshop_is_left_alone_forever(client):
     assert rooms.by_code(client.app.state.conn, codes.WORKSHOP)["status"] == "lobby"
 
 
-def test_the_screen_holding_a_room_keeps_saying_it_is_there(client):
+def test_the_screen_holding_a_room_says_so_by_staying_connected(client):
     # The half of the rule above that has to run in a browser. Nothing else
-    # speaks for a room before kick-off, so a screen that stops sending this
-    # loses every room it opens half a minute after opening it.
+    # speaks for a room before kick-off, so a screen that opened its own room's
+    # socket anonymously would lose every room it opens half a minute later.
     js = client.get("/static/arena.js").text
-    assert 'send({ type: "host.here" })' in js
-    assert "setInterval(stillHere" in js
-    # Comfortably inside the grace, or a screen that is there is swept anyway:
-    # one dropped report has to still leave time for the next.
-    every = int(re.search(r"const STILL_HERE_MS = (\d+)", js).group(1))
-    assert every * 2 < arena.HOST_GONE_SECONDS * 1000
+    opening = js.split("openRoom(code, {")[1].split("});", 1)[0]
+    assert "clientId: screenToken()," in opening
+
+    # And says it once, by connecting. The heartbeat that used to carry this is
+    # gone: it was the thing a backgrounded tab could not do, and the arena
+    # stopped reading it from a screen when the two tokens were split - a
+    # `host.here` bearing the screen token has been ignored ever since.
+    assert "host.here" not in js
+    assert "STILL_HERE_MS" not in js
+    assert "setInterval(stillHere" not in js
 
 
 def test_a_screen_that_is_still_reporting_keeps_its_match(client, live_room):

@@ -29,6 +29,11 @@ dev = [
     "pytest==8.4.2",
     "pytest-asyncio==1.2.0",
     "pytest-timeout==2.4.0",
+    # The wall is a room full of screens and a person standing at one of them,
+    # and no amount of asserting on `arena.js` as a string tests that. Held at
+    # the version the grounds run, so the browser this drives is the browser
+    # the farm plays matches in -- and the one already downloaded for it.
+    "playwright==1.56.0",
 ]
 
 [tool.pytest.ini_options]
@@ -37,3 +42,7 @@ testpaths = ["tests"]
 # A socket test whose frame never arrives blocks on receive_json forever. Without
 # this the suite hangs instead of failing, which is the worse of the two.
 timeout = 30
+# Off by default: these want a browser and half a minute each, and the suite
+# they would be sitting in front of runs in seconds. `-m e2e` asks for them.
+markers = ["e2e: needs a browser and a running arena"]
+addopts = "-m 'not e2e'"
