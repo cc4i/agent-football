@@ -113,6 +113,15 @@ CREATE TABLE IF NOT EXISTS result (
 
 CREATE INDEX IF NOT EXISTS room_by_status ON room (status);
 CREATE INDEX IF NOT EXISTS result_by_player ON result (player_id);
+
+-- The seat primary key stops two people taking the same dugout; this stops one
+-- person taking both. `take_seat` says as much and checks for it, but a check
+-- is a read and sitting down is a write, and a double-tapped phone is enough to
+-- get between them. Head to head scoring would then rate a player against
+-- themselves. An index rather than a table constraint because `CREATE TABLE IF
+-- NOT EXISTS` will not add one to a table that is already there, which would
+-- leave every database made before today quietly unprotected.
+CREATE UNIQUE INDEX IF NOT EXISTS one_dugout_per_player ON seat (room_id, player_id);
 """
 
 # Every table, newest dependency last. The test suite truncates these between

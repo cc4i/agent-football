@@ -111,14 +111,17 @@ def take_seat(conn, room_id, team, player_id, philosophy):
             (room_id, team, player_id, philosophy, time.time()),
         )
     except psycopg.errors.UniqueViolation as clash:
-        # The check above is the common path and words the refusal from the
-        # room's own state, but it is a read and this is a write, and in
-        # between the two another instance can seat somebody. One of two people
-        # reaching for the same dugout has to lose, so the loser gets the answer
-        # the rules already have rather than a 500. The rollback is what lets
-        # everybody else carry on: a statement the server refused leaves the
-        # transaction in error, and every later one fails until it is ended.
+        # The two checks above are the common path and word their refusals from
+        # the room's own state, but they are reads and this is a write, and
+        # between the two another request can seat somebody: a rival instance
+        # during a rollout, or the same phone tapped twice. Whichever of the two
+        # rules the database caught, the loser is told the same thing the check
+        # would have told them rather than handed a 500. The rollback is what
+        # lets everybody else carry on: a statement the server refused leaves
+        # the transaction in error, and every later one fails until it is ended.
         conn.rollback()
+        if clash.diag.constraint_name == "one_dugout_per_player":
+            raise RoomError("you already have a dugout in this match") from clash
         raise RoomError(f"the {team} dugout is taken") from clash
     conn.commit()
 

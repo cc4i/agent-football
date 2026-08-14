@@ -166,6 +166,45 @@ def test_two_managers_reaching_for_one_dugout_both_get_an_answer(client, dsn, ph
                        json={"philosophy": "counter"}).status_code == 200
 
 
+def test_one_phone_tapped_twice_does_not_end_up_in_both_dugouts(client, dsn, phones,
+                                                                monkeypatch):
+    """The other rule `take_seat` states in prose and used to check for twice.
+
+    A player holds one dugout in a room, and until the unique index went in
+    nothing but a read said so. Two taps close enough together - one phone, no
+    rollout needed - both passed that read and both inserted, and head to head
+    scoring would then have rated a player against themselves. Same seam as the
+    race above, and the loser is told the same thing the check would have told
+    them.
+    """
+    phones.join("Alex Rivera", "alex@example.com")
+    code = client.post("/api/rooms", json={"mode": "versus"}).json()["code"]
+
+    connection = client.app.state.conn
+    real_execute = connection.execute
+    already = []
+
+    def the_other_tap_lands_first(query, *arguments, **keywords):
+        if not already and str(query).startswith("INSERT INTO seat"):
+            already.append(query)
+            with psycopg.connect(dsn, autocommit=True) as rival:
+                rival.execute(
+                    "INSERT INTO seat (room_id, team, player_id, philosophy, ready, joined_at) "
+                    "SELECT room.id, 'red', player.id, 'counter', 0, 0 FROM room, player "
+                    "WHERE room.code = %s AND player.display_name = 'Alex Rivera'", (code,))
+        return real_execute(query, *arguments, **keywords)
+
+    monkeypatch.setattr(connection, "execute", the_other_tap_lands_first)
+    refused = client.post(f"/api/rooms/{code}/seats/blue", json={"philosophy": "high press"})
+    monkeypatch.undo()
+
+    assert already, "the seam never fired, so nothing raced"
+    assert refused.status_code == 409
+    assert refused.json()["detail"] == "you already have a dugout in this match"
+    assert client.get(f"/api/rooms/{code}").json()["seats"].keys() == {"red"}
+    assert idle(client)
+
+
 def turn_the_watchdog_over(client):
     """Run exactly one turn of the real watchdog loop, `finally` and all.
 
