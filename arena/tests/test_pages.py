@@ -110,6 +110,41 @@ def test_every_scrolling_surface_inherits_a_scrollbar_the_dark_theme_can_hold(
             "the root already states it; a second copy is one that can drift")
 
 
+def test_no_field_a_thumb_lands_on_is_small_enough_for_ios_to_zoom_the_page(client):
+    # Safari on iOS zooms the whole page in whenever it focuses a field whose
+    # text is under 16px, and it does not zoom back out again. The shout box
+    # was .9rem, so tapping it to talk to the squad blew the dugout up past
+    # both edges of the screen -- the relay off one side, the chips off the
+    # other -- one-handed, with a match running, and the only way back was to
+    # pinch it down by hand.
+    #
+    # Asserted over every rule that dresses a field rather than over that one
+    # box. The rule is not "the shout box is 16px", it is that nothing a thumb
+    # lands on is smaller than that, and the next field added is the next one
+    # to forget it.
+    #
+    # Comments out first, and innermost blocks only: `@media` and `@keyframes`
+    # nest, and the rules inside them dress fields on the same phone.
+    css = re.sub(r"/\*.*?\*/", "", client.get("/static/app.css").text, flags=re.S)
+    fields = re.compile(r"\.input\b|(?:^|[\s,>+~])(?:input|textarea|select)\b")
+    checked = 0
+    for selector, block in re.findall(r"([^{}]*)\{([^{}]*)\}", css):
+        if not fields.search(selector):
+            continue
+        size = re.search(r"font-size:\s*([\d.]+)(rem|em|px)", block)
+        if not size:
+            continue
+        checked += 1
+        px = float(size.group(1)) * (1 if size.group(2) == "px" else 16)
+        assert px >= 16, (
+            f"{selector.strip()} sets {size.group(0)} = {px}px;"
+            " iOS zooms the page on anything under 16px and stays there")
+    # The stylesheet is one file and the selectors above are how a field is
+    # found in it. A rename that matched nothing would pass every assertion in
+    # the loop by never running one.
+    assert checked, "no field's font-size was found to check"
+
+
 def test_a_screen_left_running_picks_up_a_fixed_stylesheet(client):
     # A browser given no Cache-Control invents one, and it invents hours. The
     # wall screen at a venue is never reloaded with the cache bypassed, so the

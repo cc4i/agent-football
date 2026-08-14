@@ -334,7 +334,12 @@ a.btn{display:block;text-align:center;text-decoration:none;line-height:1.2}
 
 .composer{flex:none;margin-top:11px}
 .shout-row{display:flex;gap:6px;margin-bottom:8px}
-.shout-row .input{padding:10px 12px;font-size:.9rem}
+/* 16px, and not the .9rem that fitted the row better. Safari on iOS zooms the
+   page in whenever it focuses a field under 16px and does not zoom back out,
+   so tapping this box to talk to the squad blew the dugout up past both edges
+   of the screen, mid-match, one-handed. The padding comes down by the two
+   pixels the taller line adds, so the row is the height it always was. */
+.shout-row .input{padding:9px 12px;font-size:1rem}
 .shout-row button{
   flex:none;background:linear-gradient(180deg,#f0564a,#c0392b);border:none;color:#fff;
   padding:0 16px;border-radius:8px;font-family:'Outfit',system-ui,sans-serif;font-weight:800;
