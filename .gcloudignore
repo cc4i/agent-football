@@ -1,0 +1,31 @@
+# What `gcloud builds submit` may upload. This is a separate exposure from
+# .dockerignore and has to be kept beside it: the whole directory is tarred and
+# put in a staging bucket before any Dockerfile is read, so a path excluded from
+# every image is still uploaded unless it is excluded here as well. With no
+# .gcloudignore at all gcloud synthesises one from .gitignore, and everything
+# tracked in git - the dugout included - goes up.
+#
+# The first two lines are correctness rather than housekeeping. `COPY arena/ ./`
+# runs after `uv sync` has built /app/.venv, and `COPY game/frontend/ ./` runs
+# after `npm ci` has built node_modules. If the context carried either, this
+# Mac's aarch64 virtual environment and host-built native modules would land on
+# top of the container's and the image would fail somewhere strange and late.
+**/.venv
+**/node_modules
+# A stale local pitch build would be copied in and then overwritten by the build
+# stage, which works until the day it does not.
+**/dist
+# The arena's suite has no business in an image that faces the internet.
+**/tests
+**/__pycache__
+**/.pytest_cache
+**/*.db
+**/.env
+# History, and it is large. The tag deploy.sh builds under is worked out on this
+# machine, so nothing in the build needs a repository.
+.git
+docs
+# The dugout embeds the Antigravity CLI and runs shell commands unrestricted,
+# and it has no business in an image that faces the internet - nor in a bucket
+# reachable by everyone with build access to the project.
+dugout

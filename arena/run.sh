@@ -29,14 +29,43 @@ if ! command -v uv >/dev/null 2>&1; then
     exit 1
 fi
 
-# Nothing is checked here. The arena reads its own configuration from the
-# environment and from .env, so it is the only thing that knows whether the
-# salt, the secret and the service token were set, and it warns about each of
-# them on the way up. A copy of that check in this script would be a second
-# answer to the same question, and it would be the one that was wrong.
-
 echo "--> Syncing python environment with uv..."
 uv sync --all-groups
+
+# The salt, the secret and the service token are not checked here. The arena
+# reads its own configuration from the environment and from .env, so it is the
+# only thing that knows whether they were set, and it warns about each of them
+# on the way up. A copy of that check in this script would be a second answer
+# to the same question, and it would be the one that was wrong.
+#
+# The database is different. Without it uvicorn dies on a traceback that says
+# nothing about what to do, and what to do is one command. Whatever libpq said
+# is printed with it: a wrong password, a wrong port, a missing socket and a
+# server still starting up all read the same without it. After the sync, since
+# it needs psycopg.
+if ! refusal=$(uv run python -c "
+import os
+import sys
+
+import psycopg
+
+from db import DEFAULT_DSN
+
+dsn = os.environ.get('ARENA_DB', DEFAULT_DSN)
+try:
+    psycopg.connect(dsn).close()
+except psycopg.OperationalError as problem:
+    # A database that does not exist yet is not a problem: the arena makes it.
+    if 'does not exist' not in str(problem):
+        print(f'no Postgres at {dsn}\n  {problem}'.rstrip())
+        sys.exit(1)
+"); then
+    echo "ERROR: ${refusal:-the database preflight did not run}"
+    echo "  native:  brew services start postgresql@18"
+    echo "  compose: podman compose up -d   (or docker compose up -d), then"
+    echo "           export ARENA_DB=postgresql://arena:arena@localhost:5433/arena"
+    exit 1
+fi
 
 echo "--> Starting Arena on http://$HOST:$PORT ..."
 exec uv run uvicorn app:app --host "$HOST" --port "$PORT" "$@"

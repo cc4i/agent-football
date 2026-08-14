@@ -30,7 +30,8 @@ player agents, and they pick the numbers.
 
 ## Architecture
 
-Three processes. The arena owns the state; everything else asks it.
+Three processes on a laptop, or one Cloud Run service with three containers in
+it. Either way the arena owns the state and everything else asks it.
 
 ```
   you, in a chat window        a phone, one per manager      the big screen
@@ -117,9 +118,25 @@ that push rather than from a poll, which is why a change shows up mid-match.
 ## Running it
 
 You need [uv](https://docs.astral.sh/uv/), Node, the Antigravity CLI with
-`agy login` done, and a Postgres for the arena to keep its history in -
-`brew services start postgresql@18`, or your platform's equivalent. The arena
-makes its own database on the way up.
+`agy login` done, and a Postgres for the arena to keep its history in. Native
+is the default path:
+
+```bash
+brew services start postgresql@18     # or your platform's equivalent
+```
+
+The arena makes its own database on the way up, so that is the whole of the
+setup. If you would rather not install one, `compose.yaml` at the repository
+root brings up the same thing in a container, on 5433 so it cannot shadow a
+local 5432:
+
+```bash
+podman compose up -d                  # or docker compose up -d
+export ARENA_DB=postgresql://arena:arena@localhost:5433/arena
+```
+
+Either way `arena/run.sh` says which of the two to run if it cannot reach one,
+rather than letting uvicorn die on a traceback.
 
 ```bash
 cp game/.env.example   game/.env      # then set GOOGLE_CLOUD_PROJECT
@@ -148,6 +165,22 @@ shell wins over all of them. See `arena/README.md`.
 
 The agent runs shell commands unrestricted, by design, so that it can launch
 the script it writes in stage 2. Run this on your own machine.
+
+## Deployed
+
+One Cloud Run service with three containers - the arena on the port, the coach
+and the captain on the loopback interface they share - and a Cloud SQL database
+behind it. `deploy/service.yaml` is the whole topology and `deploy/README.md`
+is how to put it there.
+
+The dugout does not go with it. It embeds the Antigravity CLI and runs shell
+commands unrestricted, which is exactly what stage 2 needs and exactly what has
+no business facing the internet, so it stays on the presenter's machine and
+talks to the deployed arena over `ARENA_URL`.
+
+One instance, on purpose: the match bus, host liveness and the chain's
+semaphore all live in one process. That means every deploy drops every live
+match, which `deploy/README.md` says rather more loudly.
 
 ## Does the tuning actually do anything?
 

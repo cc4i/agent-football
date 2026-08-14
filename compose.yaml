@@ -1,0 +1,26 @@
+# Postgres for anyone without a local install. The native one is the default
+# path - `brew services start postgresql@18` and the arena makes its own
+# database - and this is the fallback.
+#
+#   podman compose up -d          # or docker compose up -d
+#   ARENA_DB=postgresql://arena:arena@localhost:5433/arena arena/run.sh
+#
+# Port 5433 on purpose, so it cannot quietly shadow a local 5432.
+services:
+  postgres:
+    image: postgres:18
+    environment:
+      POSTGRES_USER: arena
+      POSTGRES_PASSWORD: arena
+      POSTGRES_DB: arena
+    ports:
+      - "5433:5432"
+    volumes:
+      - arena-pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U arena"]
+      interval: 5s
+      retries: 10
+
+volumes:
+  arena-pg:

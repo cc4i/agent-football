@@ -5,6 +5,7 @@ import socket
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+import httpx
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.responses import FileResponse, StreamingResponse
@@ -31,10 +32,14 @@ from tools.match import read_status
 load_dotenv()
 
 STATIC_DIR = Path(__file__).parent / "static"
-# The arena is in this list because every tool in the dugout now goes through
-# it: with the arena down the squad cannot be read, tuned or shouted at, and
-# the manager should see that in the header rather than in a tool result.
-GAME_SERVICES = {"arena": 8003, "pitch": 5173, "coach": 8000, "captain": 8001}
+# The three that are ports on this machine. The arena is watched too, and is
+# not among them: it is a URL, because it may be the deployed one while the
+# pitch, the coach and the captain are still here.
+GAME_SERVICES = {"pitch": 5173, "coach": 8000, "captain": 8001}
+# What the arena gets instead of the 250ms below. A deployed arena is a network
+# round trip and a cold-start-adjacent one at that, and a header dot that goes
+# dark because Cloud Run took 400ms is worse than a header that takes a moment.
+ARENA_TIMEOUT_SECONDS = 2.0
 
 
 @asynccontextmanager
@@ -54,8 +59,20 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
 def game_services() -> dict:
-    """One TCP connect per service. Enough to light the header dots."""
-    up = {}
+    """One reach per service. Enough to light the header dots.
+
+    Two mechanisms, because the arena is no longer necessarily a port on this
+    machine: it is asked wherever `ARENA_URL` says it lives, and the three that
+    are still local are probed. The arena is first because every tool in the
+    dugout goes through it, so an arena that is down is the first thing the
+    manager should see and the last thing they should have to guess at.
+    """
+    try:
+        answer = httpx.get(f"{arena.base_url()}/health",
+                           timeout=ARENA_TIMEOUT_SECONDS)
+        up = {"arena": answer.status_code == 200}
+    except httpx.HTTPError:
+        up = {"arena": False}
     for name, port in GAME_SERVICES.items():
         try:
             # "localhost", not a literal, so both address families are tried:

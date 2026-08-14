@@ -1,0 +1,158 @@
+# The whole topology, in a file, so it is reviewable in a diff rather than in
+# somebody's shell history. Multi-container services cannot be expressed on the
+# `gcloud run deploy` command line at all.
+#
+# The three placeholders are rendered by deploy/deploy.sh. They are spelt with
+# a pair of underscores on each side because a bare PROJECT is a substring of
+# GOOGLE_CLOUD_PROJECT below, and a global substitution would rewrite the
+# variable's name along with its value. Vertex would then have no project, and
+# nothing would say so until the first shout failed at the model call.
+#
+#   deploy/deploy.sh          # renders this and replaces the service
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: arena
+  annotations:
+    run.googleapis.com/launch-stage: GA
+spec:
+  template:
+    metadata:
+      annotations:
+        # One instance. This is a correctness constraint, not a cost decision.
+        # The match bus, host liveness and the chain's Gemini semaphore are all
+        # in process. A second instance means phones that never see a frame, a
+        # watchdog that abandons matches somebody is playing, and a shout whose
+        # specialist patches land on the other instance so `caused_by` returns
+        # None and the leaderboard is quietly wrong with no error anywhere.
+        # Read the spec before raising this.
+        autoscaling.knative.dev/minScale: "1"
+        autoscaling.knative.dev/maxScale: "1"
+        # The watchdog sweep, the chain and the bus all run between requests.
+        # Throttled, a quiet room is abandoned late and a shout in flight stalls.
+        run.googleapis.com/cpu-throttling: "false"
+        run.googleapis.com/startup-cpu-boost: "true"
+        run.googleapis.com/cloudsql-instances: __PROJECT__:__REGION__:arena-pg
+        # The arena takes the traffic. The captain has to be up before the coach
+        # can hand a shout to it, and the coach before the arena proxies to it.
+        run.googleapis.com/container-dependencies: '{"arena":["coach"],"coach":["captain"]}'
+    spec:
+      # A WebSocket is a request as far as Cloud Run is concerned, and the
+      # default is 300 seconds. A match is 180 plus a lobby plus a huddle, so
+      # the default cuts the room socket mid-match and it reads as a network
+      # fault. 3600 is the maximum.
+      timeoutSeconds: 3600
+      # Left at the default 80. With one instance this only governs how many
+      # requests are handed over at once, and 50 phones are almost entirely
+      # long-lived sockets rather than requests.
+      containerConcurrency: 80
+      serviceAccountName: arena@__PROJECT__.iam.gserviceaccount.com
+      volumes:
+        - name: player-state
+          emptyDir:
+            medium: Memory
+            sizeLimit: 128Mi
+
+      containers:
+        # The only container with a port. Everything else is loopback.
+        - name: arena
+          image: __REGION__-docker.pkg.dev/__PROJECT__/futsal/arena:__TAG__
+          ports:
+            - name: http1
+              containerPort: 8080
+          # 4 + 2 + 2 is 8 vCPU, which is the ceiling for one Cloud Run
+          # instance. Whoever adds a fourth container has to take the CPU from
+          # one of these three; a revision over the ceiling is not admitted.
+          resources:
+            limits:
+              cpu: "4"
+              memory: 8Gi
+          volumeMounts:
+            - name: player-state
+              mountPath: /shared/player_state
+          env:
+            - name: ARENA_ENV
+              value: production
+            - name: ARENA_DB
+              value: postgresql://arena@/arena?host=/cloudsql/__PROJECT__:__REGION__:arena-pg
+            - name: ARENA_COACH_URL
+              value: http://127.0.0.1:8000
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef: {name: arena-db-password, key: latest}
+            - name: ARENA_SECRET
+              valueFrom:
+                secretKeyRef: {name: arena-secret, key: latest}
+            - name: ARENA_EMAIL_SALT
+              valueFrom:
+                secretKeyRef: {name: arena-email-salt, key: latest}
+            - name: ARENA_SERVICE_TOKEN
+              valueFrom:
+                secretKeyRef: {name: arena-service-token, key: latest}
+          startupProbe:
+            httpGet: {path: /health, port: 8080}
+            periodSeconds: 3
+            failureThreshold: 20
+          livenessProbe:
+            httpGet: {path: /health, port: 8080}
+            periodSeconds: 30
+
+        - name: coach
+          image: __REGION__-docker.pkg.dev/__PROJECT__/futsal/coach:__TAG__
+          resources:
+            limits:
+              cpu: "2"
+              memory: 4Gi
+          volumeMounts:
+            - name: player-state
+              mountPath: /shared/player_state
+          env:
+            - name: GOOGLE_GENAI_USE_VERTEXAI
+              value: "true"
+            - name: GOOGLE_CLOUD_PROJECT
+              value: __PROJECT__
+            - name: GOOGLE_CLOUD_LOCATION
+              value: global
+            - name: CAPTAIN_A2A_URL
+              value: http://127.0.0.1:8001/.well-known/agent-card.json
+            # The specialists reach the arena over loopback, so this token
+            # never crosses the internet.
+            - name: ARENA_URL
+              value: http://127.0.0.1:8080
+            - name: ARENA_SERVICE_TOKEN
+              valueFrom:
+                secretKeyRef: {name: arena-service-token, key: latest}
+          # The probe proves the port and nothing else. `adk web` binds 8000 and
+          # serves with no credentials at all, so a missing aiplatform binding
+          # or a wrong project passes this and surfaces at the first shout
+          # instead. Shouting once is the last step of a deploy for that reason.
+          startupProbe:
+            tcpSocket: {port: 8000}
+            periodSeconds: 3
+            failureThreshold: 40
+
+        - name: captain
+          image: __REGION__-docker.pkg.dev/__PROJECT__/futsal/captain:__TAG__
+          resources:
+            limits:
+              cpu: "2"
+              memory: 4Gi
+          env:
+            - name: GOOGLE_GENAI_USE_VERTEXAI
+              value: "true"
+            - name: GOOGLE_CLOUD_PROJECT
+              value: __PROJECT__
+            - name: GOOGLE_CLOUD_LOCATION
+              value: global
+            - name: ARENA_URL
+              value: http://127.0.0.1:8080
+            - name: ARENA_SERVICE_TOKEN
+              valueFrom:
+                secretKeyRef: {name: arena-service-token, key: latest}
+          startupProbe:
+            tcpSocket: {port: 8001}
+            periodSeconds: 3
+            failureThreshold: 40
+  traffic:
+    - percent: 100
+      latestRevision: true

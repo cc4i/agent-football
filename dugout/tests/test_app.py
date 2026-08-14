@@ -1,5 +1,6 @@
 import json
 import socket
+from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 
@@ -42,16 +43,50 @@ def test_health_reports_every_service_the_dugout_needs(monkeypatch):
         "arena": True, "pitch": True, "coach": False, "captain": False}
 
 
-def test_the_arena_is_one_of_the_services_the_header_watches():
+def unreachable_arena(monkeypatch):
+    """Point the arena at the discard port, so only the ports are being read."""
+    monkeypatch.setattr(app_module.arena, "base_url", lambda: "http://127.0.0.1:9")
+
+
+def test_the_arena_is_asked_wherever_it_is_running(monkeypatch):
     # Every tool goes through it, so an arena that is down is the first thing
     # the manager should see and the last thing they should have to guess at.
-    assert app_module.GAME_SERVICES["arena"] == 8003
+    # It is asked over HTTP rather than probed on a port, because the deployed
+    # arena is a hostname and the dugout stays on this machine.
+    asked = {}
+
+    def answer(url, timeout):
+        asked["url"], asked["timeout"] = url, timeout
+        return SimpleNamespace(status_code=200)
+
+    monkeypatch.setattr(app_module, "GAME_SERVICES", {})
+    monkeypatch.setattr(app_module.arena, "base_url",
+                        lambda: "https://arena-abc.a.run.app")
+    monkeypatch.setattr(app_module.httpx, "get", answer)
+    assert app_module.game_services() == {"arena": True}
+    assert asked["url"] == "https://arena-abc.a.run.app/health"
+    # Not the 250ms the three ports get: a deployed arena is a round trip.
+    assert asked["timeout"] == app_module.ARENA_TIMEOUT_SECONDS
+
+
+def test_the_arena_is_down_when_it_answers_anything_but_200(monkeypatch):
+    monkeypatch.setattr(app_module, "GAME_SERVICES", {})
+    monkeypatch.setattr(app_module.httpx, "get",
+                        lambda url, timeout: SimpleNamespace(status_code=503))
+    assert app_module.game_services() == {"arena": False}
+
+
+def test_the_arena_is_down_when_it_does_not_answer_at_all(monkeypatch):
+    monkeypatch.setattr(app_module, "GAME_SERVICES", {})
+    unreachable_arena(monkeypatch)
+    assert app_module.game_services() == {"arena": False}
 
 
 def test_game_services_reports_false_for_a_closed_port(monkeypatch):
     # 9 is discard, reliably closed on a dev machine.
+    unreachable_arena(monkeypatch)
     monkeypatch.setattr(app_module, "GAME_SERVICES", {"nothing": 9})
-    assert app_module.game_services() == {"nothing": False}
+    assert app_module.game_services() == {"arena": False, "nothing": False}
 
 
 def test_game_services_finds_a_service_bound_only_to_ipv6(monkeypatch):
@@ -61,9 +96,10 @@ def test_game_services_finds_a_service_bound_only_to_ipv6(monkeypatch):
     server.bind(("::1", 0))
     server.listen(1)
     try:
+        unreachable_arena(monkeypatch)
         monkeypatch.setattr(
             app_module, "GAME_SERVICES", {"pitch": server.getsockname()[1]})
-        assert app_module.game_services() == {"pitch": True}
+        assert app_module.game_services() == {"arena": False, "pitch": True}
     finally:
         server.close()
 
