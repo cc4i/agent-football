@@ -37,6 +37,7 @@ import board
 import chain
 import codes
 import db
+import grounds as grounds_registry
 import identity
 import limits
 import philosophies
@@ -277,6 +278,9 @@ async def lifespan(fastapi_app: FastAPI):
     # what keeps a backgrounded tab's match alive. Per app for the same reason
     # as the counter above it.
     fastapi_app.state.held = _HeldRooms()
+    # Which grounds instances are connected and what each is running. Per app
+    # for the same reason: a socket belongs to the process that accepted it.
+    fastapi_app.state.grounds = grounds_registry.Grounds()
     # Install filter to redact client_id from access logs.
     access_logger = logging.getLogger("uvicorn.access")
     access_logger.addFilter(_RedactClientId())
@@ -1065,13 +1069,20 @@ def _require_profile_writer(request, connection, room_id, team):
 
 
 def _is_service_caller(request):
-    """Whether this came from a process holding the shared secret.
+    """Whether this came from a process holding the shared secret."""
+    return _service_token_ok(request.headers.get("x-arena-service", ""))
+
+
+def _service_token_ok(offered):
+    """Whether a header value is the shared secret between our own processes.
 
     Compared in constant time, and an empty configured token can never match,
     so forgetting to set one locks the agents out rather than letting everyone
     in.
+
+    Takes the header rather than the request because a WebSocket handshake has
+    headers and no request: the grounds authenticate here too.
     """
-    offered = request.headers.get("x-arena-service", "")
     # The two sides came in by different roads and each goes back the way it
     # came. Spelling both as UTF-8 would compare a token against a re-spelling
     # of itself: `café` set in the environment and sent correctly over the wire
@@ -1738,6 +1749,56 @@ async def _watch_for_the_missing(fastapi_app):
             # rooms opened, which on an instance nobody has visited yet is the
             # only thing holding the vacuum horizon down.
             db.finish(fastapi_app.state.conn)
+
+
+@app.websocket("/ws/grounds")
+async def grounds_socket(socket: WebSocket):
+    """One socket per grounds instance. Assignments down, capacity up.
+
+    Authenticated with the same X-Arena-Service the specialists carry: this is
+    a server talking to a server, and what comes down it is a room's physics
+    token, which is the one credential no browser may ever be handed.
+
+    No frames go this way. Each match reports on its own /ws/rooms/{code} like
+    a tab always did, which is what keeps `_handle_from_host` and `fake_host`
+    honest, and what means the arena needs no idea how many processes are
+    behind the football it is being told about.
+    """
+    if not _service_token_ok(socket.headers.get("x-arena-service", "")):
+        # Accepted before closing for the reason `wall_socket` gives: a refused
+        # upgrade has nowhere to put a close code, so the instance would see
+        # 1006 with no sentence and retry against a token that will never work.
+        await socket.accept()
+        await socket.close(code=4403, reason="the grounds must authenticate")
+        return
+
+    await socket.accept()
+    registry = socket.app.state.grounds
+    joined = False
+    try:
+        while True:
+            try:
+                message = await socket.receive_json()
+            except ValueError:
+                # Not JSON. A control plane is ours on both ends, so this is a
+                # bug rather than an attack, but it is not worth a disconnect.
+                continue
+            if not isinstance(message, dict):
+                continue
+            if message.get("type") == "grounds.here":
+                registry.joined(socket, message.get("capacity", 0))
+                joined = True
+                logger.info("grounds joined, capacity %s; %s connected",
+                            message.get("capacity"), registry.connected())
+    except WebSocketDisconnect:
+        pass
+    finally:
+        # Before anything that can raise, as with the room socket: an instance
+        # that has gone must stop being offered matches on the next kick-off.
+        if joined:
+            registry.left(socket)
+            logger.info("grounds left; %s connected, %s running",
+                        registry.connected(), registry.running())
 
 
 @app.websocket("/ws/wall")
