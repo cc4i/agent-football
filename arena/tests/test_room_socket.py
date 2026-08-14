@@ -346,6 +346,25 @@ def test_a_nul_in_an_event_kind_does_not_kill_the_socket(client, live_room):
     assert frame == {"type": "state", "clock": 11}
 
 
+def test_a_non_ascii_client_id_does_not_kill_the_socket(client, live_room):
+    # A third way into the same crash, one guard further down: the host token
+    # is compared with hmac.compare_digest, which raises on a non-ASCII string
+    # rather than saying no. Anyone can put one in the query string.
+    code, host_token = live_room()
+    with client.websocket_connect(f"/ws/rooms/{code}") as viewer:
+        viewer.receive_json()
+        with client.websocket_connect(f"/ws/rooms/{code}?client_id=%C3%A9") as impostor:
+            impostor.receive_json()
+            impostor.send_json({"type": "host.state", "payload": {"clock": 99}})
+        with client.websocket_connect(f"/ws/rooms/{code}?client_id={host_token}") as host:
+            host.receive_json()
+            host.send_json({"type": "host.state", "payload": {"clock": 13}})
+            frame = viewer.receive_json()
+    # The impostor's frame is refused like any other non-host's, and the socket
+    # it arrived on lives long enough to be told so.
+    assert frame == {"type": "state", "clock": 13}
+
+
 def test_a_lone_surrogate_in_host_state_does_not_kill_the_wall(client, live_room):
     # The wall is shared across tenants: a crash here takes down every live match.
     code, host_token = live_room()

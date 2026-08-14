@@ -145,6 +145,11 @@ async def lifespan(fastapi_app: FastAPI):
     # seat, so it is opened here rather than by a phone.
     if rooms.by_code(connection, codes.WORKSHOP) is None:
         rooms.create_room(connection, "solo", codes.WORKSHOP)
+    # On every boot but the first that check finds the room and nothing commits
+    # after it, so the instance would sit on an open transaction from startup
+    # until its first caller arrived - which on a fresh Cloud Run instance can
+    # be a while.
+    db.finish(connection)
     fastapi_app.state.conn = connection
     fastapi_app.state.bus = Bus()
     fastapi_app.state.chain = chain.Chain(fastapi_app.state.bus)
@@ -398,6 +403,7 @@ async def sit_down(code: str, team: str, body: SeatRequest, request: Request,
 async def set_ready(code: str, team: str, body: ReadyRequest, request: Request,
                     player_id: int = Depends(current_player)):
     connection, room = _profile_room(request, code)
+    _known_team(team)
     _require_own_seat(connection, room["id"], team, player_id)
     with _rules():
         rooms.set_ready(connection, room["id"], team, body.ready)
@@ -712,7 +718,12 @@ def _profile_room(request, code):
 
 
 def _known_team(team):
-    """Refuse a dugout name before it is used to look anything up."""
+    """Refuse a dugout name before it is used to look anything up.
+
+    Most unknown dugouts are harmless, because the lookup simply finds no row.
+    One is not: psycopg will not bind a NUL at all, so a team carrying one has
+    to be turned away here rather than by the query.
+    """
     if team not in rooms.TEAMS:
         raise HTTPException(404, f"there is no {team} dugout")
 
@@ -754,8 +765,21 @@ def _is_service_caller(request):
     in.
     """
     offered = request.headers.get("x-arena-service", "")
-    return bool(SERVICE_TOKEN and offered
-                and hmac.compare_digest(offered, SERVICE_TOKEN))
+    return bool(SERVICE_TOKEN and offered and _same_secret(offered, SERVICE_TOKEN))
+
+
+def _same_secret(offered, expected):
+    """Constant-time equality for two secrets that may hold anything at all.
+
+    `hmac.compare_digest` refuses a non-ASCII str outright rather than saying
+    no, and both of the secrets it is asked about here arrive from outside the
+    process: a caller's header and a socket's query string. A wrong token has
+    to be a wrong token and not a crash, so the comparison happens on the bytes
+    they travelled as, which every string has - lone surrogates included, since
+    an environment variable can carry those.
+    """
+    return hmac.compare_digest(offered.encode("utf-8", "surrogatepass"),
+                               expected.encode("utf-8", "surrogatepass"))
 
 
 def _player_or_401(request, connection):
@@ -819,15 +843,19 @@ async def room_socket(socket: WebSocket, code: str, client_id: str = ""):
         return
     room = rooms.by_code(connection, code)
     if room is None:
+        db.finish(connection)
         await socket.close(code=4404, reason=f"there is no room {code}")
         return
 
     await socket.accept()
-    await socket.send_json({"type": "room", **_snapshot(connection, room["id"])})
-    # The snapshot is a read, and a read opens a transaction like anything
-    # else. A viewer that never says a word would otherwise hold one open for
-    # as long as its tab is.
-    db.finish(connection)
+    try:
+        await socket.send_json({"type": "room", **_snapshot(connection, room["id"])})
+    finally:
+        # The snapshot is a read, and a read opens a transaction like anything
+        # else. A viewer that never says a word would otherwise hold one open
+        # for as long as its tab is, and one that closed its tab between the
+        # read and the send would hold it forever.
+        db.finish(connection)
 
     subscription = match_bus.subscribe(room_topic(code))
     pump = asyncio.create_task(_pump(socket, subscription))
@@ -882,7 +910,7 @@ def _handle_from_host(message, connection, match_bus, room, client_id, heard):
     # both the host token and the status are checked against it as it is now.
     current = rooms.by_code(connection, room["code"])
     host_client_id = current["host_client_id"]
-    if not client_id or not host_client_id or not hmac.compare_digest(client_id, host_client_id):
+    if not client_id or not host_client_id or not _same_secret(client_id, host_client_id):
         return
     # Holding the token is no longer proof the match has started, since the
     # creator has held it since they opened the room. Nothing reaches the log
@@ -1016,6 +1044,16 @@ async def _watch_for_the_missing(fastapi_app):
             # One bad sweep must not take the watchdog down for the life of the
             # process: every room after it would then hang live forever.
             logger.exception("the sweep for missing hosts failed")
+        finally:
+            # One sweep is one unit of work, and no middleware reaches this
+            # loop. Logging the failure above is not enough on its own: the
+            # statement that failed left the transaction in error, and every
+            # later statement in the process - the next sweep's, and the next
+            # caller's - fails with it until somebody rolls back. On the way
+            # through it also puts back the transaction that reading the live
+            # rooms opened, which on an instance nobody has visited yet is the
+            # only thing holding the vacuum horizon down.
+            db.finish(fastapi_app.state.conn)
 
 
 @app.websocket("/ws/wall")

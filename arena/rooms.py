@@ -9,6 +9,8 @@ import json
 import secrets
 import time
 
+import psycopg
+
 import codes
 import identity
 import profiles
@@ -34,20 +36,15 @@ def required_teams(mode):
 def create_player(conn, display_name, email, salt):
     """Insert or find a player, keyed on the hashed email. Returns the id."""
     email_hash = identity.hash_email(email, salt)
-    existing = conn.execute(
-        "SELECT id FROM player WHERE email_hash = %s", (email_hash,)
-    ).fetchone()
-    if existing:
-        # A repeat player keeps one row so the board keeps one entry for them,
-        # but they may well have typed a different name this time.
-        conn.execute("UPDATE player SET display_name = %s WHERE id = %s",
-                     (display_name, existing["id"]))
-        conn.commit()
-        return existing["id"]
-
+    # A repeat player keeps one row so the board keeps one entry for them, but
+    # they may well have typed a different name this time. One statement rather
+    # than a look and then a write: a rollout runs two instances at once, and a
+    # join arriving at both of them is an ordinary Saturday, not an edge case.
     row = conn.execute(
         "INSERT INTO player (display_name, email_hash, email_masked, created_at) "
-        "VALUES (%s, %s, %s, %s) RETURNING id",
+        "VALUES (%s, %s, %s, %s) "
+        "ON CONFLICT (email_hash) DO UPDATE SET display_name = EXCLUDED.display_name "
+        "RETURNING id",
         (display_name, email_hash, identity.mask_email(email), time.time()),
     ).fetchone()
     conn.commit()
@@ -107,11 +104,22 @@ def take_seat(conn, room_id, team, player_id, philosophy):
                     (room_id, player_id)).fetchone():
         raise RoomError("you already have a dugout in this match")
 
-    conn.execute(
-        "INSERT INTO seat (room_id, team, player_id, philosophy, ready, joined_at) "
-        "VALUES (%s, %s, %s, %s, 0, %s)",
-        (room_id, team, player_id, philosophy, time.time()),
-    )
+    try:
+        conn.execute(
+            "INSERT INTO seat (room_id, team, player_id, philosophy, ready, joined_at) "
+            "VALUES (%s, %s, %s, %s, 0, %s)",
+            (room_id, team, player_id, philosophy, time.time()),
+        )
+    except psycopg.errors.UniqueViolation as clash:
+        # The check above is the common path and words the refusal from the
+        # room's own state, but it is a read and this is a write, and in
+        # between the two another instance can seat somebody. One of two people
+        # reaching for the same dugout has to lose, so the loser gets the answer
+        # the rules already have rather than a 500. The rollback is what lets
+        # everybody else carry on: a statement the server refused leaves the
+        # transaction in error, and every later one fails until it is ended.
+        conn.rollback()
+        raise RoomError(f"the {team} dugout is taken") from clash
     conn.commit()
 
 

@@ -123,6 +123,20 @@ def test_the_wrong_shared_secret_is_no_better_than_none(client, phones, monkeypa
     assert response.status_code == 401
 
 
+def test_a_non_ascii_shared_secret_is_no_better_than_none(client, phones, monkeypatch):
+    # hmac.compare_digest raises on a non-ASCII string rather than saying no,
+    # and a header value is whatever the caller sent. Headers arrive latin-1
+    # decoded, which is why this one is offered as the bytes it travels as.
+    import app as arena_app
+    monkeypatch.setattr(arena_app, "SERVICE_TOKEN", "s3cret")
+    code = open_room(client, phones)
+    client.cookies.clear()
+    response = client.patch(f"/api/rooms/{code}/teams/red/profiles/defender",
+                            json={"changes": {"aggression": 0.2}},
+                            headers={"X-Arena-Service": "é".encode("latin-1")})
+    assert response.status_code == 401
+
+
 def test_an_unset_shared_secret_authenticates_nobody(client, phones, monkeypatch):
     # The dangerous failure is the other way round: an empty configured secret
     # matching an empty offered header and letting the whole internet in.

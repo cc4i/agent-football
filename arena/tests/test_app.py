@@ -49,6 +49,17 @@ def test_a_nul_in_an_address_is_refused_too(client):
                              "email": "alex@exa\x00mple.com"}).status_code == 422
 
 
+def test_a_nul_in_a_dugout_name_is_a_404_rather_than_a_500(client, phones):
+    # `/ready` hands the team straight to a lookup, unlike taking the seat,
+    # which checks it against the two that exist before binding anything. An
+    # unknown but clean team is a 403 there, so this has to be a refusal too
+    # rather than a DataError out of psycopg.
+    phones.join("Alex Rivera", "alex@example.com")
+    code = client.post("/api/rooms", json={"mode": "solo"}).json()["code"]
+    assert client.post(f"/api/rooms/{code}/seats/bl%00ue/ready",
+                       json={"ready": True}).status_code == 404
+
+
 def test_opening_a_room_returns_a_code_and_two_empty_dugouts(client):
     body = client.post("/api/rooms", json={"mode": "versus"}).json()
     assert body["status"] == "lobby"
