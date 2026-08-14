@@ -14,6 +14,7 @@
 
 import Phaser from 'phaser';
 import { Sound } from './audio';
+import { seededChance } from './chance';
 
 export const GAME_DURATION_SEC = 180;
 export const STATUS_CHECK_MS = 55000;
@@ -91,12 +92,21 @@ export const asset = (path) => `${import.meta.env.BASE_URL}${path.replace(/^\//,
 
 export class SoccerGameScene extends Phaser.Scene {
   /**
-   * @param {{role?: 'host'|'viewer'}} options - `viewer` renders the host's
-   *   frames and runs none of the AI or physics below it.
+   * @param {{role?: 'host'|'viewer', seed?: string}} options - `viewer`
+   *   renders the host's frames and runs none of the AI or physics below it.
+   *   `seed` makes the match reproducible; without one it plays as it always
+   *   has, off the global stream.
    */
   constructor(options = {}) {
     super({ key: 'SoccerGameScene' });
     this.role = options.role === 'viewer' ? 'viewer' : 'host';
+
+    // A match the arena can hand a seed to is a match two processes can be
+    // asked to play identically, which is the only way "the grounds play the
+    // same football a tab does" is ever more than a hope. The workshop lab
+    // passes nothing and keeps drawing from Math.random.
+    this.seed = options.seed || null;
+    this.rng = null;
     // The most recent frame off the room socket. main.js parks it here and
     // applyFrame drains it; a frame that arrives between two draws replaces
     // the one before it rather than queueing, because it is more recent.
@@ -171,7 +181,30 @@ export class SoccerGameScene extends Phaser.Scene {
     }
   }
 
+  /**
+   * Start this match's random stream, before anything has drawn from it.
+   *
+   * Called at the top of `create()` rather than in the constructor so that a
+   * scene restarted in place replays its seed from the beginning, the same way
+   * a fresh one would.
+   */
+  seedChance() {
+    this.rng = this.seed ? seededChance(this.seed) : null;
+  }
+
+  /**
+   * A float in [0, 1). Every decision the simulation leaves to luck.
+   *
+   * Seeded, this is the match's own stream and two runs agree. Unseeded, it is
+   * `Math.random()` and the workshop lab is exactly as it was.
+   */
+  chance() {
+    return this.rng ? this.rng() : Math.random();
+  }
+
   create() {
+    this.seedChance();
+
     const width = this.sys.game.config.width;
     const height = this.sys.game.config.height;
 
@@ -876,18 +909,18 @@ export class SoccerGameScene extends Phaser.Scene {
             if (isPressed) adjustedDribbleTend *= 0.35;
             if (isInOwnHalf) adjustedDribbleTend *= 0.45;
 
-            const preferDribble = Math.random() < adjustedDribbleTend;
+            const preferDribble = this.chance() < adjustedDribbleTend;
 
             // 1. Shoot check
             if (distToGoal < this.resolveDistance(profile.shotRange, 700, 500) && ((isBlue && p.x > 700) || (!isBlue && p.x < 700))) {
               if (distToGoal < 220 || !preferDribble) {
-                if (Math.random() > (profile.passProbability || 0.5)) {
+                if (this.chance() > (profile.passProbability || 0.5)) {
                   // Find opposing goalkeeper
                   const oppGk = isBlue ? this.gk2 : this.gk1;
                   // Aim at the corner furthest from the keeper
                   const shotY = oppGk.y < 380
-                    ? 460 + Math.random() * 25
-                    : 300 - Math.random() * 25;
+                    ? 460 + this.chance() * 25
+                    : 300 - this.chance() * 25;
 
                   p.setData('kickPending', true);
                   p.setData('kickChargeStart', time);
@@ -941,7 +974,7 @@ export class SoccerGameScene extends Phaser.Scene {
 
           // Support run frequency
           const supportFreq = profile.supportRunFrequency !== undefined ? profile.supportRunFrequency : 0.5;
-          if (Math.random() < supportFreq * 0.25) {
+          if (this.chance() < supportFreq * 0.25) {
             attackWeight = Math.min(1.0, attackWeight + 0.25);
           }
 
@@ -977,7 +1010,7 @@ export class SoccerGameScene extends Phaser.Scene {
         const pressDistance = 80 + pressing * 120;
 
         const isMidOrForward = role === 'midfielder' || role === 'forward';
-        const shouldChase = isClosestToBall || (isMidOrForward && opponentHasBall && distToBall < pressDistance && Math.random() < ((profile.aggression || 0.5) * 0.7 + pressing * 0.3));
+        const shouldChase = isClosestToBall || (isMidOrForward && opponentHasBall && distToBall < pressDistance && this.chance() < ((profile.aggression || 0.5) * 0.7 + pressing * 0.3));
 
         if (shouldChase && !this.throwInActive) {
           // Chase ball
@@ -1180,7 +1213,7 @@ export class SoccerGameScene extends Phaser.Scene {
           const profiles = teamNum === 1 ? this.blueProfiles : this.redProfiles;
           const profile = profiles ? (profiles[role] || {}) : {};
           const foulProb = profile.foulProbability !== undefined ? profile.foulProbability : 0.2;
-          if (Math.random() < foulProb * 0.15) {
+          if (this.chance() < foulProb * 0.15) {
             Sound.playWhistle();
             opp.setData('kickPending', false);
             opp.setVelocity(0, 0);
@@ -1342,7 +1375,7 @@ export class SoccerGameScene extends Phaser.Scene {
 
       const triggerDistance = isBlue ? 280 : 1128;
       const isClose = isBlue ? ballX < triggerDistance : ballX > triggerDistance;
-      if (isClose && Math.abs(ballY - gk.y) > 35 && !isDiving && Math.random() < (profile.diveChance || 0.1)) {
+      if (isClose && Math.abs(ballY - gk.y) > 35 && !isDiving && this.chance() < (profile.diveChance || 0.1)) {
         const isDivingUp = ballY < gk.y;
         const diveLeftAnim = isBlue ? 'gk_blue_dive_left' : 'gk_red_dive_left';
         const diveRightAnim = isBlue ? 'gk_blue_dive_right' : 'gk_red_dive_right';
@@ -1371,8 +1404,8 @@ export class SoccerGameScene extends Phaser.Scene {
       this.captureReadyAt = this.time.now + 300;
 
       const direction = gk.x < 700 ? 1 : -1;
-      ball.setVelocityX(direction * (240 + Math.random() * 160));
-      ball.setVelocityY((Math.random() * 2 - 1) * 150);
+      ball.setVelocityX(direction * (240 + this.chance() * 160));
+      ball.setVelocityY((this.chance() * 2 - 1) * 150);
       this.ballZ = 0;
       this.ballZVelocity = 0;
       this.lastTouchTeam = gk.x < 700 ? 1 : 2;
@@ -1412,18 +1445,18 @@ export class SoccerGameScene extends Phaser.Scene {
 
     // Check Touchline (Top/Bottom) boundaries
     if (by < TOUCH_TOP) {
-      const pushBack = 25 + Math.random() * 55; // 25 to 80 px
+      const pushBack = 25 + this.chance() * 55; // 25 to 80 px
       this.ball.y = TOUCH_TOP + pushBack;
       const baseVel = Math.max(150, Math.abs(this.ball.body.velocity.y) * bounceFactor);
-      this.ball.setVelocityY(baseVel + Math.random() * 80);
-      this.ball.setVelocityX(this.ball.body.velocity.x * 0.8 + (Math.random() * 100 - 50));
+      this.ball.setVelocityY(baseVel + this.chance() * 80);
+      this.ball.setVelocityX(this.ball.body.velocity.x * 0.8 + (this.chance() * 100 - 50));
       bounced = true;
     } else if (by > TOUCH_BOTTOM) {
-      const pushBack = 25 + Math.random() * 55;
+      const pushBack = 25 + this.chance() * 55;
       this.ball.y = TOUCH_BOTTOM - pushBack;
       const baseVel = Math.max(150, Math.abs(this.ball.body.velocity.y) * bounceFactor);
-      this.ball.setVelocityY(-(baseVel + Math.random() * 80));
-      this.ball.setVelocityX(this.ball.body.velocity.x * 0.8 + (Math.random() * 100 - 50));
+      this.ball.setVelocityY(-(baseVel + this.chance() * 80));
+      this.ball.setVelocityX(this.ball.body.velocity.x * 0.8 + (this.chance() * 100 - 50));
       bounced = true;
     }
 
@@ -1431,18 +1464,18 @@ export class SoccerGameScene extends Phaser.Scene {
     const insideGoalMouthY = (by > this.goalMouthTop && by < this.goalMouthBottom);
     if (!insideGoalMouthY) {
       if (bx < GOAL_LINE_L) {
-        const pushBack = 25 + Math.random() * 55;
+        const pushBack = 25 + this.chance() * 55;
         this.ball.x = GOAL_LINE_L + pushBack;
         const baseVel = Math.max(150, Math.abs(this.ball.body.velocity.x) * bounceFactor);
-        this.ball.setVelocityX(baseVel + Math.random() * 80);
-        this.ball.setVelocityY(this.ball.body.velocity.y * 0.8 + (Math.random() * 100 - 50));
+        this.ball.setVelocityX(baseVel + this.chance() * 80);
+        this.ball.setVelocityY(this.ball.body.velocity.y * 0.8 + (this.chance() * 100 - 50));
         bounced = true;
       } else if (bx > GOAL_LINE_R) {
-        const pushBack = 25 + Math.random() * 55;
+        const pushBack = 25 + this.chance() * 55;
         this.ball.x = GOAL_LINE_R - pushBack;
         const baseVel = Math.max(150, Math.abs(this.ball.body.velocity.x) * bounceFactor);
-        this.ball.setVelocityX(-(baseVel + Math.random() * 80));
-        this.ball.setVelocityY(this.ball.body.velocity.y * 0.8 + (Math.random() * 100 - 50));
+        this.ball.setVelocityX(-(baseVel + this.chance() * 80));
+        this.ball.setVelocityY(this.ball.body.velocity.y * 0.8 + (this.chance() * 100 - 50));
         bounced = true;
       }
     }
