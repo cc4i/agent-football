@@ -149,7 +149,8 @@ def test_you_cannot_mark_somebody_elses_dugout_ready(client, phones):
     assert response.status_code == 403
 
 
-def test_a_solo_match_starts_once_its_manager_is_ready(client, phones):
+def test_a_solo_match_starts_once_its_manager_is_ready(client, phones,
+                                                       grounds_connected):
     phones.join("Alex Rivera", "alex@example.com")
     code = client.post("/api/rooms", json={"mode": "solo"}).json()["code"]
     client.post(f"/api/rooms/{code}/seats/blue", json={"philosophy": "counter"})
@@ -212,7 +213,8 @@ def test_client_id_is_redacted_from_access_logs():
 
 
 def test_the_physics_token_does_not_leak_into_the_snapshot_or_broadcast(client, conn,
-                                                                        phones):
+                                                                        phones,
+                                                                        grounds_connected):
     phones.join("Alex Rivera", "alex@example.com")
     opened = client.post("/api/rooms", json={"mode": "solo"}).json()
     code = opened["code"]

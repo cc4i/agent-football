@@ -645,6 +645,9 @@ async def open_room(body: RoomRequest, request: Request):
     if not request.app.state.rooms_opened.take(limits.client_ip(request)):
         raise HTTPException(429, "slow down a moment and try that again")
     connection = request.app.state.conn
+    # The venue's real limit is how many pitches are connected, and kick-off is
+    # where that gets asked. This number is a ceiling nobody should reach: a
+    # backstop against a runaway opening rooms, not the capacity of the venue.
     if rooms.live_count(connection) >= MAX_LIVE_ROOMS:
         raise HTTPException(503, "the venue is full - wait for a match to finish")
     try:
@@ -896,14 +899,35 @@ def _say(fastapi_app, connection, room, team, text, actor, preset=None):
 async def start(code: str, request: Request, player_id: int = Depends(current_player)):
     """Kick off. Any manager in the match may call it; physics does not move.
 
-    Whoever opened the room has held the host token since they opened it, so
-    starting a match tells the room to go, rather than handing the caller
-    control of a pitch they may not even be rendering.
+    The room's physics token was minted when the room was opened, so starting a
+    match tells the arena to find somewhere to play it, rather than handing the
+    caller control of a pitch they are not running.
     """
     connection, room = _profile_room(request, code)
     _require_seated(connection, room["id"], player_id)
+
+    # Whether this room could start at all is settled first, so that a lobby
+    # with a dugout still empty hears about the dugout.
     with _rules():
-        rooms.start_match(connection, room["id"])
+        rooms.require_startable(connection, room["id"])
+
+    # Then somewhere to play, before anything is committed. A room that went
+    # live with nobody simulating it would sit at 0-0 with a clock that never
+    # started, until the sweep abandoned it thirty seconds later and told both
+    # managers their match stopped reporting - which is a lie about what went
+    # wrong. Better to refuse the kick-off and leave the lobby standing.
+    registry = request.app.state.grounds
+    if not registry.assign(code):
+        raise HTTPException(503, "no pitch is free to run this match; try again in a moment")
+
+    try:
+        with _rules():
+            rooms.start_match(connection, room["id"])
+    except Exception:
+        # The slot goes back on any failure, or a room that could not start
+        # takes a pitch out of the venue for the rest of the evening.
+        registry.release(code)
+        raise
 
     # Stances land before the room is announced live. A client that sees "live"
     # and then asks for profiles must never be able to read them mid-application.
@@ -913,6 +937,16 @@ async def start(code: str, request: Request, player_id: int = Depends(current_pl
                           reason=seat["philosophy"], actor="kick-off")
 
     snapshot = _announce(request.app, room, request)
+
+    farm = registry.socket_for(code)
+    if farm is not None:
+        # The physics token leaves the arena exactly here, to exactly one
+        # server, over a socket that authenticated as a service. The seed goes
+        # with it so the match is the same match wherever it is played.
+        await farm.send_json({"type": "host", "code": code,
+                              "token": room["host_client_id"],
+                              "seed": f"{code}-{room['id']}"})
+
     request.app.state.bus.publish(WALL, {"type": "wall", "rooms": rooms.live(connection)})
     return snapshot
 
@@ -1537,7 +1571,10 @@ def _handle_from_host(message, connection, match_bus, room, client_id, reporting
                               "match_ms": match_ms, "payload": payload})
 
     if event_kind in ("full_time", "abandoned"):
-        _end_match(connection, match_bus, room, event_kind, socket)
+        # The whistle came from whoever is running the match, so the pitch is
+        # theirs to give back and there is nothing to tell them.
+        _end_match(connection, match_bus, room, event_kind, socket,
+                   farm=socket.app.state.grounds if socket is not None else None)
 
 
 def _watch_the_clock(connection, room, payload):
@@ -1557,13 +1594,18 @@ def _watch_the_clock(connection, room, payload):
         rooms.unrank(connection, room["id"])
 
 
-def _end_match(connection, match_bus, room, event_kind, socket=None):
+def _end_match(connection, match_bus, room, event_kind, socket=None, farm=None):
     """Close the room the host says is over, and pay out if it was played out.
 
     The host is trusted for physics and not for scoring, and when a match ended
     is physics. Everything the points are computed from is already in the log;
     scoring only reads it back. An abandoned match is scored by nobody -- it has
     no full time, so there is no result to have earned.
+
+    `farm` is the grounds registry, and a match that is over gives its pitch
+    back to it. Returns the grounds socket that was running this room, so a
+    caller who ended the match behind the grounds' back can tell them. Nobody
+    tells a grounds about its own full time: it blew the whistle.
     """
     status = "finished" if event_kind == "full_time" else "abandoned"
     rooms.finish_match(connection, room["id"], status)
@@ -1572,10 +1614,12 @@ def _end_match(connection, match_bus, room, event_kind, socket=None):
     match_bus.publish(room_topic(room["code"]),
                       {"type": "room", **_snapshot(connection, room["id"], socket)})
     match_bus.publish(WALL, {"type": "wall", "rooms": rooms.live(connection)})
+    return farm.release(room["code"]) if farm is not None else None
 
 
-def _give_up_on_the_missing(connection, match_bus, now, held=None):
-    """Close rooms whose screen has stopped reporting. Returns their codes.
+def _give_up_on_the_missing(connection, match_bus, now, held=None, farm=None,
+                            drops=None):
+    """Close rooms whose host has stopped reporting. Returns their codes.
 
     A room only leaves "live" when somebody blows a whistle on it, and a laptop
     closed mid-match never does. Without this, one shut lid leaves a frozen
@@ -1604,6 +1648,13 @@ def _give_up_on_the_missing(connection, match_bus, now, held=None):
     judged. See `_HeldRooms` for why the connection is better proof than
     anything a backgrounded tab can be relied on to say, and for why a screen
     is only allowed to vouch for a room that has not kicked off.
+
+    `farm` is the grounds registry, and `drops` a list this appends
+    `(socket, code)` to for every match it abandoned that a grounds was
+    assigned. Collected rather than sent, because this stays synchronous: it
+    runs from a fixed clock in tests and from a watchdog in production, and
+    only the watchdog can await. A grounds still simulating a room the arena
+    has given up on has to be told, or it holds that slot all evening.
     """
     if held is not None:
         rooms.heard_from_all(connection, held.codes("screen"), now, statuses=("lobby",))
@@ -1634,8 +1685,10 @@ def _give_up_on_the_missing(connection, match_bus, now, held=None):
             match_bus.publish(room_topic(room["code"]),
                               {"type": "room", **_snapshot(connection, full["id"])})
         else:
-            _end_match(connection, match_bus, full, "abandoned")
-        logger.info("room %s abandoned: nothing from its screen in %ss (%s)",
+            orphaned = _end_match(connection, match_bus, full, "abandoned", farm=farm)
+            if orphaned is not None and drops is not None:
+                drops.append((orphaned, room["code"]))
+        logger.info("room %s abandoned: nothing from its host in %ss (%s)",
                     room["code"], HOST_GONE_SECONDS,
                     "waiting" if waiting else "live")
         gone.append(room["code"])
@@ -1728,9 +1781,19 @@ async def _watch_for_the_missing(fastapi_app):
     while True:
         await asyncio.sleep(SWEEP_SECONDS)
         try:
+            drops = []
             announced.update(_give_up_on_the_missing(
                 fastapi_app.state.conn, fastapi_app.state.bus, time.time(),
-                fastapi_app.state.held))
+                fastapi_app.state.held, fastapi_app.state.grounds, drops))
+            for socket, code in drops:
+                # Best effort. A grounds that has already gone is why we are
+                # here, and one that fails to hear this is not worth taking the
+                # sweep down over: it stops reporting and the next sweep is
+                # somebody else's problem.
+                try:
+                    await socket.send_json({"type": "drop", "code": code})
+                except Exception:
+                    logger.warning("could not tell the grounds to drop %s", code)
             _tell_our_own_rooms_it_is_over(fastapi_app.state.conn,
                                            fastapi_app.state.bus, announced)
             wall = _tell_our_own_wall_who_is_playing(

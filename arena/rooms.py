@@ -270,12 +270,23 @@ def can_kick_off(conn, room_id):
     return set(required_teams(room["mode"])) <= ready
 
 
-def start_match(conn, room_id):
-    """Go live. Physics already belongs to whoever opened the room."""
+def require_startable(conn, room_id):
+    """Everything about the room itself that has to hold before kick-off.
+
+    Split out from `start_match` so the arena can ask before it goes looking
+    for somewhere to play. A lobby with an empty dugout that was told "no pitch
+    is free" would be told the wrong thing, and would have taken a pitch out of
+    the venue to hear it.
+    """
     if not _room(conn, room_id)["host_client_id"]:
         raise RoomError("a match needs a host")
     if not can_kick_off(conn, room_id):
         raise RoomError("not every dugout is ready")
+
+
+def start_match(conn, room_id):
+    """Go live. Physics belongs to whichever grounds the arena assigned."""
+    require_startable(conn, room_id)
     conn.execute("UPDATE room SET status = 'live', started_at = %s WHERE id = %s",
                  (time.time(), room_id))
     conn.commit()

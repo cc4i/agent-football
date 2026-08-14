@@ -59,7 +59,8 @@ def test_the_wall_does_not_carry_events_only_frames(client, live_room):
     assert frame == {"type": "wall.state", "code": code, "score": [1, 0]}
 
 
-def test_two_live_rooms_both_reach_one_wall_connection(client, conn, phones):
+def test_two_live_rooms_both_reach_one_wall_connection(client, conn, phones,
+                                                       grounds_connected):
     def start(name, email):
         phones.join(name, email)
         opened = client.post("/api/rooms", json={"mode": "solo"}).json()

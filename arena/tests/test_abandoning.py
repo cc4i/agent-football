@@ -25,7 +25,7 @@ NOW = 10_000.0
 LATE = NOW + arena.HOST_GONE_SECONDS + 1
 
 
-def sweep(client, when, holding=None):
+def sweep(client, when, holding=None, drops=None):
     """Run one sweep, as at `when`, from inside the app's own event loop.
 
     The bus hands messages to sockets that are waiting on them, and waking one
@@ -35,11 +35,15 @@ def sweep(client, when, holding=None):
     `holding` is the app whose open host sockets vouch for their rooms, for the
     tests that have one connected. Left out, nothing is holding anything, which
     is what every test written before the socket counted assumes.
+
+    `drops` is where the sweep leaves the grounds it needs told, for the two
+    tests that care. The watchdog sends them; the sweep only collects, because
+    it is synchronous.
     """
     state = client.app.state
     held = holding.state.held if holding is not None else None
     return client.portal.call(arena._give_up_on_the_missing, state.conn, state.bus,
-                              when, held)
+                              when, held, state.grounds, drops)
 
 
 def heard_now(client, code):
@@ -237,6 +241,35 @@ def test_the_grounds_socket_keeps_the_match_it_is_running(client, live_room):
         grounds.receive_json()
         assert sweep(client, LATE, client.app) == []
         assert rooms.by_code(client.app.state.conn, code)["status"] == "live"
+
+
+# Giving up on a match is a decision two processes have to hear about. The
+# phones are told over the bus, as they always were. The grounds are told over
+# the control socket, because the arena is not the thing that stopped: a wedged
+# instance still stepping physics for a room nobody believes in any more would
+# hold that slot for the rest of the evening.
+
+
+def test_the_grounds_is_told_to_drop_a_match_the_arena_gave_up_on(
+        client, live_room, grounds_connected):
+    code, _ = live_room()
+    heard_now(client, code)
+    drops = []
+
+    assert sweep(client, LATE, drops=drops) == [code]
+
+    assert drops == [(grounds_connected, code)]
+    assert client.app.state.grounds.running() == 0
+
+
+def test_a_lobby_that_never_kicked_off_has_no_grounds_to_tell(client, conn, phones,
+                                                              grounds_connected):
+    code, _ = open_lobby(client, conn, phones)
+    heard_now(client, code)
+    drops = []
+
+    assert sweep(client, LATE, drops=drops) == [code]
+    assert drops == []
 
 
 def test_a_watcher_sitting_on_the_socket_holds_nothing(client, conn, phones):

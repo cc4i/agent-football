@@ -18,6 +18,7 @@ import chain
 import coach
 import rooms
 from bus import Bus, room_topic
+from tests.standins import connect_grounds
 
 ROOM = {"id": 1, "code": "ABCD"}
 
@@ -301,7 +302,13 @@ SERVICE = "test-service-token"
 
 
 async def seated(arena, mode="solo"):
-    """Open a room, sit Alex in the blue dugout and kick off. Returns the code."""
+    """Open a room, sit Alex in the blue dugout and kick off. Returns the code.
+
+    A pitch first, because kicking off acquires one now. Nothing below reads
+    the assignment - these tests are about what the dugout says, not about who
+    is simulating - so the stand-in is enough.
+    """
+    connect_grounds(arena.app)
     await arena.post("/api/players",
                      json={"display_name": "Alex Rivera", "email": "alex@example.com"})
     code = (await arena.post("/api/rooms", json={"mode": mode})).json()["code"]

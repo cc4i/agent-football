@@ -14,6 +14,9 @@ from fastapi.testclient import TestClient
 from psycopg import conninfo, sql
 
 import db
+from tests.standins import connect_grounds
+
+SERVICE_TOKEN = "test-service-token"
 
 
 @pytest.fixture(scope="session")
@@ -163,6 +166,30 @@ def phones(client):
     return Phones()
 
 
+@pytest.fixture
+def service_headers(monkeypatch):
+    """The shared secret between our own processes, and the header carrying it.
+
+    Pinned here rather than read from the environment so a suite run cannot
+    depend on whose `.env` is on the machine.
+    """
+    import app as arena_app
+
+    monkeypatch.setattr(arena_app, "SERVICE_TOKEN", SERVICE_TOKEN)
+    return {"X-Arena-Service": SERVICE_TOKEN}
+
+
+@pytest.fixture
+def grounds_connected(client):
+    """A pitch available to run matches, for every test that kicks one off.
+
+    Kick-off acquires somewhere to play now, so a test that starts a match
+    without this gets the honest 503 rather than a live room. See
+    `tests.standins` for why this is not a real control socket.
+    """
+    return connect_grounds(client.app)
+
+
 def physics_token(conn, code):
     """The token the grounds would be handed for this room.
 
@@ -177,7 +204,7 @@ def physics_token(conn, code):
 
 
 @pytest.fixture
-def live_room(client, conn, phones):
+def live_room(client, conn, phones, grounds_connected):
     """Open a room, seat Alex, and kick off. Returns (code, physics token)."""
 
     def _live_room(mode="solo"):

@@ -91,7 +91,8 @@ def test_a_client_that_is_not_the_host_cannot_move_the_ball(client, live_room):
     assert frame == {"type": "state", "clock": 12}
 
 
-def test_a_guessed_client_id_cannot_drive_the_match(client, conn, phones):
+def test_a_guessed_client_id_cannot_drive_the_match(client, conn, phones,
+                                                    grounds_connected):
     phones.join("Alex Rivera", "alex@example.com")
     opened = client.post("/api/rooms", json={"mode": "solo"}).json()
     code = opened["code"]

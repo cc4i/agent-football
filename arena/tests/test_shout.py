@@ -139,7 +139,7 @@ def test_a_shout_at_a_room_that_does_not_exist_is_a_404(client, phones):
                        json={"preset": "press high"}).status_code == 404
 
 
-def test_each_dugout_shouts_at_its_own_squad(client, phones):
+def test_each_dugout_shouts_at_its_own_squad(client, phones, grounds_connected):
     alex = phones.join("Alex Rivera", "alex@example.com")
     code = client.post("/api/rooms", json={"mode": "versus"}).json()["code"]
     client.post(f"/api/rooms/{code}/seats/blue", json={"philosophy": "high press"})

@@ -15,7 +15,8 @@ def test_the_join_form_can_read_the_four_stances(client):
     assert all(stance["blurb"] for stance in body["philosophies"])
 
 
-def test_kick_off_applies_the_stance_the_manager_picked(client, phones):
+def test_kick_off_applies_the_stance_the_manager_picked(client, phones,
+                                                        grounds_connected):
     phones.join("Alex Rivera", "alex@example.com")
     code = client.post("/api/rooms", json={"mode": "solo"}).json()["code"]
     seat(client, code, "blue", "low block")
@@ -26,7 +27,7 @@ def test_kick_off_applies_the_stance_the_manager_picked(client, phones):
         assert stored["attributes"][key] == value
 
 
-def test_each_dugout_gets_its_own_stance(client, phones):
+def test_each_dugout_gets_its_own_stance(client, phones, grounds_connected):
     alex = phones.join("Alex Rivera", "alex@example.com")
     code = client.post("/api/rooms", json={"mode": "versus"}).json()["code"]
     seat(client, code, "blue", "low block")
@@ -41,7 +42,8 @@ def test_each_dugout_gets_its_own_stance(client, phones):
     assert red["pressingIntensity"] == philosophies.changes_for("high press")["pressingIntensity"]
 
 
-def test_the_moves_are_in_the_log_so_scoring_can_see_them(client, phones, conn):
+def test_the_moves_are_in_the_log_so_scoring_can_see_them(client, phones, conn,
+                                                          grounds_connected):
     phones.join("Alex Rivera", "alex@example.com")
     code = client.post("/api/rooms", json={"mode": "solo"}).json()["code"]
     seat(client, code, "blue", "counter")
@@ -56,7 +58,8 @@ def test_the_moves_are_in_the_log_so_scoring_can_see_them(client, phones, conn):
     assert all(event["payload"]["reason"] == "counter" for event in kicked)
 
 
-def test_the_pitch_hears_the_stance_land_before_it_needs_it(client, phones):
+def test_the_pitch_hears_the_stance_land_before_it_needs_it(client, phones,
+                                                            grounds_connected):
     phones.join("Alex Rivera", "alex@example.com")
     code = client.post("/api/rooms", json={"mode": "solo"}).json()["code"]
     seat(client, code, "blue", "counter")
