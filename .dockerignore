@@ -9,7 +9,7 @@
 # A stale local pitch build would be copied in and then overwritten by the build
 # stage, which works until the day it does not.
 **/dist
-# The arena's suite has no business in an image that faces the internet.
+# The suites have no business in an image that faces the internet.
 **/tests
 **/__pycache__
 **/.pytest_cache

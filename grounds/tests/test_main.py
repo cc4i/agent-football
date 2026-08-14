@@ -19,6 +19,7 @@ and expects an arena is the end-to-end run in the plan, not a unit test. What is
 here is what the socket hands the supervisor, and what the platform reads.
 """
 
+import json
 import types
 
 import main
@@ -45,16 +46,21 @@ def test_a_message_comes_through_whole():
 def _asked(state):
     request = types.SimpleNamespace(app=types.SimpleNamespace(
         state=types.SimpleNamespace(grounds=state)))
-    return main.healthz(request)
+    answer = main.healthz(request)
+    return answer.status_code, json.loads(answer.body)
 
 
 def test_an_instance_with_no_page_is_not_ok():
-    """Cloud Run replaces this one. An instance whose browser has gone cannot
-    play football, and the only way to say so is to stop passing."""
-    assert _asked({"open": False, "running": 0, "capacity": 12}) == {
-        "ok": False, "running": 0, "capacity": 12}
+    """Cloud Run replaces this one, and it replaces it on the status code alone.
+
+    A liveness probe reads the code and never the body, so an instance whose
+    browser has gone answering `200 {"ok": false}` would keep passing its health
+    check forever while playing nothing. Saying no has to be the status.
+    """
+    assert _asked({"open": False, "running": 0, "capacity": 12}) == (
+        503, {"ok": False, "running": 0, "capacity": 12})
 
 
 def test_an_instance_that_is_playing_says_how_much():
-    assert _asked({"open": True, "running": 3, "capacity": 12}) == {
-        "ok": True, "running": 3, "capacity": 12}
+    assert _asked({"open": True, "running": 3, "capacity": 12}) == (
+        200, {"ok": True, "running": 3, "capacity": 12})

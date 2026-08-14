@@ -88,7 +88,14 @@ capacity before it moves to the next.
 {"ok": true, "running": 3, "capacity": 12}
 ```
 
-`ok` is whether there is a page to play in. An instance whose browser has gone
-answers `false` and closes its control socket, so the arena stops offering it
-matches and the platform replaces it. CPU throttling has to be off: between
-health checks, a throttled instance would simply stop playing football.
+`ok` is whether there is a page to play in, and it is the status code as much
+as the body: 200 with a page, 503 without one. A probe reads the code and never
+opens the body, so an instance whose browser has gone has to fail its health
+check rather than describe its own failure in JSON nobody parses. It also
+closes its control socket, so the arena stops offering it matches while the
+platform gets on with replacing it.
+
+The same 503 is the answer for the second or two before Chromium is up and the
+arena has served the bundle, which is what a startup probe should wait through.
+CPU throttling has to be off: between health checks, a throttled instance would
+simply stop playing football.

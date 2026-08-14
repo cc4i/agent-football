@@ -1,7 +1,7 @@
-"""The contract the three images share, read as text so no runtime is needed.
+"""The contract the four images share, read as text so no runtime is needed.
 
-Three Dockerfiles agree on a set of ports and two directory paths, and Task 14's
-service yaml repeats every one of them. Nothing else would notice them drifting
+Four Dockerfiles agree on a set of ports and two directory paths, and the
+service yamls repeat every one of them. Nothing else would notice them drifting
 apart, and the drift that matters is the shared player_state path: get it wrong
 in one image and the coach writes a substitution the arena answers with a 404
 that the browser's poll swallows.
@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[2]
 ARENA = (ROOT / "arena" / "Dockerfile").read_text()
 COACH = (ROOT / "game" / "Dockerfile.coach").read_text()
 CAPTAIN = (ROOT / "game" / "Dockerfile.captain").read_text()
+GROUNDS = (ROOT / "grounds" / "Dockerfile").read_text()
 DOCKERIGNORE = (ROOT / ".dockerignore").read_text()
 ENV_EXAMPLE = (ROOT / "arena" / ".env.example").read_text()
 # The two callers. An image's port is only right if it is the one being dialled,
@@ -23,6 +24,10 @@ AGENT_PY = (ROOT / "game" / "agents" / "agent.py").read_text()
 # The captain's server, which is the one place a bind and an advertised address
 # are two different things rather than one.
 CAPTAIN_PY = (ROOT / "game" / "agents" / "captain_server.py").read_text()
+# The grounds serve their own port rather than being handed one on a command
+# line, and they ship a browser, so both numbers live in the service itself.
+GROUNDS_PY = (ROOT / "grounds" / "main.py").read_text()
+GROUNDS_PROJECT = (ROOT / "grounds" / "pyproject.toml").read_text()
 
 # What a container reaches its own instance on, written out rather than left to
 # `localhost`, which is two addresses wherever IPv6 is up.
@@ -59,6 +64,14 @@ def bound(dockerfile):
     found = re.search(r'"--host",\s*"([^"]+)"|--host (\S+)', dockerfile)
     assert found, "the image's CMD names no bind address"
     return found.group(1) or found.group(2)
+
+
+def defaulted(source, name):
+    """What a module falls back to for `name` when the environment says nothing."""
+    found = re.search(rf'^{name}\s*=\s*(?:int\()?os\.environ\.get\("{name}",\s*"([^"]+)"',
+                      source, re.MULTILINE)
+    assert found, f"{name} no longer defaults to anything"
+    return found.group(1)
 
 
 def dialled(source, name):
@@ -147,6 +160,53 @@ def test_the_captain_advertises_the_loopback_rather_than_the_bind():
     assert 'os.environ.get("CAPTAIN_HOST"' in CAPTAIN_PY
     assert 'os.environ.get("CAPTAIN_BIND"' in CAPTAIN_PY
     assert env(CAPTAIN, "CAPTAIN_HOST") == LOOPBACK
+
+
+def test_the_grounds_serve_the_port_they_declare():
+    # Unlike the other three, this server is handed no port on a command line -
+    # it reads PORT itself - so the image's job is only to agree with it about
+    # what that is when nobody sets one.
+    assert env(GROUNDS, "PORT") == defaulted(GROUNDS_PY, "PORT")
+    assert exposed(GROUNDS) == env(GROUNDS, "PORT")
+
+
+def test_the_grounds_browser_is_the_build_their_own_playwright_downloads():
+    """A Playwright client and a browser build are one version, not two.
+
+    Which is what makes the download a step in this image rather than a base
+    image naming a version of its own. Two pins is the bug: a client one
+    release ahead of the browsers sitting beside it refuses to launch with
+    `Executable doesn't exist`, the base image is fine, the pip pin is fine,
+    and no match ever starts.
+
+    So the order is the test. The lockfile is synced, PATH is put in front of
+    the venv it made, and only then is `playwright install` the pinned one.
+    """
+    assert re.search(r'"playwright==\S+?"', GROUNDS_PROJECT), \
+        "the grounds no longer pin playwright, so there is no version to agree with"
+    steps = [GROUNDS.index(step) for step in ("uv sync --frozen",
+                                              'PATH="/app/.venv/bin:$PATH"',
+                                              "PLAYWRIGHT_BROWSERS_PATH=",
+                                              "playwright install --with-deps chromium")]
+    assert steps == sorted(steps), "the grounds download a browser for some other playwright"
+
+
+def test_the_grounds_bring_the_libraries_their_browser_loads():
+    # `--with-deps` is the apt half of the line above, and dropping it builds
+    # cleanly: Chromium on a slim base is a binary with nothing to link
+    # against, and it fails at launch in Cloud Run rather than here.
+    assert "--with-deps" in GROUNDS
+    # And the browser goes somewhere that does not depend on who runs the
+    # image. The default is under $HOME, so root's cache is not a path a
+    # non-root runtime would look in.
+    assert env(GROUNDS, "PLAYWRIGHT_BROWSERS_PATH").startswith("/")
+
+
+def test_the_grounds_bind_wide_because_cloud_run_requires_it_of_the_ingress():
+    # Same contract as the arena's, and the same failed revision behind it. The
+    # grounds are an ingress container too: nothing dials them but the probe,
+    # and the probe does not dial from inside the instance's namespace.
+    assert f'host="{WIDE}"' in GROUNDS_PY
 
 
 def test_the_arena_binds_wide_because_cloud_run_requires_it_of_the_ingress():

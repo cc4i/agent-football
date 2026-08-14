@@ -1,0 +1,118 @@
+# The grounds: one Chromium playing whatever the arena assigns it.
+#
+# Its own service rather than a fourth container beside the arena, for two
+# reasons that both matter. A browser holding a venue's football is the thing
+# most likely to need replacing on its own, and a container in the arena's
+# instance cannot be: the whole instance goes. And the arena's three containers
+# already ask for 8 vCPU, which is the ceiling for one Cloud Run instance, so
+# there is no CPU left there to play in.
+#
+# The placeholders are rendered by deploy/deploy.sh, the same way service.yaml's
+# are. __ARENA_URL__ is not a name you set: deploy.sh reads it off the arena it
+# replaced a step earlier, which is why the grounds are deployed second.
+#
+#   deploy/deploy.sh          # renders this and replaces the service
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: grounds
+  annotations:
+    run.googleapis.com/launch-stage: GA
+spec:
+  template:
+    metadata:
+      annotations:
+        # One instance, for the same reason as the arena's and a different
+        # mechanism. The arena hands a match to a socket; a second instance
+        # behind this revision is a second socket offering the same pitches, and
+        # nothing downstream would tell the two apart. Scaling this out is a
+        # real thing to want at fifty matches and it is not a number to raise
+        # here: it needs the arena to spread rooms across grounds by capacity,
+        # which it does, and it needs each instance addressable, which
+        # `maxScale: "1"` per revision is standing in for today.
+        autoscaling.knative.dev/minScale: "1"
+        autoscaling.knative.dev/maxScale: "1"
+        # Load-bearing in a way it is not even for the arena. The only requests
+        # this service takes are its own health checks, and everything it does
+        # happens between them: throttled, it would stop playing football the
+        # moment nobody asked it whether it was alive.
+        run.googleapis.com/cpu-throttling: "false"
+        run.googleapis.com/startup-cpu-boost: "true"
+        # Chromium. The first-generation sandbox is a gVisor syscall surface a
+        # browser does not fit through, and what that looks like is a launch
+        # that hangs rather than an error naming the environment. gen2 is also
+        # what makes --disable-dev-shm-usage's alternative available, though
+        # the flag is set anyway.
+        run.googleapis.com/execution-environment: gen2
+      # No VPC interface. The database is the arena's business and this service
+      # has none of its own; the arena is reached over the internet by the same
+      # public URL a phone uses, carrying the service token in a header.
+    spec:
+      # Nothing but health checks arrive here, so the default would do. Written
+      # down because the number that matters is on the other side: this service
+      # opens one outbound socket per match to the arena, and it is the arena's
+      # containerConcurrency that has to clear a full venue.
+      containerConcurrency: 10
+      # Its own account, holding one secret and nothing else. The arena's would
+      # have worked and it also carries roles/aiplatform.user, which is a
+      # Vertex token mintable from the metadata server by anything running in
+      # this instance - and what runs in this instance is a web browser. See
+      # deploy/README.md for the two role bindings.
+      serviceAccountName: futsal-grounds@__PROJECT__.iam.gserviceaccount.com
+
+      containers:
+        - name: grounds
+          image: __REGION__-docker.pkg.dev/__PROJECT__/futsal/grounds:__TAG__
+          ports:
+            - name: http1
+              containerPort: 8004
+          # The football is one thread - one page, one renderer - so this is not
+          # four times one match's worth of anything. It is that thread never
+          # queueing behind Chromium's own processes, the Python holding the
+          # control socket, and a garbage collection that would otherwise be a
+          # dropped frame in every match at once. GROUNDS_CAPACITY below is
+          # measured against this size and means nothing away from it.
+          resources:
+            limits:
+              cpu: "4"
+              memory: 4Gi
+          env:
+            # Rendered from the arena this deploy just replaced. A grounds
+            # pointed at the wrong arena connects, offers its pitches and plays
+            # nothing: the arena being kicked off in has no grounds, so every
+            # kick-off there answers 503.
+            - name: ARENA_URL
+              value: __ARENA_URL__
+            # How many matches this instance offers to run. A promise about CPU:
+            # past it the arena refuses kick-off rather than letting every match
+            # in the venue slow down together.
+            - name: GROUNDS_CAPACITY
+              value: "12"
+            # The one credential this service has, and the same secret the arena
+            # reads. A different one is a control socket closed with 4403 and an
+            # instance retrying forever against a token that will never work.
+            - name: ARENA_SERVICE_TOKEN
+              valueFrom:
+                secretKeyRef: {name: arena-service-token, key: latest}
+          # Both probes ask the one route there is. It answers 503 until there
+          # is a page to play in, which is what makes the startup probe wait for
+          # Chromium and the arena's bundle rather than for a socket to accept.
+          #
+          # 40 x 3s. A browser launch is seconds; the budget is for the arena,
+          # whose own revision went ready a step ago and whose first request
+          # here is a cold one.
+          startupProbe:
+            httpGet: {path: /healthz, port: 8004}
+            periodSeconds: 3
+            failureThreshold: 40
+          # The half that matters after the deploy. A page that has crashed took
+          # its matches with it either way, and nothing else would notice: the
+          # instance stays up, keeps being offered matches, and refuses every
+          # one of them for the rest of the evening. This is what makes it a
+          # fresh instance instead.
+          livenessProbe:
+            httpGet: {path: /healthz, port: 8004}
+            periodSeconds: 30
+  traffic:
+    - percent: 100
+      latestRevision: true

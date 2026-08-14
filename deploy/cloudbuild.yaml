@@ -1,4 +1,4 @@
-# The three images, built where they will run.
+# The four images, built where they will run.
 #
 # Not built on the laptop. This is an Apple Silicon Mac and Cloud Run is amd64,
 # so a local build is either the wrong architecture or an emulated one, and an
@@ -8,9 +8,9 @@
 #
 # Invoked by deploy/deploy.sh, which passes the repository and the tag.
 
-# The three run at once - `waitFor: ['-']` is the whole of it - because nothing
-# here depends on anything else here. The pitch's `npm ci` makes the arena the
-# long pole, so the other two are free.
+# The four run at once - `waitFor: ['-']` is the whole of it - because nothing
+# here depends on anything else here. The pitch's `npm ci` and the grounds'
+# Chromium download are the two long poles, and they are long in parallel.
 steps:
   - id: arena
     name: gcr.io/cloud-builders/docker
@@ -27,19 +27,25 @@ steps:
     waitFor: ['-']
     args: ['build', '-f', 'game/Dockerfile.captain', '-t', '${_REPO}/captain:${_TAG}', '.']
 
+  - id: grounds
+    name: gcr.io/cloud-builders/docker
+    waitFor: ['-']
+    args: ['build', '-f', 'grounds/Dockerfile', '-t', '${_REPO}/grounds:${_TAG}', '.']
+
 # Pushed by Cloud Build on success, so a build that fails halfway leaves no
 # half-tagged repository behind for the deploy to pick up.
 images:
   - '${_REPO}/arena:${_TAG}'
   - '${_REPO}/coach:${_TAG}'
   - '${_REPO}/captain:${_TAG}'
+  - '${_REPO}/grounds:${_TAG}'
 
-# The default is 600s and three images with an `npm ci` in one of them will
-# exceed it, at which point the build is cancelled rather than failed and the
-# log says nothing about why.
+# The default is 600s and four images with an `npm ci` in one and a browser
+# download in another will exceed it, at which point the build is cancelled
+# rather than failed and the log says nothing about why.
 timeout: 1800s
 
 options:
   # The default pool is one vCPU, which leaves the pitch build as the long pole
-  # by a wide margin. Eight makes the three concurrent steps actually concurrent.
+  # by a wide margin. Eight makes the four concurrent steps actually concurrent.
   machineType: E2_HIGHCPU_8

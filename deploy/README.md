@@ -1,13 +1,16 @@
 # Deploying the arena
 
-One Cloud Run service, `arena`, with three containers in it: the arena on the
+Two Cloud Run services. `arena` has three containers in it: the arena on the
 port, and the coach and the captain beside it on the loopback interface the
-three share. One Cloud SQL instance behind it. The dugout is not here and never
-will be - it embeds the Antigravity CLI and runs shell commands unrestricted,
-so it stays on the presenter's laptop.
+three share. `grounds` has one, a browser, and takes no traffic at all - the
+arena hands it matches over a socket the grounds opened, and the matches are
+played there rather than in whatever tab happens to be showing them. One Cloud
+SQL instance behind the pair. The dugout is not here and never will be - it
+embeds the Antigravity CLI and runs shell commands unrestricted, so it stays on
+the presenter's laptop.
 
-`service.yaml` is the whole topology. Everything below either creates something
-it refers to or renders and applies it.
+`service.yaml` and `grounds.yaml` are the whole topology. Everything below
+either creates something they refer to or renders and applies them.
 
 ## Read this first
 
@@ -72,19 +75,20 @@ Both of these drop every live match, exactly as a deploy does.
 
 `minScale: "1"` with `cpu-throttling: false` bills for the whole lifetime of
 the service rather than per request: 4 vCPU and 8 GiB of the arena's container,
-plus the coach's and the captain's 2 and 4 each, charged continuously whether
-anybody is playing or not. The Cloud SQL instance never stops either. This is
-not a scale-to-zero service and cannot be made into one without giving up the
-single instance the correctness rests on.
+plus the coach's and the captain's 2 and 4 each, plus the grounds' own 4 and 4,
+charged continuously whether anybody is playing or not. The Cloud SQL instance
+never stops either. Neither service scales to zero and neither can be made to
+without giving up the single instance the correctness rests on.
 
 Left alone it multiplies. Every superseded revision holding its pinned instance
 bills at the same rate as the live one, so an afternoon of deploys costs an
 afternoon of arenas; the stand-down step is worth as much here as it is above.
 
-Delete the service and stop the SQL instance between workshops:
+Delete both services and stop the SQL instance between workshops:
 
 ```bash
 gcloud run services delete arena --region="$REGION"
+gcloud run services delete grounds --region="$REGION"
 gcloud sql instances patch arena-pg --activation-policy=NEVER
 ```
 
@@ -245,7 +249,7 @@ never moved.
 `arena-email-salt` cannot be rotated afterwards without turning every returning
 player into a stranger. Set it once.
 
-### The service account
+### The two service accounts
 
 ```bash
 gcloud iam service-accounts create futsal-arena --display-name="The futsal arena"
@@ -256,6 +260,15 @@ for role in roles/secretmanager.secretAccessor \
             roles/logging.logWriter; do
     gcloud projects add-iam-policy-binding "$PROJECT" \
         --member="serviceAccount:${SA}" --role="$role" --condition=None
+done
+
+gcloud iam service-accounts create futsal-grounds --display-name="The futsal grounds"
+
+GROUNDS_SA="futsal-grounds@${PROJECT}.iam.gserviceaccount.com"
+for role in roles/secretmanager.secretAccessor \
+            roles/logging.logWriter; do
+    gcloud projects add-iam-policy-binding "$PROJECT" \
+        --member="serviceAccount:${GROUNDS_SA}" --role="$role" --condition=None
 done
 ```
 
@@ -271,12 +284,18 @@ the flag mandatory: without it gcloud will not guess that you meant an
 unconditional binding, and it prompts for the condition instead. Under
 `deploy.sh` or any other script that is a hang rather than a prompt.
 
-Three roles, one per thing the instance touches: the secrets it starts with,
-Vertex for the chain, and its own logs. The database is not one of them.
-`roles/cloudsql.client` is the Auth Proxy's permission - it authorises the
+Three roles for the arena, one per thing the instance touches: the secrets it
+starts with, Vertex for the chain, and its own logs. The database is not one of
+them. `roles/cloudsql.client` is the Auth Proxy's permission - it authorises the
 connector to open the tunnel - and a TCP connection to a private address with a
 password in `PGPASSWORD` never asks the Cloud SQL API anything. Add it back the
 day the socket comes back, and not before.
+
+Two for the grounds, and the missing one is the point. `roles/aiplatform.user`
+is a Vertex token that anything inside the instance can mint from the metadata
+server, and what runs inside that instance is a web browser pointed at a page.
+The arena's account would have worked and would have carried that with it; this
+one holds the service token it needs to connect and nothing else.
 
 The interface into the VPC is the Cloud Run service agent's business rather
 than this account's, and in a single project it already holds the role for it.
@@ -293,9 +312,17 @@ deploy/deploy.sh
 ```
 
 It warns if the tree is dirty, asks before dropping the live matches, builds
-the three images in Cloud Build, reads the database's private address, renders
+the four images in Cloud Build, reads the database's private address, renders
 `service.yaml` with your project, region, network, subnet, that address and the
-short commit as the tag, replaces the service, and prints the URL.
+short commit as the tag, and replaces the arena. Then it reads the arena's own
+URL back off Cloud Run, renders `grounds.yaml` with it, replaces the grounds,
+stands down what both replaced, and prints the URL.
+
+The order is the point. A grounds needs the address of the arena it plays for,
+that address is assigned when the service is first made, and reading it after
+the replace is what keeps it out of the yaml. Pointed at the wrong arena a
+grounds connects, offers its pitches and plays nothing, while the arena people
+are actually using has no grounds and answers every kick-off with a 503.
 
 It stops before the deploy if the address it read is a public one, because a
 public address is the one thing that renders cleanly here and then cannot be
@@ -314,6 +341,18 @@ gcloud run services add-iam-policy-binding arena \
 
 Without it a scanned QR code lands on a 403 and nothing on the phone explains
 why.
+
+The grounds gets no such binding and must not. Nothing dials it: it holds one
+outbound socket to the arena and serves one health check, which Cloud Run's own
+probes reach without going through IAM at all. To read that health check
+yourself, send a token rather than opening the service:
+
+```bash
+GROUNDS="$(gcloud run services describe grounds --region="$REGION" \
+    --format='value(status.url)')"
+curl -s -H "Authorization: Bearer $(gcloud auth print-identity-token)" \
+    "${GROUNDS}/healthz"          # {"ok":true,"running":3,"capacity":12}
+```
 
 ### The last two steps of a first deploy
 
@@ -458,11 +497,14 @@ podman machine start
 podman build --platform linux/amd64 -f arena/Dockerfile          -t arena:local   .
 podman build --platform linux/amd64 -f game/Dockerfile.coach     -t coach:local   .
 podman build --platform linux/amd64 -f game/Dockerfile.captain   -t captain:local .
+podman build --platform linux/amd64 -f grounds/Dockerfile        -t grounds:local .
 ```
 
 `--platform linux/amd64` because Cloud Run will not run the arm64 image an
-Apple Silicon Mac builds by default. It costs an emulated `npm ci` and three
-emulated `uv sync`s, which is the other reason the real build is not here.
+Apple Silicon Mac builds by default. It costs an emulated `npm ci`, four
+emulated `uv sync`s and an emulated browser download, which is the other reason
+the real build is not here. Drop the flag to build the grounds for this Mac,
+which is the only way the run below is quick enough to be worth doing.
 
 Running the arena image by hand, against this machine's Postgres:
 
@@ -483,6 +525,23 @@ HEAD against a perfectly healthy arena answers 405.
 The image bakes in `ARENA_ENV=production`, so it refuses to start without those
 three. That refusal is the image working.
 
+Running the grounds image by hand, against an arena on this machine:
+
+```bash
+podman run --rm -p 8004:8004 \
+  -e ARENA_URL=http://host.containers.internal:8003 \
+  -e ARENA_SERVICE_TOKEN=dev-token \
+  grounds:local
+
+curl -s localhost:8004/healthz         # {"ok":true,"running":0,"capacity":12}
+```
+
+`ok` goes true when Chromium has launched and the arena has served it
+`/pitch/host.html`, which is a second or two. Until then the same route answers
+503 with the same body, because a startup probe reads the status and never the
+body - and so the log is the thing to watch if it stays false: it says which of
+the two it is still waiting for, every few seconds, by name.
+
 ## Watching it
 
 ```bash
@@ -498,3 +557,14 @@ gcloud run revisions list --service=arena --region="$REGION"
 Logs from all three containers arrive interleaved and each line carries the
 container name, which is the quickest way to tell an arena that refused a patch
 from a specialist that never sent one.
+
+The grounds answers the same four commands with `grounds` in place of `arena`,
+and one line in its log is worth knowing:
+
+```
+connected to the arena at https://arena-... , offering 12 pitches
+```
+
+Without it, nothing is being played anywhere and every kick-off in the venue is
+a 503. The arena's side of the same moment is `grounds joined, capacity 12; 1
+connected`, and the pair is the whole handshake.

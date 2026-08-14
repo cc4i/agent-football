@@ -34,6 +34,7 @@ import uvicorn
 import websockets
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from playwright.async_api import async_playwright
 
 from supervisor import Supervisor
@@ -202,10 +203,17 @@ app = FastAPI(title="Grounds", lifespan=lifespan)
 
 @app.get("/healthz")
 def healthz(request: Request):
-    """Up, and how much football is happening. The only request this serves."""
+    """Up, and how much football is happening. The only request this serves.
+
+    The status is the part the platform reads - a liveness probe never opens the
+    body - so an instance with no page has to fail rather than report failure.
+    The body is for a human with curl, and for the capacity check in the plan.
+    """
     state = request.app.state.grounds
-    return {"ok": state["open"], "running": state["running"],
-            "capacity": state["capacity"]}
+    return JSONResponse(
+        status_code=200 if state["open"] else 503,
+        content={"ok": state["open"], "running": state["running"],
+                 "capacity": state["capacity"]})
 
 
 def run():

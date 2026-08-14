@@ -1,12 +1,17 @@
-"""The service yaml against the images it deploys, read as text.
+"""The service yamls against the images they deploy, read as text.
 
-`test_images.py` exists because three Dockerfiles agree on a set of ports and
+`test_images.py` exists because four Dockerfiles agree on a set of ports and
 two directory paths and nothing would notice them drifting apart. The service
-yaml is now the third copy of every one of those values, so it is read here
-against the same sources rather than against a second set of literals.
+yamls are now the second copy of every one of those values, so they are read
+here against the same sources rather than against a second set of literals.
+
+Two services, because the grounds is its own: one Chromium playing whatever the
+arena assigns it. It shares this file rather than getting one of its own,
+because what it repeats - a port, a service token, the arena's own URL - are
+the arena's values, and the pair drifting apart is the failure worth catching.
 
 Text and not `pyyaml`: the arena does not depend on a yaml parser and this is
-not worth adding one for. The file's shape is stable enough to match on, and
+not worth adding one for. The files' shape is stable enough to match on, and
 every helper below asserts before it returns, so a match that stops matching
 fails as itself rather than as an AttributeError three lines later.
 """
@@ -16,16 +21,30 @@ import subprocess
 
 from app import MAX_LIVE_ROOMS, MAX_WALL_SOCKETS
 from rooms import TEAMS
-from tests.test_images import ARENA, CAPTAIN, COACH, LOOPBACK, ROOT, env, exposed
+from tests.test_images import (ARENA, CAPTAIN, COACH, GROUNDS, LOOPBACK, ROOT,
+                               env, exposed)
 
 SERVICE = (ROOT / "deploy" / "service.yaml").read_text()
+GROUNDS_SERVICE = (ROOT / "deploy" / "grounds.yaml").read_text()
 DEPLOY = (ROOT / "deploy" / "deploy.sh").read_text()
-# The yaml with its prose taken out. `sed` rewrites a comment along with
-# everything else, but a mangled comment is cosmetic and a mangled value is a
-# broken deploy, so the bare-token check below reads this and the header comment
-# stays free to name the trap it is warning about.
-SETTINGS = "\n".join(line for line in SERVICE.splitlines()
-                     if not line.lstrip().startswith("#"))
+BUILD = (ROOT / "deploy" / "cloudbuild.yaml").read_text()
+
+
+def settings(text):
+    """A yaml with its prose and its keys taken out.
+
+    `sed` rewrites a comment along with everything else, but a mangled comment
+    is cosmetic and a mangled value is a broken deploy, so the bare-token check
+    at the foot of this file reads this and the yamls' own header comments stay
+    free to name the trap they are warning about.
+
+    The `- name:` keys go with them. An environment variable is named for what
+    it holds, so the grounds' `ARENA_URL` is spelt exactly like the placeholder
+    word that fills it, and a key is not something a bad render can break.
+    """
+    return "\n".join(line for line in text.splitlines()
+                     if not line.lstrip().startswith("#")
+                     and not re.match(r"^\s+- name: \S+$", line))
 
 # The three variables that dial another container in this instance. Scoped, not
 # every URL in the file: `ARENA_PUBLIC_URL` is added to this same `env:` block by
@@ -49,25 +68,25 @@ SECRETS = {
 PLACEHOLDER = re.compile(r"^__[A-Z]+(_[A-Z]+)*__$")
 
 
-def valued(name):
+def valued(name, service=SERVICE):
     """What the service sets an environment variable to, everywhere it sets it."""
-    found = re.findall(rf"^\s+- name: {name}\n\s+value: (\S+)$", SERVICE, re.MULTILINE)
+    found = re.findall(rf"^\s+- name: {name}\n\s+value: (\S+)$", service, re.MULTILINE)
     assert found, f"the service sets no literal {name}"
     return found
 
 
-def follows(name):
+def follows(name, service=SERVICE):
     """The key under each of an environment variable's entries.
 
     `value:` for a literal and `valueFrom:` for a reference, which is the whole
     of what the secret test needs to know.
     """
-    found = re.findall(rf"^\s+- name: {name}\n\s+(\S+)", SERVICE, re.MULTILINE)
+    found = re.findall(rf"^\s+- name: {name}\n\s+(\S+)", service, re.MULTILINE)
     assert found, f"the service does not set {name} at all"
     return found
 
 
-def secreted(name):
+def secreted(name, service=SERVICE):
     """The Secret Manager secret each of an environment variable's entries reads.
 
     Anchored to the `- name:` above it rather than looked for anywhere in the
@@ -75,34 +94,42 @@ def secreted(name):
     """
     found = re.findall(
         rf"^\s+- name: {name}\n\s+valueFrom:\n\s+secretKeyRef: "
-        rf"\{{name: (\S+), key: latest\}}$", SERVICE, re.MULTILINE)
+        rf"\{{name: (\S+), key: latest\}}$", service, re.MULTILINE)
     assert found, f"the service does not read a secret for {name}"
     return found
 
 
-def block(container):
+def block(container, service=SERVICE):
     """One container's own lines, from its `- name:` to the next container's.
 
     A container is named in lower case and an environment variable in upper, so
     the two `- name:` keys are told apart by that and by sharing an indent.
     """
     found = re.search(rf"^(\s+)- name: {container}$(.*?)(?=^\1- name: [a-z]|\Z)",
-                      SERVICE, re.MULTILINE | re.DOTALL)
+                      service, re.MULTILINE | re.DOTALL)
     assert found, f"the service has no {container} container"
     return found.group(2)
 
 
-def probed(container):
+def probed(container, service=SERVICE):
     """Every port a container's probes dial, whichever kind of probe they are."""
     found = re.findall(r"^\s+(?:httpGet: \{path: \S+, port|tcpSocket: \{port): (\d+)\}$",
-                       block(container), re.MULTILINE)
+                       block(container, service), re.MULTILINE)
     assert found, f"nothing probes {container} at all"
     return found
 
 
-def scalar(key):
+def probe_paths(container, service=SERVICE):
+    """Every path a container's HTTP probes ask for."""
+    found = re.findall(r"^\s+httpGet: \{path: (\S+), port: \d+\}$",
+                       block(container, service), re.MULTILINE)
+    assert found, f"nothing probes {container} over HTTP"
+    return found
+
+
+def scalar(key, service=SERVICE):
     """A plain `key: value` from anywhere in the file, quotes included."""
-    found = re.search(rf"^\s+{re.escape(key)}: (\S+)$", SERVICE, re.MULTILINE)
+    found = re.search(rf"^\s+{re.escape(key)}: (\S+)$", service, re.MULTILINE)
     assert found, f"the service sets no {key}"
     return found.group(1)
 
@@ -135,9 +162,9 @@ def rendered():
     return dict(found)
 
 
-def placeholders():
+def placeholders(service=SERVICE):
     """Every token in the yaml that is waiting to be rendered."""
-    return set(re.findall(r"__\w+?__", SERVICE))
+    return set(re.findall(r"__\w+?__", service))
 
 
 def well_known_path():
@@ -218,6 +245,109 @@ def test_nothing_dials_a_sibling_container_by_name():
     for name in SIBLINGS:
         for url in valued(name):
             assert url.startswith(f"http://{LOOPBACK}"), f"{name} is {url}"
+
+
+# --- The grounds -----------------------------------------------------------
+# Its own service, and every value below is one it shares with the arena.
+
+
+def test_the_grounds_publish_the_port_they_listen_on():
+    assert scalar("containerPort", GROUNDS_SERVICE) == env(GROUNDS, "PORT")
+
+
+def test_every_grounds_probe_dials_the_health_check_it_serves():
+    """The startup probe and the liveness probe, on the one route there is.
+
+    A probe on the wrong port here is a revision that never goes ready, or -
+    worse, because it looks like nothing - an instance restarted every thirty
+    seconds with a venue's matches on it.
+    """
+    port = scalar("containerPort", GROUNDS_SERVICE)
+    assert probed("grounds", GROUNDS_SERVICE) == [port] * 2
+    assert set(probe_paths("grounds", GROUNDS_SERVICE)) == {"/healthz"}
+
+
+def test_a_grounds_that_cannot_play_football_is_replaced():
+    """The liveness probe is how a dead browser becomes a fresh instance.
+
+    Nothing else notices. The matches are gone either way - a page that has
+    crashed took them with it - but an instance left standing goes on being
+    offered more, and refuses every one of them for the rest of the evening.
+    A probe reads the status code and nothing else, which is why the grounds
+    answers its own health check with a 503 rather than a cheerful `ok: false`.
+    """
+    assert "livenessProbe" in block("grounds", GROUNDS_SERVICE)
+
+
+def test_the_grounds_run_exactly_one_instance():
+    """Two would double-run any room the arena assigned once.
+
+    The arena assigns a match to a socket, and a second instance behind one
+    revision is a second socket: two simulations of the same room, two clocks,
+    and two streams of frames racing each other into one match's log.
+    """
+    assert scalar("autoscaling.knative.dev/minScale", GROUNDS_SERVICE) == '"1"'
+    assert scalar("autoscaling.knative.dev/maxScale", GROUNDS_SERVICE) == '"1"'
+
+
+def test_the_grounds_are_not_throttled():
+    """Load-bearing here in a way it is not even for the arena.
+
+    The only requests this service takes are its own health checks. Everything
+    it does happens between them, so a throttled instance is one that stops
+    playing football the moment nobody asks it whether it is alive.
+    """
+    assert scalar("run.googleapis.com/cpu-throttling", GROUNDS_SERVICE) == '"false"'
+
+
+def test_the_grounds_run_gen2():
+    # Chromium. The first-generation sandbox is a gVisor syscall surface that a
+    # browser does not fit through, and what it looks like is a launch that
+    # hangs rather than an error naming the environment.
+    assert scalar("run.googleapis.com/execution-environment", GROUNDS_SERVICE) == "gen2"
+
+
+def test_the_grounds_carry_the_arena_s_own_service_token():
+    """The one credential this service has, and the same secret the arena reads.
+
+    A different secret here is a control socket closed with 4403 and an
+    instance retrying forever against a token that will never work - and, at
+    the far end, a venue where every kick-off is a 503 because no pitch ever
+    joined.
+    """
+    assert set(follows("ARENA_SERVICE_TOKEN", GROUNDS_SERVICE)) == {"valueFrom:"}
+    assert set(secreted("ARENA_SERVICE_TOKEN", GROUNDS_SERVICE)) == \
+        set(secreted("ARENA_SERVICE_TOKEN"))
+
+
+def test_the_grounds_play_for_the_arena_this_deploy_just_made():
+    """Rendered, not written down.
+
+    The arena's URL is stable in practice and this is still not the place to
+    keep a copy of it: a grounds pointed at the wrong arena connects, offers
+    its pitches and plays nothing, because the arena being kicked off in has
+    no grounds and refuses every match.
+    """
+    assert valued("ARENA_URL", GROUNDS_SERVICE) == ["__ARENA_URL__"]
+    assert "__ARENA_URL__" in rendered()
+
+
+def test_the_grounds_are_deployed_after_the_arena_they_play_for():
+    # Which is what makes the URL above readable at all: it is `status.url` off
+    # the service the step before this one replaced.
+    assert "deploy/grounds.yaml" in DEPLOY, "the deploy never stands the grounds up"
+    order = DEPLOY.index("deploy/service.yaml"), DEPLOY.index("deploy/grounds.yaml")
+    assert order[0] < order[1], "the grounds are deployed before the arena exists"
+    read = DEPLOY[:order[1]]
+    assert 'ARENA_URL="$(gcloud run services describe arena' in read
+
+
+def test_the_grounds_image_is_built_by_the_same_pipeline():
+    # A yaml naming an image nothing builds is a deploy that fails on a pull,
+    # after the arena has already been replaced.
+    assert "grounds/Dockerfile" in BUILD, "nothing builds the grounds image"
+    assert "'${_REPO}/grounds:${_TAG}'" in BUILD.split("images:")[1], \
+        "the grounds image is built and never pushed"
 
 
 def test_the_service_runs_exactly_one_instance():
@@ -324,18 +454,20 @@ def test_the_placeholders_cannot_match_inside_an_identifier():
     for token, variable in substitutions.items():
         assert PLACEHOLDER.match(token), f"sed would rewrite {token} inside an identifier"
         assert token == f"__{variable}__"
-    assert set(substitutions) == placeholders()
+    # Both yamls, because deploy.sh renders both and one sed run left out of it
+    # is a service deployed with `__TAG__` where its image should be.
+    assert set(substitutions) == placeholders() | placeholders(GROUNDS_SERVICE)
 
 
 def test_no_setting_spells_a_placeholder_word_bare():
     # The other direction, and the one somebody actually types: a new line
     # written as `value: PROJECT` because the underscores looked decorative.
-    # sed renders it, so the deploy succeeds and the yaml looks right in the
-    # diff; what breaks is whatever else on the line shares the word.
+    # sed leaves it exactly as typed, so the deploy succeeds and the yaml looks
+    # right in the diff; what breaks is whatever reads the value afterwards.
     #
-    # Comments are not read. sed rewrites those too, but a mangled sentence is
-    # cosmetic where a mangled value is a broken deploy, and this file's header
-    # comment has to stay free to name the trap it is warning about.
-    bare = "|".join(sorted(token.strip("_") for token in placeholders()))
-    loose = re.search(rf"(?<![A-Z_])({bare})(?![A-Z_])", SETTINGS)
-    assert not loose, f"{loose and loose.group()} is rendered wherever it appears"
+    # Comments and keys are not read - see `settings`.
+    bare = "|".join(sorted(token.strip("_")
+                           for token in placeholders() | placeholders(GROUNDS_SERVICE)))
+    for yaml in (SERVICE, GROUNDS_SERVICE):
+        loose = re.search(rf"(?<![A-Z_])({bare})(?![A-Z_])", settings(yaml))
+        assert not loose, f"{loose and loose.group()} is never rendered"

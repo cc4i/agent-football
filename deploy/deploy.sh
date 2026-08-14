@@ -1,5 +1,5 @@
 #!/bin/bash
-# deploy.sh - Builds the three images in Cloud Build and replaces the service.
+# deploy.sh - Builds the four images in Cloud Build and replaces both services.
 
 # Copyright 2026 Google LLC
 #
@@ -45,7 +45,7 @@ read -r -p "Continue? [y/N] " answer
 # Built in Cloud Build rather than here: it is amd64 natively, which this Mac is
 # not, and it pushes with the credentials gcloud already has. What gets uploaded
 # is governed by .gcloudignore, which keeps the dugout out of the tarball.
-echo "--> Building the three images..."
+echo "--> Building the four images..."
 gcloud builds submit --config deploy/cloudbuild.yaml \
     --substitutions="_REPO=${REPO},_TAG=${TAG}" \
     --project="${PROJECT}" .
@@ -79,13 +79,42 @@ sed -e "s|__PROJECT__|${PROJECT}|g" \
     deploy/service.yaml > /tmp/arena-service.yaml
 gcloud run services replace /tmp/arena-service.yaml --region="${REGION}" --project="${PROJECT}"
 
+# The grounds play for an arena, and this is the one they play for. Read rather
+# than recorded, for the same reason the database's address is: it is assigned
+# by Cloud Run when the service is first made. Read after the replace above and
+# not before, so that a first deploy has a URL to read at all.
+#
+# A grounds pointed at the wrong arena is the quietest failure available here.
+# It connects, offers its pitches, and plays nothing - while the arena the venue
+# is actually using has no grounds and answers every kick-off with a 503.
+echo "--> Reading the arena's URL for the grounds to play for..."
+ARENA_URL="$(gcloud run services describe arena --region="${REGION}" --project="${PROJECT}" \
+    --format='value(status.url)')"
+if [ -z "$ARENA_URL" ]; then
+    echo "the arena has no URL, so there is nothing for the grounds to play for." >&2
+    exit 1
+fi
+echo "    ${ARENA_URL}"
+
+echo "--> Replacing the grounds..."
+sed -e "s|__PROJECT__|${PROJECT}|g" \
+    -e "s|__REGION__|${REGION}|g" \
+    -e "s|__ARENA_URL__|${ARENA_URL}|g" \
+    -e "s|__TAG__|${TAG}|g" \
+    deploy/grounds.yaml > /tmp/grounds-service.yaml
+gcloud run services replace /tmp/grounds-service.yaml --region="${REGION}" --project="${PROJECT}"
+
 # The containers every deploy before this one pinned. maxScale bounds a revision
-# and minScale pins an instance per revision, so the replace above did not stop
-# the arena it superseded: that container keeps running, takes no traffic, and
-# goes on sweeping the one database on its own watchdog with the code it was
-# built from. Three were up at once here. Cloud Run reclaims them on a schedule
-# of its own, and across one afternoon of deploys that ran from a minute to an
-# hour; a revision is immutable, so there is nothing to scale down to hurry it.
+# and minScale pins an instance per revision, so the replaces above did not stop
+# what they superseded: that container keeps running, takes no traffic, and goes
+# on doing its job with the code it was built from. For the arena that is
+# sweeping the one database on its own watchdog - three were up at once here.
+# For the grounds it is a browser whose control socket reconnects to whatever
+# the public URL now points at, which is the new arena: a pitch running last
+# deploy's bundle, offering itself for real matches. Cloud Run reclaims them on
+# a schedule of its own, and across one afternoon of deploys that ran from a
+# minute to an hour; a revision is immutable, so there is nothing to scale down
+# to hurry it.
 #
 # Deleting is the only lever there is, and it is not a stop button either. The
 # revision leaves the API at once and the container was still answering its
@@ -97,15 +126,20 @@ gcloud run services replace /tmp/arena-service.yaml --region="${REGION}" --proje
 # deploy turns out to be the bad one, and pointing traffic at a revision that
 # still exists takes seconds where rebuilding an old tag takes minutes. That
 # rollback is in deploy/README.md; this is the line that keeps it possible.
-echo "--> Standing down the revisions this replaces..."
-serving="$(gcloud run services describe arena --region="${REGION}" --project="${PROJECT}" \
-    --format='value(status.traffic[].revisionName)' | tr ';' '\n')"
-if [ -z "$serving" ]; then
-    # Nothing named as taking traffic is not an answer to act on: the list below
-    # is every revision there is, so an empty exclusion deletes the live arena.
-    echo "WARNING: nothing is named as serving traffic, so none were stood down." >&2
-else
-    replaced="$(gcloud run revisions list --service=arena --region="${REGION}" \
+stand_down() {
+    local service="$1"
+    local serving replaced keep revision
+    echo "--> Standing down the ${service} revisions this replaces..."
+    serving="$(gcloud run services describe "${service}" --region="${REGION}" \
+        --project="${PROJECT}" --format='value(status.traffic[].revisionName)' | tr ';' '\n')"
+    if [ -z "$serving" ]; then
+        # Nothing named as taking traffic is not an answer to act on: the list
+        # below is every revision there is, so an empty exclusion would delete
+        # the live one.
+        echo "WARNING: nothing is named as serving traffic, so none were stood down." >&2
+        return
+    fi
+    replaced="$(gcloud run revisions list --service="${service}" --region="${REGION}" \
         --project="${PROJECT}" --format='value(metadata.name)')"
     # Whole line and fixed string. arena-00007-cvr contains arena-00007-cv, and
     # a match loose enough to confuse the two takes the venue down.
@@ -124,7 +158,9 @@ else
         gcloud run revisions delete "${revision}" --region="${REGION}" \
             --project="${PROJECT}" --quiet || echo "WARNING: ${revision} is still up." >&2
     done
-fi
+}
 
-gcloud run services describe arena --region="${REGION}" --project="${PROJECT}" \
-    --format='value(status.url)'
+stand_down arena
+stand_down grounds
+
+echo "${ARENA_URL}"
