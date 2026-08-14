@@ -105,27 +105,37 @@ export async function keepAwake(navigation = navigator, page = document) {
 export const opposite = (team = room.team) => (team === 'red' ? 'blue' : 'red');
 
 /** Every role's attributes for one dugout, as the arena holds them. */
-export async function readProfiles(team = room.team) {
+export async function readProfiles(code, team) {
   const response = await fetch(
-    `/api/rooms/${encodeURIComponent(room.code)}/teams/${encodeURIComponent(team)}/profiles`);
-  if (!response.ok) throw new Error(`the arena has no ${team} profiles for ${room.code}`);
+    `/api/rooms/${encodeURIComponent(code)}/teams/${encodeURIComponent(team)}/profiles`);
+  if (!response.ok) throw new Error(`the arena has no ${team} profiles for ${code}`);
   const body = await response.json();
   // Only the four roles the pitch knows how to drive, in a known order.
   return Object.fromEntries(ROLES.map(role => [role, body.profiles[role]]).filter(([, p]) => p));
 }
 
 /**
- * Hold a socket open on this room.
+ * Hold a socket open on a room.
+ *
+ * The room is an argument rather than the module's own. A page used to be
+ * about exactly one match, settled from its URL before any of this ran; the
+ * grounds page is about fifty at once, so which room a socket is for became
+ * something the caller says.
+ *
+ * `hosting` is whether this socket may drive physics. It defaults to holding a
+ * token, because a page that was handed one was handed it to play with, and
+ * the arena checks the token on every frame regardless.
  *
  * Reconnects on its own: the arena's log is gapless and the room is re-sent on
  * every connect, so coming back is always safe. Giving up would strand a match
  * that is still being played.
  */
-export function connect({ onRoom, onEvent, onState } = {}) {
+export function connect(code, { clientId = '', hosting = Boolean(clientId),
+                                onRoom, onEvent, onState } = {}) {
   const scheme = window.location.protocol === 'https:' ? 'wss' : 'ws';
-  const query = room.clientId ? `?client_id=${encodeURIComponent(room.clientId)}` : '';
+  const query = clientId ? `?client_id=${encodeURIComponent(clientId)}` : '';
   const address =
-    `${scheme}://${window.location.host}/ws/rooms/${encodeURIComponent(room.code)}${query}`;
+    `${scheme}://${window.location.host}/ws/rooms/${encodeURIComponent(code)}${query}`;
 
   let socket = null;
   let wait = 500;
@@ -163,10 +173,10 @@ export function connect({ onRoom, onEvent, onState } = {}) {
 
   return {
     /** Positions, score and clock. Dropped if they arrive faster than the wire. */
-    state: (payload) => isHost() && send({ type: 'host.state', payload }),
+    state: (payload) => hosting && send({ type: 'host.state', payload }),
     /** Something that happened. This is what scoring is later computed from. */
     event: (kind, payload, matchMs) =>
-      isHost() && send({ type: 'host.event', kind, payload, match_ms: matchMs }),
+      hosting && send({ type: 'host.event', kind, payload, match_ms: matchMs }),
     close() {
       stopped = true;
       window.clearTimeout(retry);

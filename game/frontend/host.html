@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>grounds</title>
+    <!--
+      No UI, deliberately. Nobody watches this page: it is loaded by one
+      Chromium in one server and driven over CDP. Everything a tab has that a
+      simulation does not need is absent rather than hidden - no profiles
+      panel, no speed bar, no start screen, no debug log.
+    -->
+    <style>
+      body { margin: 0; background: #000; }
+    </style>
+  </head>
+  <body>
+    <script type="module" src="/src/host.js"></script>
+  </body>
+</html>

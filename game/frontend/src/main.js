@@ -261,7 +261,7 @@ function applyProfilesToScene() {
 // rematch; from then on the socket says what moved and why.
 async function loadProfiles() {
   try {
-    const squad = await readProfiles();
+    const squad = await readProfiles(room.code, room.team);
     Object.entries(squad).forEach(([role, profile]) => {
       currentProfiles[role] = profile;
       // Log the initial values so the panel shows the starting config.
@@ -271,7 +271,7 @@ async function loadProfiles() {
     // room that is the house side the arena seeded from the baselines, and in
     // a head-to-head room it is a second manager's squad, moving on their
     // shouts. Only the arena knows which, and it does not have to say.
-    if (isHost()) otherProfiles = await readProfiles(opposite());
+    if (isHost()) otherProfiles = await readProfiles(room.code, opposite());
     applyProfilesToScene();
   } catch (err) {
     console.error("Failed to load player profiles:", err);
@@ -867,7 +867,9 @@ function nameTheManagers() {
 // The room's feed. Profile moves arrive on it, and when this pitch holds the
 // host token, frames and events leave on it. Open before anything is loaded so
 // nothing said between the read and the connect is missed.
-const feed = connect({
+const feed = connect(room.code, {
+  clientId: room.clientId,
+  hosting: isHost(),
   // Who is in the two dugouts, which is what the nameplates on the pitch say.
   onRoom: (message) => {
     seated = message;

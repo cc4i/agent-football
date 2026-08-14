@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import { resolve } from 'node:path';
+
 import { defineConfig } from 'vite';
 
 export default defineConfig({
@@ -25,7 +27,19 @@ export default defineConfig({
   // they land in the same dist/assets/ by default. Separating them is what lets
   // the arena cache the bundle for a year and still let a regenerated kit
   // through: one directory is safe to freeze, the other never is.
-  build: { assetsDir: 'bundle' },
+  build: {
+    assetsDir: 'bundle',
+    rollupOptions: {
+      input: {
+        // The pitch, unchanged: the lab, and the picture of a match on a wall.
+        main: resolve(import.meta.dirname, 'index.html'),
+        // The farm's page. The same build on purpose, and loaded from the
+        // arena at runtime, so version skew between what simulates a match and
+        // what renders it is impossible by construction.
+        host: resolve(import.meta.dirname, 'host.html'),
+      },
+    },
+  },
 
   server: {
     proxy: {
