@@ -235,6 +235,37 @@ def test_the_service_runs_exactly_one_instance():
     assert scalar("autoscaling.knative.dev/maxScale") == '"1"'
 
 
+def test_the_deploy_stands_down_the_revisions_it_replaces():
+    """One instance is per revision, and a deploy leaves the last one running.
+
+    Which makes the test above true of a revision and not of the venue. The
+    arena a deploy supersedes keeps its pinned container, takes no traffic, and
+    goes on deciding abandonments against the same database from whatever code
+    it was built from -- three of them were up at once in production. A revision
+    is immutable, so deleting is the only lever, and `deploy.sh` pulls it.
+
+    Read as text like everything else here, and what it reads for is the guard
+    rather than the delete. Deleting revisions is only ever safe because the
+    list is filtered first, and every way of getting that filter slightly wrong
+    ends with the arena the venue is playing on being the one deleted.
+    """
+    assert "gcloud run revisions delete" in DEPLOY, "a deploy leaves its old arenas up"
+    guard = DEPLOY.split("gcloud run revisions delete")[0]
+    # Filtered against what Cloud Run says is taking traffic, rather than
+    # against the tag deployed a moment ago or the newest name in the list.
+    assert "value(status.traffic[].revisionName)" in guard
+    assert 'if [ -z "$serving" ]' in guard, "an empty answer would delete every revision"
+    # Whole line and fixed string: arena-00007-cvr contains arena-00007-cv, and
+    # a prefix or a regex is a footgun pointed at the live one.
+    assert "grep -vxF" in guard
+    # And one of the replaced ones is spared, because a revision that still
+    # exists is a rollback of seconds where rebuilding its tag is minutes. The
+    # list comes back newest first, so that one is the head of it and the
+    # deletes run over the tail.
+    assert "head -n 1" in guard
+    assert "tail -n +2" in guard
+
+
 def test_the_instance_takes_a_whole_venue_of_sockets_at_once():
     """`containerConcurrency` is a hard cap and every socket here is long-lived.
 

@@ -35,9 +35,9 @@ if [ -n "$(git status --porcelain)" ]; then
 fi
 
 # Every deploy replaces what is running, and what is running is holding every
-# live match. There is no rolling handover to be had at max-instances: 1 -- and
-# on the evenings Cloud Run leaves a second container up anyway, this takes
-# that one with it. See deploy/README.md on what maxScale actually promises.
+# live match. There is no rolling handover to be had at max-instances: 1. What
+# the replace does not do is stop the old arena, which is what the last step of
+# this script is for. See deploy/README.md.
 echo "This drops every match currently being played. Deploy between matches."
 read -r -p "Continue? [y/N] " answer
 [ "$answer" = "y" ] || exit 1
@@ -78,6 +78,53 @@ sed -e "s|__PROJECT__|${PROJECT}|g" \
     -e "s|__TAG__|${TAG}|g" \
     deploy/service.yaml > /tmp/arena-service.yaml
 gcloud run services replace /tmp/arena-service.yaml --region="${REGION}" --project="${PROJECT}"
+
+# The containers every deploy before this one pinned. maxScale bounds a revision
+# and minScale pins an instance per revision, so the replace above did not stop
+# the arena it superseded: that container keeps running, takes no traffic, and
+# goes on sweeping the one database on its own watchdog with the code it was
+# built from. Three were up at once here. Cloud Run reclaims them on a schedule
+# of its own, and across one afternoon of deploys that ran from a minute to an
+# hour; a revision is immutable, so there is nothing to scale down to hurry it.
+#
+# Deleting is the only lever there is, and it is not a stop button either. The
+# revision leaves the API at once and the container was still answering its
+# health probe twenty minutes later with no revision left to belong to. So this
+# keeps the pile from growing rather than ending the overlap -- which the arena
+# is built to survive in any case, or the deploy itself could not be survived.
+#
+# All but one of them. The newest of what is replaced is the way back if this
+# deploy turns out to be the bad one, and pointing traffic at a revision that
+# still exists takes seconds where rebuilding an old tag takes minutes. That
+# rollback is in deploy/README.md; this is the line that keeps it possible.
+echo "--> Standing down the revisions this replaces..."
+serving="$(gcloud run services describe arena --region="${REGION}" --project="${PROJECT}" \
+    --format='value(status.traffic[].revisionName)' | tr ';' '\n')"
+if [ -z "$serving" ]; then
+    # Nothing named as taking traffic is not an answer to act on: the list below
+    # is every revision there is, so an empty exclusion deletes the live arena.
+    echo "WARNING: nothing is named as serving traffic, so none were stood down." >&2
+else
+    replaced="$(gcloud run revisions list --service=arena --region="${REGION}" \
+        --project="${PROJECT}" --format='value(metadata.name)')"
+    # Whole line and fixed string. arena-00007-cvr contains arena-00007-cv, and
+    # a match loose enough to confuse the two takes the venue down.
+    for revision in $serving; do
+        replaced="$(printf '%s\n' "${replaced}" | grep -vxF "${revision}" || true)"
+    done
+    # Newest first, which is the order `revisions list` answers in.
+    keep="$(printf '%s\n' "${replaced}" | head -n 1)"
+    if [ -n "$keep" ]; then
+        echo "    ${keep} (kept, this is what rolls back to)"
+    fi
+    for revision in $(printf '%s\n' "${replaced}" | tail -n +2); do
+        echo "    ${revision}"
+        # Not fatal. The deploy is live by this point, and a revision that
+        # refuses to go is the state this script has run in all along.
+        gcloud run revisions delete "${revision}" --region="${REGION}" \
+            --project="${PROJECT}" --quiet || echo "WARNING: ${revision} is still up." >&2
+    done
+fi
 
 gcloud run services describe arena --region="${REGION}" --project="${PROJECT}" \
     --format='value(status.url)'

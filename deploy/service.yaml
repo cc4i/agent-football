@@ -32,15 +32,21 @@ spec:
         # None and the leaderboard is quietly wrong with no error anywhere.
         # Read the spec before raising this.
         #
-        # And read the next paragraph before trusting it. Cloud Run honours
-        # maxScale as a target, not a promise: a second container was observed
-        # in production under this exact yaml, serving nothing but its own
-        # health probe and running its own watchdog for an hour. Two arenas
-        # sweeping means either of them can be the one to decide a room is
-        # over, and only the one holding the sockets can say so - which is why
-        # host liveness is a database column and why the sweep now reconciles
-        # what its own sockets have been told. Everything else on this list is
-        # still a real consequence and still unguarded.
+        # And read the next paragraph before trusting it. Both of these bound a
+        # revision and neither says anything about the service. minScale pins an
+        # instance per revision, so a deploy does not stop the arena it replaces:
+        # that container stays up, serving nothing but its own health probe, and
+        # goes on sweeping the one database with the code it was built from.
+        # Three were up at once in production under this exact yaml, one of them
+        # half an hour past the deploy that replaced it. Two arenas sweeping
+        # means either of them can be the one to decide a room is over, and only
+        # the one holding the sockets can say so - which is why host liveness is
+        # a database column and why the sweep now reconciles what its own
+        # sockets have been told. deploy.sh stands the old ones down, that being
+        # the only lever an immutable revision has, but a deleted revision's
+        # container outlives it by twenty minutes and counting -- so that keeps
+        # the pile from growing and does not end the overlap. Everything else on
+        # this list is still a real consequence and still unguarded.
         autoscaling.knative.dev/minScale: "1"
         autoscaling.knative.dev/maxScale: "1"
         # The watchdog sweep, the chain and the bus all run between requests.

@@ -21,14 +21,52 @@ The database survives both. Players, rooms, the event log and the leaderboard
 are all in Cloud SQL, so a manager who reloads gets their history back. What
 they do not get back is the match they were playing. Deploy between matches.
 
-**`maxScale: "1"` is a target, not a promise.** A second container was found up
-under this exact yaml, hours after the deploy that started it, taking no
-traffic but its own health probe. Filter Cloud Logging by `labels.instanceId`
-to see it. It runs the watchdog like any other arena, so it decides about half
-the abandonments in the venue and publishes them to a bus with nobody on it.
-The arena is built to survive that overlap now - liveness is a column, and the
-sweep re-tells its own sockets what the database says - but anything you add
-that assumes one process is assuming something Cloud Run has not agreed to.
+**A revision this one replaces keeps its instance.** `maxScale` bounds a
+revision and `minScale` pins an instance per revision; neither is a statement
+about the service. So a deploy does not stop the arena it supersedes. That
+container stays up taking no traffic but its own health probe, and it runs the
+watchdog like any other arena, so it decides some of the abandonments in the
+venue and publishes each to a bus with nobody on it. Three were up at once here,
+one of them half an hour past the deploy that replaced it:
+
+```bash
+gcloud logging read 'resource.type="cloud_run_revision"
+  AND resource.labels.service_name="arena"' --limit=500 \
+  --format='value(resource.labels.revision_name)' | sort | uniq -c
+```
+
+More than one name in that count is more than one arena. `deploy.sh` deletes
+what it supersedes for this reason, all but the newest, which it keeps for the
+rollback below. Deleting is the only lever there is, because a revision cannot
+be scaled down once it exists.
+
+It is not a stop button. The revision leaves the API immediately; the container
+it pinned does not go with it, and was still answering its health probe twenty
+minutes later with no revision left to belong to. Cloud Run reclaims these on a
+schedule of its own that ran anywhere from a minute to an hour across one
+afternoon of deploys. So the stand-down keeps the pile from growing and does not
+end the overlap - which the arena is built to survive in any case, or a deploy
+could not be survived either: liveness is a column, and the sweep re-tells its
+own sockets what the database says. Anything you add that assumes one process is
+assuming something Cloud Run has not agreed to.
+
+## Rolling back
+
+The revision the last deploy replaced is still there, which makes going back to
+it seconds rather than a rebuild:
+
+```bash
+gcloud run services update-traffic arena --region="$REGION" \
+  --to-revisions=arena-00006-ffx=100
+```
+
+`deploy.sh` prints the name to use as it stands the others down. That pins
+traffic, so the next `deploy.sh` puts `latestRevision: true` back and takes over
+again - there is nothing to undo afterwards. Going back further than one
+revision means rebuilding the tag, which is `TAG=<sha> ./deploy/deploy.sh`; the
+image is still in Artifact Registry under its commit either way.
+
+Both of these drop every live match, exactly as a deploy does.
 
 ## What it costs to leave up
 
@@ -38,6 +76,10 @@ plus the coach's and the captain's 2 and 4 each, charged continuously whether
 anybody is playing or not. The Cloud SQL instance never stops either. This is
 not a scale-to-zero service and cannot be made into one without giving up the
 single instance the correctness rests on.
+
+Left alone it multiplies. Every superseded revision holding its pinned instance
+bills at the same rate as the live one, so an afternoon of deploys costs an
+afternoon of arenas; the stand-down step is worth as much here as it is above.
 
 Delete the service and stop the SQL instance between workshops:
 
