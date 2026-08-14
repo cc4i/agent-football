@@ -15,6 +15,18 @@
 import { defineConfig } from 'vite';
 
 export default defineConfig({
+  // Deployed, the pitch is a subdirectory of the arena rather than an origin of
+  // its own: with no domain there is no certificate, so there is no second
+  // HTTPS origin to be had. The dev server keeps serving from / and
+  // import.meta.env.BASE_URL follows either way.
+  base: process.env.PITCH_BASE || '/',
+
+  // Vite's own output is content-hashed and the public/ folder's is not, and
+  // they land in the same dist/assets/ by default. Separating them is what lets
+  // the arena cache the bundle for a year and still let a regenerated kit
+  // through: one directory is safe to freeze, the other never is.
+  build: { assetsDir: 'bundle' },
+
   server: {
     proxy: {
       '/api-apps': {

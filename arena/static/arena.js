@@ -455,7 +455,9 @@ function label(wanted) {
 
 /** Point the pitch at a room: as its host if we hold the token, else watching. */
 function watch(wanted) {
-  const at = new URL(venue.pitch_url || location.origin);
+  // The pitch may be an origin or may be a path on this one. Two-argument form
+  // handles both: an absolute URL ignores the base, a path resolves against it.
+  const at = new URL(venue.pitch_url || location.origin, location.origin);
   at.searchParams.set("room", wanted);
   at.searchParams.set("team", "blue");
   const token = wanted === code ? hostToken() : "";

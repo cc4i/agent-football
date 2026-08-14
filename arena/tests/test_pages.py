@@ -66,3 +66,8 @@ def test_a_screen_left_running_picks_up_a_fixed_stylesheet(client):
 
 def test_the_static_mount_cannot_be_walked_out_of(client):
     assert client.get("/static/../app.py").status_code in (404, 403)
+
+
+def test_the_pitch_is_not_mounted_without_a_directory(client):
+    # Locally Vite serves it. A 404 here is the arena declining to guess.
+    assert client.get("/pitch/").status_code == 404

@@ -129,10 +129,16 @@ HOST_GONE_REASON = "The screen running this match stopped reporting, so it was a
 # name or its tunnel. The default is right for one person testing alone.
 PUBLIC_URL = os.environ.get("ARENA_PUBLIC_URL", "http://localhost:8003").rstrip("/")
 
+# The built pitch, when the arena is the thing serving it. Unset locally, where
+# Vite serves the pitch on :5173 and this mount does not exist.
+PITCH_DIR = os.environ.get("ARENA_PITCH_DIR", "")
+
 # Where the pitch is served from. The big screen frames it rather than drawing
 # it: physics is 2000 lines of Phaser that already exist and already work, and
 # reimplementing them in the arena to avoid an iframe would be the wrong trade.
-PITCH_URL = os.environ.get("ARENA_PITCH_URL", "http://localhost:5173").rstrip("/")
+# When the arena is serving the bundle itself, that is a path on this origin.
+PITCH_URL = os.environ.get(
+    "ARENA_PITCH_URL", "/pitch" if PITCH_DIR else "http://localhost:5173").rstrip("/")
 
 STATIC = Path(__file__).parent / "static"
 
@@ -1184,6 +1190,33 @@ class Revalidated(StaticFiles):
         response.headers["Cache-Control"] = "no-cache"
         return response
 
+
+class Immutable(StaticFiles):
+    """Vite's content-hashed bundle, cached for as long as a browser likes.
+
+    The opposite of `Revalidated` and for the opposite reason: hashed JavaScript
+    and CSS under /pitch/bundle are named by their own contents, so a changed
+    file is a changed URL and the old one can never be stale. The rest of what
+    the arena serves is not hashed -- the kits, the portraits, the favicon --
+    which is why those are `Revalidated` instead.
+    """
+
+    def file_response(self, *args, **kwargs):
+        response = super().file_response(*args, **kwargs)
+        response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        return response
+
+
+if PITCH_DIR:
+    @app.get("/pitch")
+    @app.get("/pitch/")
+    async def pitch_page():
+        """The pitch's own entry point, never cached: it names the hashed bundle."""
+        return FileResponse(Path(PITCH_DIR) / "index.html", media_type="text/html",
+                            headers={"Cache-Control": "no-cache"})
+
+    app.mount("/pitch/bundle", Immutable(directory=Path(PITCH_DIR) / "bundle"), name="bundle")
+    app.mount("/pitch", Revalidated(directory=PITCH_DIR), name="pitch")
 
 # Mounted last so no page or API path can ever be shadowed by a file on disk.
 app.mount("/static", Revalidated(directory=STATIC), name="static")

@@ -79,6 +79,16 @@ function stamp(seconds) {
   return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
 }
 
+/**
+ * An asset URL that survives being served from somewhere other than the root.
+ *
+ * In development the pitch is its own origin at /. Deployed, it is a
+ * subdirectory of the arena at /pitch/, because without a domain there is no
+ * second origin to put it on. Vite rewrites the asset URLs it can see, and it
+ * cannot see a string handed to Phaser's loader.
+ */
+export const asset = (path) => `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
+
 export class SoccerGameScene extends Phaser.Scene {
   /**
    * @param {{role?: 'host'|'viewer'}} options - `viewer` renders the host's
@@ -140,12 +150,12 @@ export class SoccerGameScene extends Phaser.Scene {
   }
 
   preload() {
-    this.load.image('pitch', '/assets/backgrounds/pitch.png');
-    this.load.image('scoreboard', '/assets/ui/scoreboard.png');
-    this.load.image('coach_portrait', '/assets/ui/coach_portrait.png');
-    this.load.image('opponent_coach_portrait', '/assets/ui/opponent_coach_portrait.png');
-    this.load.image('shout_input', '/assets/ui/shout_input.png');
-    this.load.image('ball', '/assets/sprites/ball.png');
+    this.load.image('pitch', asset('assets/backgrounds/pitch.png'));
+    this.load.image('scoreboard', asset('assets/ui/scoreboard.png'));
+    this.load.image('coach_portrait', asset('assets/ui/coach_portrait.png'));
+    this.load.image('opponent_coach_portrait', asset('assets/ui/opponent_coach_portrait.png'));
+    this.load.image('shout_input', asset('assets/ui/shout_input.png'));
+    this.load.image('ball', asset('assets/sprites/ball.png'));
 
     // The kits. Each sheet is generated per match and cut in the dugout, which
     // writes the atlas beside it: where every pose landed and what it is
@@ -156,8 +166,8 @@ export class SoccerGameScene extends Phaser.Scene {
       goalkeeper_blue: 'goalkeeper_blue_team',
       goalkeeper_red: 'goalkeeper_red_team'
     })) {
-      this.load.atlas(key, `/assets/sprites/${sheet}.png`,
-        `/assets/sprites/${sheet}.json`);
+      this.load.atlas(key, asset(`assets/sprites/${sheet}.png`),
+        asset(`assets/sprites/${sheet}.json`));
     }
   }
 
