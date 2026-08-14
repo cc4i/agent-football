@@ -1,0 +1,22 @@
+# The first two lines are correctness rather than housekeeping. `COPY arena/ ./`
+# runs after `uv sync` has built /app/.venv, and `COPY game/frontend/ ./` runs
+# after `npm ci` has built node_modules. If the context carried either, this
+# Mac's aarch64 virtual environment and host-built native modules would land on
+# top of the container's and the image would fail somewhere strange and late.
+# Deleting a line here to make the build "see more" is how that happens.
+**/.venv
+**/node_modules
+# A stale local pitch build would be copied in and then overwritten by the build
+# stage, which works until the day it does not.
+**/dist
+# The arena's suite has no business in an image that faces the internet.
+**/tests
+**/__pycache__
+**/.pytest_cache
+**/*.db
+**/.env
+.git
+docs
+# The dugout embeds the Antigravity CLI and runs shell commands unrestricted,
+# and it has no business in an image that faces the internet.
+dugout

@@ -1,0 +1,30 @@
+# The A2A captain. Reached only by the coach, over the loopback interface the
+# containers of one Cloud Run instance share.
+#
+#   docker build -f game/Dockerfile.captain -t captain .
+
+FROM python:3.14-slim
+WORKDIR /app
+
+# Pinned, because a lockfile is only as reproducible as the thing reading it:
+# `uv sync --frozen` fixes every dependency and a floating uv would leave the
+# tool doing the pinning as the one part of the image free to drift.
+COPY --from=ghcr.io/astral-sh/uv:0.11.23 /uv /usr/local/bin/uv
+
+COPY game/pyproject.toml game/uv.lock ./
+RUN uv sync --frozen --no-dev
+
+COPY game/agents/ ./agents/
+
+# Loopback, and the literal rather than the name captain_server.py defaults to.
+# The isolation is that this container publishes no port; the coach still
+# reaches it over the network namespace the instance shares. `localhost` would
+# be two addresses in a dual-stack container, which leaves this bind and the
+# dial in game/agents/agent.py agreeing by resolution order.
+ENV CAPTAIN_HOST=127.0.0.1 \
+    CAPTAIN_PORT=8001 \
+    PATH="/app/.venv/bin:$PATH"
+
+EXPOSE 8001
+
+CMD ["python", "-m", "agents.captain_server"]

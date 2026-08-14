@@ -1,0 +1,37 @@
+# The ADK coach. Nothing authenticates a request to an ADK server, so it is
+# reachable only from the instance it runs in.
+#
+#   docker build -f game/Dockerfile.coach -t coach .
+
+FROM python:3.14-slim
+WORKDIR /app
+
+# Pinned, because a lockfile is only as reproducible as the thing reading it:
+# `uv sync --frozen` fixes every dependency and a floating uv would leave the
+# tool doing the pinning as the one part of the image free to drift.
+COPY --from=ghcr.io/astral-sh/uv:0.11.23 /uv /usr/local/bin/uv
+
+COPY game/pyproject.toml game/uv.lock ./
+RUN uv sync --frozen --no-dev
+
+COPY game/agents/ ./agents/
+
+# The MCP server the specialists spawn over stdio writes here, and the arena
+# serves the same directory. It is an in-memory volume mounted into both, at a
+# plain directory rather than under /var/run, which is a symlink to /run in this
+# base image: two containers resolving that symlink differently would show up as
+# the arena 404ing a substitution this one had already written.
+ENV PLAYER_STATE_DIR=/shared/player_state \
+    PATH="/app/.venv/bin:$PATH"
+
+EXPOSE 8000
+
+# `adk web .` scans the working directory for the agent package beside it.
+#
+# Loopback, and the literal rather than the name. The isolation is that this
+# container publishes no port; the arena still reaches it because the containers
+# of one Cloud Run instance share a network namespace, and so share the loopback
+# interface this binds. `localhost` would be two addresses in a dual-stack
+# container, which leaves the bind here and the dial in arena/coach.py agreeing
+# by resolution order rather than by having been written down.
+CMD ["adk", "web", ".", "--host", "127.0.0.1", "--port", "8000"]
