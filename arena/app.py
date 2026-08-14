@@ -568,8 +568,17 @@ async def read_me(request: Request, player_id: int = Depends(current_player)):
 
 @app.get("/api/rooms/open")
 async def read_open_rooms(request: Request):
-    """Which rooms are still waiting for a manager, for a phone with no room."""
-    return {"rooms": rooms.open_now(request.app.state.conn)}
+    """Which rooms are waiting for a manager, and what is on meanwhile.
+
+    Both, because a phone with nowhere to go has one question and it is not
+    "which rooms are open". It is "is anything happening here". A venue whose
+    every screen is mid-match answers the first question with an empty list,
+    which reads the same as a venue with nothing plugged in, so the second is
+    answered alongside it: those matches are the reason there is no seat, and
+    they are also the promise that there will be one.
+    """
+    connection = request.app.state.conn
+    return {"rooms": rooms.open_now(connection), "playing": rooms.live(connection)}
 
 
 @app.get("/api/players/available")

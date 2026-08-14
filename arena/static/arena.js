@@ -50,6 +50,10 @@ const SILENT_MS = 4000;
 // until somebody takes a seat, so for the whole of the lobby this is the only
 // thing between an open room and a room that only looks open.
 const STILL_HERE_MS = 10000;
+// How long a result stands before the screen opens the lobby for the next
+// match. Long enough to read a scoreline from the back of a room, short enough
+// that the queue on the other side of it is not waiting on anybody.
+const NEXT_LOBBY_MS = 20000;
 
 let code = (params.get("room") || "").toUpperCase();
 let venue = { pitch_url: "" };
@@ -63,6 +67,7 @@ let turned = 0;             // the first tile of the strip's current page
 let stripped = "";          // the page the strip is drawing, so it is redrawn once
 let courtRoom = null;       // somebody else's room, open only while they are on
 let leaving = false;        // this page is on its way out to a room that works
+let handover = 0;           // the countdown from a result to the next lobby
 const live = new Map();     // code -> what the wall knows about that room
 const tiles = new Map();    // code -> the strip's elements for it
 
@@ -201,17 +206,57 @@ function mine(snapshot) {
   if (snapshot.status === "abandoned") return startFresh(snapshot.mode);
   el("again").hidden = snapshot.status !== "finished";
   drawSeats(snapshot);
+  if (snapshot.status === "finished" && hostToken()) handOver();
   direct();
+}
+
+/**
+ * Full time. Stand the result up for a moment, then open the next lobby.
+ *
+ * A screen is the only thing in the building that can open a room, and it can
+ * hold one at a time, so the whole venue's turnstile is this one page. Waiting
+ * for somebody to press "New room" put that turnstile behind a click nobody in
+ * the queue is standing next to: the manager who just played is looking at
+ * their phone, the next four are looking at theirs, and the screen sat on
+ * "Full time. Open a new room to play again." until an organiser walked over.
+ * Every phone in the room read "no screen is waiting for a manager this
+ * second" for the whole of it, which is the same sentence a venue with nothing
+ * plugged in shows.
+ *
+ * The count is shown rather than run down quietly, because a screen that
+ * clears a result on its own is one somebody is about to miss the score on.
+ * The button stays where it was and skips the wait for anybody who wants it.
+ */
+function handOver() {
+  if (leaving || handover) return;
+  const mode = (ours && ours.mode) || MODE;
+  let left = Math.round(NEXT_LOBBY_MS / 1000);
+  const count = () => {
+    if (left <= 0) {
+      clearInterval(handover);
+      leaving = true;
+      location.assign(`/arena?mode=${mode}`);
+      return;
+    }
+    el("badge").textContent = `Full time. Next lobby in ${left}s`;
+    left -= 1;
+  };
+  count();
+  handover = setInterval(count, 1000);
 }
 
 function drawSeats(snapshot) {
   const teams = snapshot.mode === "solo" ? ["blue"] : ["blue", "red"];
   const taken = teams.filter((team) => snapshot.seats[team]).length;
-  el("badge").textContent = snapshot.status === "finished"
-    ? "Full time. Open a new room to play again."
-    : taken === teams.length
-      ? "Ready when they are"
-      : `Waiting for ${teams.length - taken === 1 ? "a manager" : "two managers"}`;
+  // The handover owns the badge once it has started counting, so a room
+  // message arriving behind it does not put the sentence it replaced back.
+  if (!handover) {
+    el("badge").textContent = snapshot.status === "finished"
+      ? "Full time. Open a new room to play again."
+      : taken === teams.length
+        ? "Ready when they are"
+        : `Waiting for ${teams.length - taken === 1 ? "a manager" : "two managers"}`;
+  }
 
   const cards = [];
   teams.forEach((team, index) => {

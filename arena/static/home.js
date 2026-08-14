@@ -59,7 +59,8 @@ async function look() {
   try {
     const [board, open] = await Promise.all([get("/api/board"), get("/api/rooms/open")]);
     standing.textContent = whereTheyStand(board, me);
-    drawRooms(open.rooms.filter((room) => room.code !== (me.room && me.room.code)), me);
+    drawRooms(open.rooms.filter((room) => room.code !== (me.room && me.room.code)),
+              open.playing, me);
     problem.hidden = true;
   } catch (failure) {
     complain(failure);
@@ -100,9 +101,9 @@ function record(head) {
   return parts.join(", ");
 }
 
-function drawRooms(open, me) {
+function drawRooms(open, playing, me) {
   if (!open.length) {
-    rooms.replaceChildren(nothingOpen(me));
+    rooms.replaceChildren(nothingOpen(playing, me));
     return;
   }
   rooms.replaceChildren(...open.map(card));
@@ -135,14 +136,42 @@ function waitingIn(room) {
   return held.length ? `${mode} · ${held[0]} is waiting` : `${mode} · nobody in it yet`;
 }
 
-function nothingOpen(me) {
+/**
+ * The empty state, which is three different situations wearing one face.
+ *
+ * A screen holds one room and one room seats one or two managers, so the
+ * fourth person through the door finds nothing to tap - and the sentence they
+ * used to find said no screen was waiting, which is what a venue with nothing
+ * plugged in says too. They had no way to tell "two minutes" from "broken",
+ * and the honest answer was standing on the wall in front of them.
+ */
+function nothingOpen(playing, me) {
   const box = document.createElement("p");
   box.className = "roomless";
   box.textContent = me.room
     ? "Nothing else is open. Finish the match you are in."
-    : "No screen is waiting for a manager this second. One appears here as soon as"
-      + " somebody opens a lobby, or scan the code on the big screen itself.";
+    : playing.length
+      ? `${onNow(playing)} A screen opens its next lobby as soon as the match`
+        + " on it ends, and the room turns up here by itself."
+      : "No screen is waiting for a manager this second. One appears here as soon as"
+        + " somebody opens a lobby, or scan the code on the big screen itself.";
   return box;
+}
+
+/**
+ * What is being played, named while there is one match to name.
+ *
+ * A live room has its dugouts filled, which is what let it kick off, so the
+ * one match case is a person to point at. The red dugout of a score attack is
+ * the house side and is not.
+ */
+function onNow(playing) {
+  const [match] = playing;
+  const named = playing.length === 1
+    && [match.blue, match.red].filter(Boolean).join(" vs ");
+  if (named) return `${named} ${match.red ? "are" : "is"} playing right now.`;
+  const many = playing.length > 1;
+  return `${figure(playing.length)} match${many ? "es are" : " is"} on right now.`;
 }
 
 function complain(failure) {

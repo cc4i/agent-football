@@ -100,7 +100,7 @@ def test_a_match_that_is_over_is_not_somewhere_to_go_back_to(client, live_room, 
 
 
 def test_a_venue_with_nothing_open_says_so_rather_than_erroring(client):
-    assert client.get("/api/rooms/open").json() == {"rooms": []}
+    assert client.get("/api/rooms/open").json() == {"rooms": [], "playing": []}
 
 
 def test_a_room_in_its_lobby_is_a_room_to_walk_into(client, phones):
@@ -143,6 +143,33 @@ def test_a_solo_room_is_full_at_one(client, phones):
 def test_a_match_already_under_way_is_not_a_room_to_walk_into(client, live_room):
     live_room()
     assert client.get("/api/rooms/open").json()["rooms"] == []
+
+
+def test_a_phone_with_nowhere_to_go_is_told_what_is_being_played(client, live_room):
+    # The reason there is no seat, which is also the promise that there will be
+    # one. A screen holds one room and a score attack seats one manager, so the
+    # second person to scan the sheet finds an empty list - and an empty list on
+    # its own is what a venue with nothing plugged in looks like.
+    code, _ = live_room()
+    answer = client.get("/api/rooms/open").json()
+    assert answer["rooms"] == []
+    assert answer["playing"] == \
+        [{"code": code, "mode": "solo", "blue": "Alex Rivera", "red": None}]
+
+
+def test_the_page_names_them_rather_than_saying_no_screen_is_waiting(client):
+    # Both branches out of one empty list, because the difference between them
+    # is the whole point of asking what is on.
+    js = client.get("/static/home.js").text
+    assert "playing right now" in js
+    assert "No screen is waiting" in js
+
+
+def test_a_match_that_ended_is_not_still_being_played(client, live_room, conn):
+    code, _ = live_room()
+    rooms.finish_match(conn, rooms.by_code(conn, code)["id"])
+    conn.commit()
+    assert client.get("/api/rooms/open").json()["playing"] == []
 
 
 def test_the_workshop_is_not_a_room_anybody_walks_into(client, conn):
