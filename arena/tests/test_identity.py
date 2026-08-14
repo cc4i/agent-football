@@ -54,3 +54,8 @@ def test_rubbish_is_refused_rather_than_raising():
     assert identity.verify_token("", "secret") is None
     assert identity.verify_token("not-a-token", "secret") is None
     assert identity.verify_token("42", "secret") is None
+    # A cookie is edited as easily as it is read, and `isdigit` says yes to a
+    # digit from any script, so neither half of this reaches `int` by accident.
+    assert identity.verify_token("42.é", "secret") is None
+    assert identity.verify_token("42." + "\udce9", "secret") is None
+    assert identity.verify_token("٤٢.anything", "secret") is None

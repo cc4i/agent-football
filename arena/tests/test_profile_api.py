@@ -100,6 +100,18 @@ def test_a_phone_with_no_session_cannot_move_anything(client, phones):
     assert response.status_code == 401
 
 
+def test_a_phone_whose_cookie_was_edited_gets_an_answer_rather_than_a_crash(client, phones):
+    # A session cookie is the easiest thing on a phone to edit, and the mac in
+    # it went through the same `compare_digest` that refuses a non-ASCII string
+    # rather than saying no. Sent as bytes because that is what a header is.
+    code = open_room(client, phones)
+    client.cookies.clear()
+    response = client.patch(f"/api/rooms/{code}/teams/blue/profiles/defender",
+                            json={"changes": {"aggression": 0.2}},
+                            headers={"Cookie": "arena_session=1.é".encode("utf-8")})
+    assert response.status_code == 401
+
+
 def test_a_service_caller_with_the_shared_secret_may_move_a_profile(client, phones,
                                                                     monkeypatch):
     import app as arena_app
@@ -123,7 +135,7 @@ def test_the_wrong_shared_secret_is_no_better_than_none(client, phones, monkeypa
     assert response.status_code == 401
 
 
-def test_a_non_ascii_shared_secret_is_no_better_than_none(client, phones, monkeypatch):
+def test_a_non_ascii_guess_is_refused_and_not_fatal(client, phones, monkeypatch):
     # hmac.compare_digest raises on a non-ASCII string rather than saying no,
     # and a header value is whatever the caller sent. Headers arrive latin-1
     # decoded, which is why this one is offered as the bytes it travels as.
@@ -135,6 +147,22 @@ def test_a_non_ascii_shared_secret_is_no_better_than_none(client, phones, monkey
                             json={"changes": {"aggression": 0.2}},
                             headers={"X-Arena-Service": "é".encode("latin-1")})
     assert response.status_code == 401
+
+
+def test_a_non_ascii_shared_secret_still_lets_the_agents_in(client, phones, monkeypatch):
+    # A token the deploy generates is ASCII, but a token somebody types on a
+    # laptop is whatever their keyboard makes, and the two sides of the
+    # comparison come in by different roads: the environment is decoded as
+    # UTF-8 and a header as latin-1. Read either one in the other's language
+    # and the agents are refused forever with nothing to say why.
+    import app as arena_app
+    monkeypatch.setattr(arena_app, "SERVICE_TOKEN", "café")
+    code = open_room(client, phones)
+    client.cookies.clear()
+    response = client.patch(f"/api/rooms/{code}/teams/red/profiles/defender",
+                            json={"changes": {"aggression": 0.2}, "actor": "midfield-agent"},
+                            headers={"X-Arena-Service": "café".encode("utf-8")})
+    assert response.status_code == 200
 
 
 def test_an_unset_shared_secret_authenticates_nobody(client, phones, monkeypatch):

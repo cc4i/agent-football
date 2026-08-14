@@ -39,7 +39,13 @@ def sign_token(player_id, secret):
 def verify_token(token, secret):
     """Return the player id, or None if this was not signed with `secret`."""
     body, _, mac = (token or "").partition(".")
-    if not body.isdigit() or not hmac.compare_digest(mac, _mac(body, secret)):
+    # A cookie holds whatever the browser was told to hold, and `compare_digest`
+    # refuses a non-ASCII str rather than saying no - which would be a 500 on
+    # every route a phone uses. `isdigit` is no guard against reaching it: it is
+    # true of Arabic-Indic digits too. Bytes answer every cookie that can be
+    # sent, and a real mac is base64, so it is the same bytes either way.
+    if not body.isdigit() or not hmac.compare_digest(mac.encode("utf-8", "surrogatepass"),
+                                                     _mac(body, secret).encode()):
         return None
     return int(body)
 

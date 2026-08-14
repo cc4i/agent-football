@@ -12,6 +12,7 @@ import time
 
 import psycopg
 import pytest
+from starlette.websockets import WebSocket, WebSocketDisconnect
 
 import codes
 import rooms
@@ -69,6 +70,50 @@ def test_a_socket_to_a_room_that_is_not_there_leaves_no_transaction_open(client)
         with client.websocket_connect("/ws/rooms/ZZZZ"):
             pass
     assert idle(client)
+
+
+def the_screen_leaves_between_the_read_and_the_send(monkeypatch):
+    """Make the first frame out of a socket fail, the way a shut laptop does.
+
+    The read that fills that frame has already happened when the send is
+    reached - it is the argument - so this is the one window in which a socket
+    can open a transaction and never arrive at the line that puts it back.
+    Failing the send itself rather than staging a disconnect leaves the arena's
+    own code, `finally` and all, exactly as it ships.
+    """
+    async def the_screen_is_gone(self, *arguments, **keywords):
+        raise WebSocketDisconnect(1006)
+
+    monkeypatch.setattr(WebSocket, "send_json", the_screen_is_gone)
+
+
+def test_a_snapshot_nobody_was_there_to_receive_leaves_no_transaction_open(client, live_room,
+                                                                           monkeypatch):
+    # A phone that scans a QR and locks itself a moment later. The room was
+    # read either way, and the socket is gone, so nothing will come back for it.
+    code, _ = live_room()
+    the_screen_leaves_between_the_read_and_the_send(monkeypatch)
+    with contextlib.suppress(Exception):
+        with client.websocket_connect(f"/ws/rooms/{code}"):
+            pass
+    monkeypatch.undo()
+    assert idle(client)
+    assert client.get(f"/api/rooms/{code}").status_code == 200
+
+
+def test_a_wall_nobody_was_there_to_receive_leaves_no_transaction_open(client, live_room,
+                                                                       monkeypatch):
+    # Same window, and on the wall it is a screen at the far end of the venue
+    # that a cleaner unplugged. Nobody reconnects it until the morning, and the
+    # transaction its last read opened would wait exactly that long.
+    live_room()
+    the_screen_leaves_between_the_read_and_the_send(monkeypatch)
+    with contextlib.suppress(Exception):
+        with client.websocket_connect("/ws/wall"):
+            pass
+    monkeypatch.undo()
+    assert idle(client)
+    assert client.get(f"/api/rooms/{codes.WORKSHOP}").status_code == 200
 
 
 def test_a_socket_message_leaves_no_transaction_open(client, live_room):

@@ -122,6 +122,10 @@ def take_seat(conn, room_id, team, player_id, philosophy):
         conn.rollback()
         if clash.diag.constraint_name == "one_dugout_per_player":
             raise RoomError("you already have a dugout in this match") from clash
+        # `seat_pkey`, which is also what Postgres reports when a request breaks
+        # both rules at once - the same one the checks above pick first. Named
+        # here because a third unique constraint on `seat` would otherwise land
+        # in this branch and tell a phone something confident and wrong.
         raise RoomError(f"the {team} dugout is taken") from clash
     conn.commit()
 

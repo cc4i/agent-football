@@ -765,21 +765,47 @@ def _is_service_caller(request):
     in.
     """
     offered = request.headers.get("x-arena-service", "")
-    return bool(SERVICE_TOKEN and offered and _same_secret(offered, SERVICE_TOKEN))
+    # The two sides came in by different roads and each goes back the way it
+    # came. Spelling both as UTF-8 would compare a token against a re-spelling
+    # of itself: `café` set in the environment and sent correctly over the wire
+    # would never match, and the agents would get a silent 401 forever with
+    # nothing anywhere to say why.
+    return bool(SERVICE_TOKEN and offered
+                and _same_secret(_header_bytes(offered), _text_bytes(SERVICE_TOKEN)))
 
 
 def _same_secret(offered, expected):
-    """Constant-time equality for two secrets that may hold anything at all.
+    """Constant-time equality for two secrets, decided on their bytes.
 
     `hmac.compare_digest` refuses a non-ASCII str outright rather than saying
-    no, and both of the secrets it is asked about here arrive from outside the
-    process: a caller's header and a socket's query string. A wrong token has
-    to be a wrong token and not a crash, so the comparison happens on the bytes
-    they travelled as, which every string has - lone surrogates included, since
-    an environment variable can carry those.
+    no, and every secret it is asked about here arrives from outside the
+    process: a caller's header, a socket's query string, the environment. A
+    wrong token has to be a wrong token and not a crash, so this only ever
+    compares bytes. Which bytes is the caller's to say, because the road a
+    string took in decides what it was before it was a string.
     """
-    return hmac.compare_digest(offered.encode("utf-8", "surrogatepass"),
-                               expected.encode("utf-8", "surrogatepass"))
+    return hmac.compare_digest(offered, expected)
+
+
+def _header_bytes(value):
+    """The bytes a header value was before Starlette made it a string.
+
+    Headers are decoded as latin-1, the one codec that maps every byte to
+    exactly one character and back, so this hands back the caller's own bytes
+    and cannot fail on anything that came off a socket.
+    """
+    return value.encode("latin-1")
+
+
+def _text_bytes(value):
+    """The bytes behind a string that came in as UTF-8: a query, the environment.
+
+    Python decodes the environment as UTF-8 and parks any byte that is not
+    valid UTF-8 in a lone surrogate, and `surrogatepass` is what puts those
+    back where a plain encode would raise on them. Query strings and anything
+    read back out of Postgres came in as UTF-8 too.
+    """
+    return value.encode("utf-8", "surrogatepass")
 
 
 def _player_or_401(request, connection):
@@ -910,7 +936,8 @@ def _handle_from_host(message, connection, match_bus, room, client_id, heard):
     # both the host token and the status are checked against it as it is now.
     current = rooms.by_code(connection, room["code"])
     host_client_id = current["host_client_id"]
-    if not client_id or not host_client_id or not _same_secret(client_id, host_client_id):
+    if not client_id or not host_client_id or not _same_secret(_text_bytes(client_id),
+                                                               _text_bytes(host_client_id)):
         return
     # Holding the token is no longer proof the match has started, since the
     # creator has held it since they opened the room. Nothing reaches the log
@@ -1061,11 +1088,15 @@ async def wall_socket(socket: WebSocket):
     """Every live room at a glance. One connection for the filmstrip, not six."""
     match_bus = socket.app.state.bus
     await socket.accept()
-    await socket.send_json({"type": "wall", "rooms": rooms.live(socket.app.state.conn)})
-    # The wall's only statement is that one read, and it then sits there all
-    # evening. Nothing else here touches the database, so this is the whole of
-    # what it owes the connection.
-    db.finish(socket.app.state.conn)
+    try:
+        await socket.send_json({"type": "wall", "rooms": rooms.live(socket.app.state.conn)})
+    finally:
+        # The wall's only statement is that one read, and it then sits there all
+        # evening. Nothing else here touches the database, so this is the whole
+        # of what it owes the connection - owed just the same by a screen whose
+        # tab closed between the read and the send, which is the one path that
+        # would otherwise hold a transaction open with nobody left to close it.
+        db.finish(socket.app.state.conn)
 
     subscription = match_bus.subscribe(WALL, maxsize=128)
     tasks = [asyncio.create_task(_pump(socket, subscription)),
