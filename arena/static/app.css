@@ -584,11 +584,19 @@ body.big{padding:24px}
   font-family:'IBM Plex Mono',ui-monospace,monospace;font-weight:600;font-size:2rem;
   letter-spacing:.3em;color:var(--gold);padding-left:.3em;display:block;line-height:1.1;
 }
+/* `anywhere` rather than `word-break:break-all`, which is what this was until
+   the service had a real name to print. break-all fills the line to the last
+   character that fits and breaks there, and on the deployed host that lands
+   mid-word: `...a.run.ap` / `p/join/M56U`. Dropped, the hyphens in the
+   hostname are break opportunities again and it comes apart where a reader
+   would expect - `https://arena-yowyyj7gkq-` / `as.a.run.app/join/M56U`.
+   `anywhere` is what keeps the guarantee break-all was here for: a hostname
+   with no hyphen in it still cannot overflow the box. */
 .or-code em{
   font-style:normal;display:block;margin-top:10px;
   font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:.72rem;color:var(--blue);
   background:var(--blue-dim);border:1px solid var(--blue-line);
-  border-radius:var(--r-sm);padding:6px 8px;word-break:break-all;
+  border-radius:var(--r-sm);padding:6px 8px;overflow-wrap:anywhere;
 }
 
 /* The standings, framed under the seats. A room in a lobby is a screen nobody
