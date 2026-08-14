@@ -45,6 +45,8 @@ shell wins where both say something, which is what lets one exported
 | `ARENA_CHAIN_LIMIT` | `4` | How many shouts may be talking to Gemini at once, across every room. The quota belongs to the venue, not to a room. |
 | `ARENA_CHAIN_SECONDS` | `150` | The whole chain, slot to huddle. A match is three minutes long. |
 | `ARENA_MAX_LIVE_ROOMS` | `120` | How many matches may be live at once. When reached, opening another room is a 503 saying the venue is full - wait for a match to finish. |
+| `ARENA_WALL_HZ` | `2` | How often one room's tile may redraw on the wall. A host reports at 10 Hz because its match needs it; fifty thumbnails at that rate is five hundred messages a second down every wall socket. Whoever is watching one match still gets every frame, on the room socket. Zero or less turns the thinning off rather than the wall. |
+| `ARENA_MAX_WALL_SOCKETS` | `60` | How many big screens may watch the wall at once. Sized above the spec's 50 rooms, because `/arena` opens a wall socket on every screen that hosts one, and below `ARENA_MAX_LIVE_ROOMS`, because the cost is rooms x `ARENA_WALL_HZ` x screens. One beyond the cap is accepted and then closed with code 4429 and the reason `too many screens are watching the wall`: it loses its filmstrip and keeps its match. |
 
 ## Pages
 

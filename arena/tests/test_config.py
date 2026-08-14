@@ -50,6 +50,25 @@ def test_a_laptop_still_starts_with_none_of_them(monkeypatch):
     assert module.SERVICE_TOKEN == ""
 
 
+def test_the_wall_reads_its_rate_and_its_cap_from_the_environment(monkeypatch):
+    # Renaming either variable in app.py leaves the rest of the suite green,
+    # because every other test patches the module attribute rather than the
+    # environment. This is the only thing that would notice.
+    module = _boot(monkeypatch, ARENA_WALL_HZ="5", ARENA_MAX_WALL_SOCKETS="7")
+    assert module.WALL_HZ == 5.0
+    assert module.MAX_WALL_SOCKETS == 7
+
+
+def test_the_wall_falls_back_to_what_the_readme_promises(monkeypatch):
+    # An operator reads the README's defaults column and deploys without either
+    # of these set. These are the two numbers that column names.
+    monkeypatch.delenv("ARENA_WALL_HZ", raising=False)
+    monkeypatch.delenv("ARENA_MAX_WALL_SOCKETS", raising=False)
+    module = _boot(monkeypatch)
+    assert module.WALL_HZ == 2.0
+    assert module.MAX_WALL_SOCKETS == 60
+
+
 def test_the_join_url_is_worked_out_from_the_request_when_unset(monkeypatch, client, phones):
     monkeypatch.setenv("ARENA_PUBLIC_URL", "")
     monkeypatch.setattr("app.PUBLIC_URL", "")

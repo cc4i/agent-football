@@ -1,10 +1,15 @@
 """Shared fixtures. One throwaway database, emptied between tests."""
 
+import logging
 import os
+import socket
+import threading
+import time
 
 import httpx
 import psycopg
 import pytest
+import uvicorn
 from fastapi.testclient import TestClient
 from psycopg import conninfo, sql
 
@@ -79,6 +84,62 @@ async def arena(dsn, monkeypatch):
                                      base_url="http://arena.test") as caller:
             caller.app = app
             yield caller
+
+
+@pytest.fixture
+def real_arena_server(dsn, monkeypatch):
+    """A real uvicorn server on a real socket, for tests that need one.
+
+    TestClient and httpx.ASGITransport both collapse streaming responses into
+    a single chunk, so they cannot tell a streaming handler from a buffering
+    one. Only a real socket can see the difference.
+    """
+    monkeypatch.setenv("ARENA_DB", dsn)
+    from app import app
+
+    # Bind to 127.0.0.1:0 so the OS picks an available port.
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.bind(("127.0.0.1", 0))
+    sock.listen(5)
+    host, port = sock.getsockname()
+
+    # Track handler count to ensure logging is not reconfigured.
+    app_logger = logging.getLogger("app")
+    handler_count_before = len(app_logger.handlers)
+
+    # Websockets enabled, because a close code only reaches a client over a
+    # handshake something actually performed, and TestClient invents one. The
+    # sansio implementation rather than plain `websockets`: the latter imports
+    # `websockets.legacy` and the two deprecation warnings that come with it,
+    # and this suite is held at one warning.
+    config = uvicorn.Config(app, host=host, port=port, log_level="error",
+                            log_config=None, ws="websockets-sansio")
+    server = uvicorn.Server(config)
+
+    def run_server():
+        server.run(sockets=[sock])
+
+    thread = threading.Thread(target=run_server, daemon=True)
+    thread.start()
+
+    # Wait for the server to start, with a timeout.
+    for _ in range(50):
+        if server.started:
+            break
+        time.sleep(0.1)
+    else:
+        raise RuntimeError("uvicorn did not start in time")
+
+    yield f"http://{host}:{port}"
+
+    # Tear down: stop the server and join the thread.
+    server.should_exit = True
+    thread.join(timeout=2.0)
+    if thread.is_alive():
+        raise RuntimeError("uvicorn thread did not stop in time")
+
+    # Ensure logging was not reconfigured.
+    assert len(app_logger.handlers) == handler_count_before
 
 
 @pytest.fixture

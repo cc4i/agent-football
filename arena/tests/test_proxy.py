@@ -9,14 +9,10 @@ unauthenticated ADK server is a free language model for whoever finds it.
 
 import asyncio
 import json
-import logging
-import socket
 import threading
-import time
 
 import httpx
 import pytest
-import uvicorn
 
 import coach
 
@@ -180,57 +176,6 @@ def test_coach_error_status_passes_through_not_502(client, monkeypatch):
 
 
 # Streaming: incremental delivery over a real socket
-
-
-@pytest.fixture
-def real_arena_server(dsn, monkeypatch):
-    """A real uvicorn server on a real socket, for tests that need one.
-
-    TestClient and httpx.ASGITransport both collapse streaming responses into
-    a single chunk, so they cannot tell a streaming handler from a buffering
-    one. Only a real socket can see the difference.
-    """
-    monkeypatch.setenv("ARENA_DB", dsn)
-    from app import app
-
-    # Bind to 127.0.0.1:0 so the OS picks an available port.
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.bind(("127.0.0.1", 0))
-    sock.listen(5)
-    host, port = sock.getsockname()
-
-    # Track handler count to ensure logging is not reconfigured.
-    app_logger = logging.getLogger("app")
-    handler_count_before = len(app_logger.handlers)
-
-    config = uvicorn.Config(app, host=host, port=port, log_level="error",
-                            log_config=None, ws="none")
-    server = uvicorn.Server(config)
-
-    def run_server():
-        server.run(sockets=[sock])
-
-    thread = threading.Thread(target=run_server, daemon=True)
-    thread.start()
-
-    # Wait for the server to start, with a timeout.
-    for _ in range(50):
-        if server.started:
-            break
-        time.sleep(0.1)
-    else:
-        raise RuntimeError("uvicorn did not start in time")
-
-    yield f"http://{host}:{port}"
-
-    # Tear down: stop the server and join the thread.
-    server.should_exit = True
-    thread.join(timeout=2.0)
-    if thread.is_alive():
-        raise RuntimeError("uvicorn thread did not stop in time")
-
-    # Ensure logging was not reconfigured.
-    assert len(app_logger.handlers) == handler_count_before
 
 
 def test_run_sse_streams_incrementally_not_buffered(real_arena_server, monkeypatch):

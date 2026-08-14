@@ -17,6 +17,7 @@ import Phaser from 'phaser';
 import { SoccerGameScene, GAME_DURATION_SEC, STATUS_CHECK_MS } from './game';
 import { Sound } from './audio';
 import { createStatusHook } from './status.js';
+import { createSubstitutionPoll } from './substitutions.js';
 import { room, isHost, isViewer, shouldRunStatusCheck, opposite, readProfiles, connect, keepAwake } from './arena.js';
 
 let gameInstance = null;
@@ -841,44 +842,18 @@ function showNotification(role, action, reason) {
   setTimeout(() => toast.remove(), 5600);
 }
 
-// Track the last-seen timestamp per role so each request shows exactly once.
-const lastSubTs = { defender: 0, midfielder: 0, forward: 0, goalkeeper: 0 };
-
 // One file per room and dugout, because a knock in one match must not sub a
 // player off in another. football_mcp_server.py writes it and vite serves it.
 const SUBSTITUTIONS_URL = `/player_state/substitutions/${room.code}__${room.team}.json`;
 
-// Seed timestamps from any pre-existing file so stale entries don't toast on load.
-async function primeSubstitutions() {
-  try {
-    const res = await fetch(`${SUBSTITUTIONS_URL}?t=` + Date.now());
-    if (!res.ok) return;
-    const data = await res.json();
-    ROLES.forEach(role => {
-      if (data[role] && data[role].ts) lastSubTs[role] = data[role].ts;
-    });
-  } catch (err) {
-    // No file yet - nothing to prime.
-  }
-}
-
-async function checkSubstitutions() {
-  try {
-    const res = await fetch(`${SUBSTITUTIONS_URL}?t=` + Date.now());
-    if (!res.ok) return; // file may not exist yet
-    const data = await res.json();
-    ROLES.forEach(role => {
-      const entry = data[role];
-      if (entry && entry.ts && entry.ts > lastSubTs[role]) {
-        lastSubTs[role] = entry.ts;
-        console.log(`Player condition event: ${role} -> ${entry.action} (${entry.reason})`);
-        showNotification(role, entry.action, entry.reason);
-      }
-    });
-  } catch (err) {
-    // Silent: a malformed/missing file is fine.
-  }
-}
+const substitutions = createSubstitutionPoll({
+  url: SUBSTITUTIONS_URL,
+  fetch: window.fetch.bind(window),
+  notify: (role, action, reason) => {
+    console.log(`Player condition event: ${role} -> ${action} (${reason})`);
+    showNotification(role, action, reason);
+  },
+});
 
 // The room as the arena last described it. Held here because it arrives on
 // connect and Phaser takes a moment longer to boot than a socket does.
@@ -933,7 +908,7 @@ if (room.inMatch) {
 // of a screen, and act on the answer in a room this tab does not hold physics
 // for. A shout can injure somebody, so a real match still watches for toasts.
 if (!isViewer()) {
-  primeSubstitutions().then(() => setInterval(checkSubstitutions, 2000));
+  substitutions.prime().then(() => setInterval(() => substitutions.check(), 2000));
 }
 
 // The autonomous "are you tired?" chain, and the workshop alone. It fires

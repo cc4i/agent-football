@@ -80,6 +80,26 @@ ROOM_RATE, ROOM_BURST = 0.5, 120
 # a full house and still refuses a loop.
 COACH_RATE, COACH_BURST = 5.0, 60
 
+# How often one room's tile may redraw on the wall. The host reports at 10 Hz
+# because that is what the match it is running needs; a thumbnail on a
+# filmstrip does not, and fifty of them at 10 Hz is five hundred messages a
+# second down every wall socket in the venue. The room socket still carries
+# every frame, which is what a viewer watching one match is reading. Zero or
+# less is an operator saying "do not thin", and every frame then goes.
+WALL_HZ = float(os.environ.get("ARENA_WALL_HZ", "2"))
+
+# How many big screens may watch the wall at once. The cost of the wall is a
+# product rather than a sum - rooms x WALL_HZ x screens - and /arena opens a
+# wall socket on every screen that hosts a room, so the spec's 50 concurrent
+# rooms with a screen each is 5,000 sends a second, which one instance carries.
+# Sixty is that 50 with headroom for a reloading screen whose old socket has
+# not been reaped yet, and for the board. Matching MAX_LIVE_ROOMS is the other
+# end of the range and is not the answer: 120 rooms with a screen each is
+# 28,800 sends a second, about a core spent on thumbnails. Past the cap a
+# screen loses its filmstrip and keeps its match, which is the right thing to
+# give up first.
+MAX_WALL_SOCKETS = int(os.environ.get("ARENA_MAX_WALL_SOCKETS", "60"))
+
 
 class _RedactClientId(logging.Filter):
     """Redact client_id from uvicorn access logs.
@@ -229,6 +249,10 @@ async def lifespan(fastapi_app: FastAPI):
     fastapi_app.state.players = limits.Bucket(PLAYER_RATE, PLAYER_BURST)
     fastapi_app.state.rooms_opened = limits.Bucket(ROOM_RATE, ROOM_BURST)
     fastapi_app.state.coach = limits.Bucket(COACH_RATE, COACH_BURST)
+    # How many screens are on the wall right now, here for the same reason as
+    # the buckets above: a module-level counter is shared by every test in the
+    # session, and one leaked socket would then fail an unrelated test later on.
+    fastapi_app.state.walls = 0
     # Install filter to redact client_id from access logs.
     access_logger = logging.getLogger("uvicorn.access")
     access_logger.addFilter(_RedactClientId())
@@ -970,6 +994,46 @@ async def _pump(socket, subscription):
         await socket.send_json(message)
 
 
+async def _pump_wall(socket, subscription):
+    """`_pump`, with the position frames thinned out.
+
+    Only `wall.state` is thinned. A room opening, kicking off or finishing is a
+    `wall` message, and dropping one of those would leave a tile that is wrong
+    rather than a tile that is a fraction of a second old.
+    """
+    keep = _wall_thinner()
+    async for message in subscription:
+        if message.get("type") == "wall.state" and not keep(message.get("code"),
+                                                            time.monotonic()):
+            continue
+        await socket.send_json(message)
+
+
+def _wall_thinner():
+    """Per-socket state deciding which wall frames are worth sending.
+
+    Per room rather than per socket overall: a wall showing one match should
+    still update smoothly, and a wall showing fifty should not send fifty times
+    as much. A room's first frame always goes, so a tile appears the moment its
+    match does.
+    """
+    last = {}
+
+    def keep(code, now):
+        if WALL_HZ <= 0:
+            # An operator writing zero means "do not thin", and `1.0 / WALL_HZ`
+            # below would answer that by killing the pump task and dropping the
+            # screen into a reconnect loop. Read here rather than closed over
+            # once, so the rate can be changed under a socket that is open.
+            return True
+        if now - last.get(code, float("-inf")) < 1.0 / WALL_HZ:
+            return False
+        last[code] = now
+        return True
+
+    return keep
+
+
 class _HostReporting:
     """When this socket last told its room that the host is here.
 
@@ -1012,11 +1076,20 @@ async def room_socket(socket: WebSocket, code: str, client_id: str = ""):
     match_bus = socket.app.state.bus
     code = code.upper()
     if not codes.is_valid(code):
+        # Accepted first so the refusal can be one: an upgrade that is never
+        # accepted is answered with an HTTP status, which has nowhere to carry
+        # a close code, so a mistyped code reached the browser as 1006 and an
+        # empty string and socket.js retried it forever.
+        await socket.accept()
         await socket.close(code=4404, reason=f"there is no room {code}")
         return
     room = rooms.by_code(connection, code)
     if room is None:
+        # Before the handshake, because `accept` is an await point and a screen
+        # that is already gone would otherwise leave the lookup's transaction
+        # open with nobody to close it.
         db.finish(connection)
+        await socket.accept()
         await socket.close(code=4404, reason=f"there is no room {code}")
         return
 
@@ -1244,33 +1317,53 @@ async def _watch_for_the_missing(fastapi_app):
 @app.websocket("/ws/wall")
 async def wall_socket(socket: WebSocket):
     """Every live room at a glance. One connection for the filmstrip, not six."""
-    match_bus = socket.app.state.bus
-    await socket.accept()
+    state = socket.app.state
+    if state.walls >= MAX_WALL_SOCKETS:
+        # Accepted first and closed straight after, because an upgrade that is
+        # never accepted is answered with an HTTP status and there is nowhere
+        # in that answer to put a close code or a sentence: the browser would
+        # get 1006 and an empty string, and retry forever over a full venue.
+        # The refusal returns before the count below, so it spends no slot.
+        await socket.accept()
+        await socket.close(code=4429, reason="too many screens are watching the wall")
+        return
+    # Taken before the handshake and given back in the finally below, because
+    # every way out of here after this line has to give it back: a refused
+    # accept, a tab that closed during the opening send, a normal hang-up. The
+    # check and this line are adjacent for the same reason: `accept` is an await
+    # point, so two handshakes racing across it would both pass a check that
+    # only one of them should.
+    state.walls += 1
+    match_bus = state.bus
     try:
-        await socket.send_json({"type": "wall", "rooms": rooms.live(socket.app.state.conn)})
-    finally:
-        # The wall's only statement is that one read, and it then sits there all
-        # evening. Nothing else here touches the database, so this is the whole
-        # of what it owes the connection - owed just the same by a screen whose
-        # tab closed between the read and the send, which is the one path that
-        # would otherwise hold a transaction open with nobody left to close it.
-        db.finish(socket.app.state.conn)
+        await socket.accept()
+        try:
+            await socket.send_json({"type": "wall", "rooms": rooms.live(socket.app.state.conn)})
+        finally:
+            # The wall's only statement is that one read, and it then sits there all
+            # evening. Nothing else here touches the database, so this is the whole
+            # of what it owes the connection - owed just the same by a screen whose
+            # tab closed between the read and the send, which is the one path that
+            # would otherwise hold a transaction open with nobody left to close it.
+            db.finish(socket.app.state.conn)
 
-    subscription = match_bus.subscribe(WALL, maxsize=128)
-    tasks = [asyncio.create_task(_pump(socket, subscription)),
-             asyncio.create_task(_until_closed(socket))]
-    done, pending = set(), set(tasks)
-    try:
-        done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+        subscription = match_bus.subscribe(WALL, maxsize=128)
+        tasks = [asyncio.create_task(_pump_wall(socket, subscription)),
+                 asyncio.create_task(_until_closed(socket))]
+        done, pending = set(), set(tasks)
+        try:
+            done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            for task in pending:
+                task.cancel()
+            for task in done:
+                if not task.cancelled():
+                    exc = task.exception()
+                    if exc:
+                        logger.exception("wall socket task died", exc_info=exc)
+            subscription.close()
     finally:
-        for task in pending:
-            task.cancel()
-        for task in done:
-            if not task.cancelled():
-                exc = task.exception()
-                if exc:
-                    logger.exception("wall socket task died", exc_info=exc)
-        subscription.close()
+        state.walls -= 1
 
 
 async def _until_closed(socket):

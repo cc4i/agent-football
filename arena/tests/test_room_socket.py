@@ -1,14 +1,42 @@
+import asyncio
+
 import pytest
+import websockets
 from fastapi import WebSocketDisconnect
+from websockets.exceptions import ConnectionClosedError
 
 import rooms
 
 
 def test_a_socket_for_a_room_that_does_not_exist_is_closed(client):
     with pytest.raises(WebSocketDisconnect) as closed:
-        with client.websocket_connect("/ws/rooms/ZZZZ"):
-            pass
+        # Accepted and then closed, so the read is what raises.
+        with client.websocket_connect("/ws/rooms/ZZZZ") as socket:
+            socket.receive_json()
     assert closed.value.code == 4404
+
+
+def test_a_mistyped_code_is_told_so_over_a_real_socket(real_arena_server):
+    """The 4404 and its sentence reach the wire, which is what stops the retry.
+
+    `socket.js` treats 4404 as the one close it will not reconnect after. That
+    branch had never fired: the arena closed before accepting, an upgrade that
+    is never accepted is answered with an HTTP status, and a status has nowhere
+    to carry a close code - so a mistyped room code arrived as 1006 with an
+    empty reason and the phone retried it forever. `TestClient` cannot see the
+    difference, because it invents a handshake and keeps the code either way.
+    """
+    room = real_arena_server.replace("http://", "ws://") + "/ws/rooms/ZZZZ"
+
+    async def knock_on_a_room_that_is_not_there():
+        with pytest.raises(ConnectionClosedError) as closed:
+            async with websockets.connect(room) as socket:
+                await socket.recv()
+        return closed.value
+
+    closed = asyncio.run(knock_on_a_room_that_is_not_there())
+    assert closed.rcvd.code == 4404
+    assert closed.rcvd.reason == "there is no room ZZZZ"
 
 
 def test_connecting_hands_over_the_room_as_it_stands(client, phones):
