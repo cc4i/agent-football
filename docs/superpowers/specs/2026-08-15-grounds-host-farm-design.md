@@ -149,7 +149,7 @@ Nothing else. The frames themselves never touch this socket.
 
 Each match reports on its own `/ws/rooms/{code}` with `host.state` and
 `host.event`, byte for byte as a tab does today. `_handle_from_host`
-(`app.py:1366`) is not modified. Scoring, the log, the bus, `WALL_HZ` and the
+(`app.py:1433`) is not modified. Scoring, the log, the bus, `WALL_HZ` and the
 rate limits are all untouched, and `fake_host.py` stays valid, which is what
 keeps the arena's own tests from needing a browser.
 
@@ -173,7 +173,7 @@ and starts meaning it.
 
 ### A grounds restart does not resume matches
 
-Live matches stop reporting, and the arena's existing sweep (`app.py:1499`)
+Live matches stop reporting, and the arena's existing sweep (`_give_up_on_the_missing`, `app.py:1540`)
 abandons them exactly as it abandons a room whose screen closed. The grounds do
 not re-claim them on the way back up.
 
@@ -192,7 +192,7 @@ that was explicitly not chosen.
 
 | Job | Where |
 |---|---|
-| Physics authority | `_handle_from_host`, `app.py:1376` |
+| Physics authority | `_handle_from_host`, `app.py:1433` |
 | This screen owns this lobby | `_require_host`, guarding the mode switch at `app.py:667` |
 
 Once physics leaves the screen, one token cannot be both. They separate:
@@ -217,16 +217,39 @@ changes is who is doing the reassuring.
 
 | A room in | is held alive by | over |
 |---|---|---|
-| lobby | its screen | `screen.here`, checked against the screen token |
+| lobby | its screen | the screen's open socket, bearing the screen token |
 | live | the grounds | `host.state` frames, as today |
 
-Same sweep, two sources, both stamping `last_heard_at` through `heard_from`.
+Same sweep, two sources, both stamping `last_heard_at`.
 
-The screen's `stillHere()` survives, but its message cannot. `host.here` is
-handled by `_handle_from_host` and checked against the physics token, which the
-screen no longer holds, so the lobby heartbeat becomes a `screen.here` checked
-against the screen token instead. `STILL_HERE_MS` and the timer around it are
-unchanged; only what they prove is different.
+`a7588f2` landed after this design was drafted and replaced the screen's
+`host.here` timer with socket presence: `_HeldRooms` counts the sockets this
+instance has open for each room, `holding` is settled once at the handshake,
+and the sweep vouches for every held code before judging any of them. That
+makes this section *simpler* than it was written, and one detail load-bearing.
+
+`holding` must now ask which kind of client this socket is, because the two
+kinds prove different things:
+
+- A **screen** socket proves its lobby is real. It must not prove a *live*
+  match is real - otherwise a wall left open on a match whose grounds died
+  keeps that match live for the rest of the evening, and the sweep can never
+  reach it.
+- A **grounds** socket proves the match is being simulated, in lobby or live.
+
+So `_HeldRooms` counts by kind, and the sweep stamps them against different
+statuses:
+
+```python
+rooms.heard_from_all(connection, held.codes("screen"), now, statuses=("lobby",))
+rooms.heard_from_all(connection, held.codes("grounds"), now)
+```
+
+The screen's `stillHere()`, `STILL_HERE_MS` and its `host.here` message are
+therefore deleted outright rather than re-credentialled. The socket is the
+proof; a timer saying the same thing more weakly is not worth keeping, and
+`host.here` checked against a token the screen no longer holds would be
+silently refused on every tick.
 
 ### The substitution toast routes through the arena
 
@@ -259,7 +282,7 @@ This retires the one path the README admits bypasses the arena, and it lets the
 `viewer` role when the wall opens. It never makes another.
 
 Loading it needs one build affordance. `/pitch/bundle/*` is content-hashed on
-purpose (`app.py:1802`, `:1822`), so the wall cannot name a file. A stable
+purpose (`app.py:1798`, `:1822`), so the wall cannot name a file. A stable
 `/pitch/viewer.js` entry, served by the `Revalidated` mount rather than the
 `Immutable` one, gives it something to import. The address comes off
 `venue.pitch_url`, which the wall already fetches (`app.py:544`), so
@@ -326,10 +349,13 @@ is exactly the behaviour wanted, now reachable at fifty rooms instead of six.
 
 ### What gets deleted
 
-From `arena/static/arena.js`: `hostToken()`, `hostingLive()`, the sessionStorage
-physics token, the `choose()` branch at `:508`, the `src` comparison guard at
-`:596`, and the refusal inside `pin()`. `stillHere()` and `STILL_HERE_MS` stay,
-carrying the screen token and a `screen.here`, as above.
+From `arena/static/arena.js`: `hostingLive()`, the `choose()` branch at `:508`,
+the `src` comparison guard at `:596`, the refusal inside `pin()`, and -
+following the liveness section above - `stillHere()`, `STILL_HERE_MS` and the
+timer around them. `hostToken()` and its sessionStorage survive under the name
+`screenToken()`, holding the screen token rather than the physics one: the wall
+still has to prove it owns its own lobby to switch that room's mode, and it
+still has to bear that token on the room socket for `_HeldRooms` to count it.
 
 Beyond the wall, `?as=host` and `?as=viewer` lose their last consumers: host
 goes to the grounds page, viewer goes to the wall's direct mount, and phones
@@ -370,7 +396,7 @@ A `grounds` service of its own, beside the existing one.
 The grounds reach the arena over `ARENA_URL` for both the page and the sockets,
 and carry `ARENA_SERVICE_TOKEN` as the coach and captain already do.
 
-`MAX_LIVE_ROOMS` (`app.py:640`) stops being a number in the arena's config and
+`MAX_LIVE_ROOMS` (`app.py:64`, checked at `:640`) stops being a number in the arena's config and
 starts being the capacity the connected grounds announced.
 
 ## Testing
