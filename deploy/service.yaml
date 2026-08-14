@@ -104,6 +104,19 @@ spec:
           env:
             - name: ARENA_ENV
               value: production
+            # What the QR codes are printed with. Unset, the arena works it out
+            # per request from the forwarded scheme and the Host header, which
+            # is what let the first deploy print a working code before the
+            # service had a name. It says so once per start, and this is the
+            # line that quietens it.
+            #
+            # `status.url` rather than the deterministic
+            # arena-1094752696945.asia-southeast1.run.app, which is the same
+            # service by the other of its two names. Ten characters shorter,
+            # and every one of them is a module more in a code somebody is
+            # scanning across a sports hall.
+            - name: ARENA_PUBLIC_URL
+              value: https://arena-yowyyj7gkq-as.a.run.app
             # A private address and a port, rather than the socket path this
             # used to name. No `sslmode`, so the connection is unencrypted and
             # both ends stay inside the VPC. `?sslmode=require` here and
