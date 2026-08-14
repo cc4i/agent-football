@@ -189,12 +189,17 @@ def test_a_match_that_ended_properly_is_left_alone(client, live_room):
     # leak, and what is left worth asserting is that the sweep only looks at
     # matches that are still live.
     code, host_token = live_room()
-    heard_now(client, code)
     with client.websocket_connect(f"/ws/rooms/{code}?client_id={host_token}") as host:
         host.receive_json()
         host.send_json({"type": "host.event", "kind": "full_time",
                         "payload": {"score": [1, 0]}})
         host.receive_json()
+
+    # Stamped after the whistle rather than before it, so the column says what
+    # a finished room's really does: a screen that stopped reporting when the
+    # match ended, longer ago than any host still playing would be given. The
+    # status is the only thing standing between this room and the sweep.
+    heard_now(client, code)
 
     assert sweep(client, NOW + arena.HOST_GONE_SECONDS + 1) == []
     assert rooms.by_code(client.app.state.conn, code)["status"] == "finished"

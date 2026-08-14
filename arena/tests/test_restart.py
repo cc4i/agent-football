@@ -32,13 +32,27 @@ def go_live(conn):
 
 
 def test_a_second_arena_does_not_abandon_a_match_it_never_heard(conn):
+    """The rollout in three moves, from the new instance's side.
+
+    It sweeps once and finds a room it has never heard of; the host goes on
+    talking to the instance being replaced, which keeps the room's liveness
+    up to date; it sweeps again, past the grace it started counting on the
+    first sweep. An arena that trusted only what it had heard for itself would
+    abandon a perfectly healthy match on that second sweep, because everything
+    it knows first-hand still dates from the first one.
+    """
     room = go_live(conn)
 
-    # The instance holding the socket heard from the host a moment ago. This
-    # one has been up for a second and has heard from nobody.
-    rooms.heard_from(conn, room["id"], NOW)
+    # Nobody has reported to this instance, so its first sweep gives the room
+    # its grace rather than giving up on it.
+    assert app._give_up_on_the_missing(conn, Bus(), NOW) == []
 
-    assert app._give_up_on_the_missing(conn, Bus(), NOW + 1) == []
+    # The host is talking to the instance holding its socket, twenty seconds
+    # into that grace. This is the part an in-memory dict cannot see.
+    rooms.heard_from(conn, room["id"], NOW + 20)
+
+    late = NOW + app.HOST_GONE_SECONDS + 1
+    assert app._give_up_on_the_missing(conn, Bus(), late) == []
     assert rooms.by_code(conn, room["code"])["status"] == "live"
 
 
