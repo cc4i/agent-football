@@ -43,7 +43,12 @@ body::before{
 }
 .agy-chip i{width:6px;height:6px;border-radius:50%;background:var(--amber);box-shadow:0 0 8px rgba(255,176,32,.8);font-style:normal;animation:tick 2.4s steps(2,end) infinite}
 .agy-chip b{font-family:var(--sheet);font-weight:700;font-size:13px;letter-spacing:.17em;text-transform:uppercase;color:var(--amber)}
-.agy-chip span{font-family:var(--data);font-size:10px;color:var(--amber-2)}
+/* The width is reserved rather than fitted: this span holds "checking…" until
+   the first /health answers, then a version and a state, and the arena is
+   allowed two seconds to reply. Fitted, the whole game stack to the right of
+   the chip slides over when it lands, and again on every ready/offline change.
+   17ch is one character more than the longest of them, and the font is mono. */
+.agy-chip span{font-family:var(--data);font-size:10px;color:var(--amber-2);min-width:17ch}
 
 .rig{display:flex;align-items:center;gap:16px;flex:0 0 auto}
 .rig>.lbl{font-family:var(--sheet);font-weight:600;font-size:9.5px;letter-spacing:.2em;text-transform:uppercase;color:var(--chalk-3)}

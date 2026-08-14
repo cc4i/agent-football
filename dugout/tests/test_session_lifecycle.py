@@ -1,3 +1,5 @@
+from importlib.metadata import version
+
 import pytest
 
 import session
@@ -86,9 +88,21 @@ async def test_health_is_ready_once_started(monkeypatch):
     monkeypatch.setattr(session, "_build_config", lambda: None)
 
     await session.start_agent()
-    assert session.agent_health() == {"ok": True, "detail": "ready"}
+    assert session.agent_health() == {
+        "ok": True, "detail": "ready", "version": session.SDK_VERSION}
 
 
 def test_health_calls_out_a_missing_project(monkeypatch):
     monkeypatch.delenv("GOOGLE_CLOUD_PROJECT", raising=False)
     assert "GOOGLE_CLOUD_PROJECT" in session.agent_health()["detail"]
+
+
+def test_health_names_the_sdk_this_process_imported(monkeypatch):
+    """The header chip renders this number and nothing else supplies it.
+
+    Read off the installed distribution, so that bumping the pin in
+    pyproject.toml is the whole change and the chip cannot go on claiming the
+    version somebody typed into the page a release ago.
+    """
+    monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "p")
+    assert session.agent_health()["version"] == version("google-antigravity")

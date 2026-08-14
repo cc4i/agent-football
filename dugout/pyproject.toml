@@ -10,7 +10,7 @@ dependencies = [
     "pillow",
     "python-dotenv==1.2.2",
     "pydantic",
-    "google-antigravity==0.1.10",
+    "google-antigravity==0.1.12",
     "playwright",
     # The arena holds the squad: httpx reads and moves it, websockets follows
     # what a shout set going. Both already arrive with google-genai; they are

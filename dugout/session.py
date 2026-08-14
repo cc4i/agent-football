@@ -3,6 +3,7 @@
 import asyncio
 import os
 from contextlib import AsyncExitStack
+from importlib.metadata import version
 from pathlib import Path
 
 from google.antigravity import (
@@ -25,6 +26,12 @@ from tools.tuning import ROLE_BY_TUNING_TOOL, TUNING_TOOL_BY_ROLE
 ACTOR_USER = "user"
 ACTOR_AGENT = "antigravity"
 ACTOR_GAME = "game"
+
+# The header chip names the SDK, and the number it shows is read off the
+# installed distribution rather than written into the page. A literal in the
+# markup is right until the first bump and quietly wrong afterwards, which on a
+# talk about this SDK is the one number in the room worth getting right.
+SDK_VERSION = version("google-antigravity")
 
 _DONE = object()
 
@@ -137,8 +144,15 @@ def _policies():
     The SDK default is confirm_run_command, which denies run_command outright
     when there is no interactive handler to ask. Nothing can ask in a server,
     and stage 2 is the agent running its own Playwright script, so it would
-    fail every time. Path-scoped denials outrank the wildcard allow, so file
-    writes outside the workspace are still refused.
+    fail every time. Specific denials outrank the wildcard allow, so the file
+    tools stay scoped to the repository.
+
+    workspace_only is a marker now rather than a check. Up to SDK 0.1.10 it
+    carried a path predicate; since 0.1.11 the builder discards the paths it is
+    handed and the in-process hook skips every rule it names, because the
+    boundary moved into the localharness binary, which takes it from
+    `workspaces` on the config below. Both are the repo root, and both have to
+    stay that way: the list is what the harness matches file tools against.
 
     Understand what this grants before running the dugout: shell commands are
     not restricted, so the agent can run anything you can, including outside
@@ -224,11 +238,15 @@ def get_agent():
 
 def agent_health() -> dict:
     if _AGENT is not None:
-        return {"ok": True, "detail": "ready"}
-    if not os.environ.get("GOOGLE_CLOUD_PROJECT"):
-        return {"ok": False,
-                "detail": "GOOGLE_CLOUD_PROJECT is not set. Check dugout/.env."}
-    return {"ok": False,
-            "detail": f"Antigravity could not start. Run `agy login` in a "
-                      f"terminal, then restart the dugout. "
-                      f"({_START_ERROR or 'session not started'})"}
+        state = {"ok": True, "detail": "ready"}
+    elif not os.environ.get("GOOGLE_CLOUD_PROJECT"):
+        state = {"ok": False,
+                 "detail": "GOOGLE_CLOUD_PROJECT is not set. Check dugout/.env."}
+    else:
+        state = {"ok": False,
+                 "detail": f"Antigravity could not start. Run `agy login` in a "
+                           f"terminal, then restart the dugout. "
+                           f"({_START_ERROR or 'session not started'})"}
+    # The version rides along with the state because the chip shows both, and
+    # an offline agent is still running some version of the SDK.
+    return {**state, "version": SDK_VERSION}
