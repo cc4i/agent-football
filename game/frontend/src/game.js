@@ -87,8 +87,15 @@ function stamp(seconds) {
  * subdirectory of the arena at /pitch/, because without a domain there is no
  * second origin to put it on. Vite rewrites the asset URLs it can see, and it
  * cannot see a string handed to Phaser's loader.
+ *
+ * Resolved against this module rather than against the page, because since the
+ * wall mounts the scene the page is not always the pitch. In development that
+ * page is the arena on :8003 and this file came from the dev server on :5173,
+ * and a sprite asked for by path would be asked of the arena, which has never
+ * heard of it.
  */
-export const asset = (path) => `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
+export const asset = (path) =>
+  new URL(`${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`, import.meta.url).href;
 
 export class SoccerGameScene extends Phaser.Scene {
   /**
@@ -111,6 +118,11 @@ export class SoccerGameScene extends Phaser.Scene {
     // applyFrame drains it; a frame that arrives between two draws replaces
     // the one before it rather than queueing, because it is more recent.
     this.wire = null;
+    // Which match a viewer is currently about, and whether the next frame is
+    // the first of it. Both are `point()`'s; a scene nobody ever cuts stays
+    // pointed at nothing and eases every frame it is given.
+    this.code = null;
+    this.snapNext = false;
     this.score1 = 0;
     this.score2 = 0;
     this.matchTime = GAME_DURATION_SEC;
@@ -1691,6 +1703,33 @@ export class SoccerGameScene extends Phaser.Scene {
   }
 
   /**
+   * Point this viewer at a different match.
+   *
+   * One canvas serves the whole wall, so a cut is this rather than a page
+   * load. Everything reset here is the last match's and would otherwise be
+   * read as the new one's for the tenth of a second before its first frame
+   * lands: its scoreline, its clock, the two managers' names. The snap is the
+   * one that shows from the back of the room - a viewer eases toward every
+   * frame it is given, which is right inside a match and wrong across a cut,
+   * and without it eleven sprites walk the length of the pitch out of the
+   * match that just ended and into the one that just started.
+   */
+  point(code) {
+    this.code = code;
+    this.wire = null;
+    this.snapNext = true;
+    this.score1 = 0;
+    this.score2 = 0;
+    this.matchTime = GAME_DURATION_SEC;
+    // create() may not have run: the wall mounts the canvas and cuts to its
+    // first match without waiting for Phaser to boot.
+    if (this.scoreText1) this.scoreText1.setText('0');
+    if (this.scoreText2) this.scoreText2.setText('0');
+    if (this.timeText) this.timeText.setText(stamp(GAME_DURATION_SEC));
+    this.nameManagers({ seats: {} });
+  }
+
+  /**
    * Draw the host's most recent frame, eased.
    *
    * The frame carries fractions of the canvas rather than pixels, so a viewer
@@ -1706,15 +1745,24 @@ export class SoccerGameScene extends Phaser.Scene {
 
     const width = this.sys.game.config.width;
     const height = this.sys.game.config.height;
-    const ease = Math.min(1, delta / CATCH_UP_MS);
+    // A cut is one frame drawn whole, with no travel reported: the two matches
+    // are unrelated, so the distance between where this sprite was and where
+    // the new match wants it is not a run - it is not motion at all, and every
+    // reading taken off it downstream would be a lie. Zero travel is what
+    // leaves the players standing and the ball unspun for the tenth of a
+    // second until a second frame says how they are really moving.
+    const snap = this.snapNext;
+    this.snapNext = false;
+    const ease = snap ? 1 : Math.min(1, delta / CATCH_UP_MS);
     // Measured before the move, because after it there is nothing left to
     // measure: at a full step the sprite is standing on the answer.
     const toward = (sprite, at) => {
       const x = at[0] * width;
       const y = at[1] * height;
-      const togo = Phaser.Math.Distance.Between(sprite.x, sprite.y, x, y);
-      const heading = x - sprite.x;
-      sprite.setPosition(sprite.x + heading * ease, sprite.y + (y - sprite.y) * ease);
+      const gap = x - sprite.x;
+      const togo = snap ? 0 : Phaser.Math.Distance.Between(sprite.x, sprite.y, x, y);
+      const heading = snap ? 0 : gap;
+      sprite.setPosition(sprite.x + gap * ease, sprite.y + (y - sprite.y) * ease);
       return { togo, heading };
     };
 
@@ -1782,6 +1830,10 @@ export class SoccerGameScene extends Phaser.Scene {
    */
   cheer(kind) {
     if (this.role !== 'viewer') return;
+    // The wall mounts a pitch and cuts to a live match immediately, so the
+    // first goal can beat Phaser's boot. Nothing to flash and nothing to
+    // celebrate on: this one is missed rather than thrown.
+    if (!this.cameras || !this.cameras.main) return;
     if (kind === 'goal' || kind === 'own_goal') {
       Sound.playGoal();
       this.cameras.main.flash(300, 255, 255, 255);

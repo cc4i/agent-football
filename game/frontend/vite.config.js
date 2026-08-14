@@ -30,6 +30,11 @@ export default defineConfig({
   build: {
     assetsDir: 'bundle',
     rollupOptions: {
+      // The viewer entry exists to be imported, and an entry nothing in the
+      // build imports has its exports dropped by default: the wall's
+      // `import { mount }` then fails against a one-line file that pulls the
+      // shared chunk in and re-exports nothing from it.
+      preserveEntrySignatures: 'strict',
       input: {
         // The pitch, unchanged: the lab, and the picture of a match on a wall.
         main: resolve(import.meta.dirname, 'index.html'),
@@ -37,6 +42,17 @@ export default defineConfig({
         // arena at runtime, so version skew between what simulates a match and
         // what renders it is impossible by construction.
         host: resolve(import.meta.dirname, 'host.html'),
+        // No page of its own: a module the arena's wall imports to mount a
+        // pitch in its own layout.
+        viewer: resolve(import.meta.dirname, 'src/viewer.js'),
+      },
+      output: {
+        // Everything else is content-hashed and frozen for a year on the way
+        // out. This one file is named, because the wall has to import it
+        // without having read a manifest to find out what it is called.
+        entryFileNames: (chunk) => (chunk.name === 'viewer'
+          ? 'viewer.js'
+          : 'bundle/[name]-[hash].js'),
       },
     },
   },

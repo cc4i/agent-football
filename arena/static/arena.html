@@ -60,8 +60,10 @@
   <!-- After it: the match at the size of the room, and both relays beside it -->
   <div class="court-grid" id="court" hidden>
     <div class="court">
-      <iframe class="court-frame" id="pitch" title="The match"
-              allow="autoplay; screen-wake-lock"></iframe>
+      <!-- One canvas, mounted once, pointed at whichever match is on. Empty
+           here: /pitch/viewer.js fills it, and until it has there is nothing
+           to draw. -->
+      <div class="court-frame" id="pitch" data-waiting="true"></div>
     </div>
 
     <aside class="rail">

@@ -71,7 +71,18 @@ function open(path, { onMessage, onOpen, onDrop } = {}) {
     close() {
       closed = true;
       clearTimeout(retry);
-      if (socket) socket.close();
+      if (!socket) return;
+      // A socket closed mid-handshake is a failed connection as far as the
+      // browser is concerned, and it says so in the console. The wall cuts
+      // between matches faster than a handshake finishes, so left alone that
+      // is a warning every few seconds on a screen that runs all evening --
+      // and an arena accepting connections nobody is on the other end of.
+      // Nothing is sent in the meantime: this hangs up the moment it can.
+      if (socket.readyState === WebSocket.CONNECTING) {
+        socket.addEventListener("open", (event) => event.target.close());
+        return;
+      }
+      socket.close();
     },
   };
 }

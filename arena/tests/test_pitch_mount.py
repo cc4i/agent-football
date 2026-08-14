@@ -19,6 +19,9 @@ def pitch_mount(tmp_path, monkeypatch, dsn):
     bundle.mkdir()
     (bundle / "index-abc123.js").write_text("console.log('pitch');")
 
+    # The one entry that is not hashed, because the wall imports it by name.
+    (dist / "viewer.js").write_text("export function mount() {}")
+
     assets = dist / "assets" / "sprites"
     assets.mkdir(parents=True)
     (assets / "player_blue_team.png").write_bytes(b"\x89PNG")
@@ -54,6 +57,20 @@ def test_the_hashed_bundle_is_immutable(pitch_mount):
     response = pitch_mount.get("/pitch/bundle/index-abc123.js")
     assert response.status_code == 200
     assert response.headers["cache-control"] == "public, max-age=31536000, immutable"
+
+
+def test_the_viewer_entry_is_revalidated_not_immutable(pitch_mount):
+    """The wall imports this one by name, so it must never be frozen for a year.
+
+    It lands beside index.html rather than in bundle/, which is the whole of
+    the mechanism: the immutable mount is bundle/ and nothing else. Served
+    from in there, a wall would go on importing last week's centre court until
+    somebody cleared a browser somebody else owns.
+    """
+    response = pitch_mount.get("/pitch/viewer.js")
+    assert response.status_code == 200
+    assert "immutable" not in response.headers.get("cache-control", "")
+    assert response.headers["cache-control"] == "no-cache"
 
 
 def test_the_assets_are_revalidated(pitch_mount):

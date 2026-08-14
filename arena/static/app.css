@@ -646,8 +646,10 @@ body.big{padding:24px}
   border:1px solid var(--line);border-radius:12px;background:#05070f;
 }
 
-/* Centre court. The pitch is framed rather than redrawn: it is 2000 lines of
-   Phaser that already exist, and it talks to the arena on its own.
+/* Centre court. One canvas for the whole venue: the same Phaser scene the
+   pitch page runs, mounted straight into this box and pointed at whichever
+   match is on. It was an iframe per match until fifty of them made a cut cost
+   a page load.
 
    The row is minmax(0,1fr) rather than the default auto: a busy rail holds
    more relay than the screen is tall, and an auto row would size itself to all
@@ -658,12 +660,22 @@ body.big{padding:24px}
 }
 .court{min-height:0;display:flex}
 .court-frame{
-  flex:1;width:100%;border:1px solid var(--line);border-radius:12px;
+  flex:1;width:100%;min-width:0;overflow:hidden;
+  border:1px solid var(--line);border-radius:12px;
   background:#05070f;box-shadow:inset 0 0 70px rgba(0,0,0,.85);
   /* Centre court is a picture, not a control. A click landing inside it would
      hand the keyboard to the game and take Esc and the tile numbers with it. */
   pointer-events:none;
 }
+/* Phaser sizes this to fit the box and centres it with its own margins, so
+   nothing here may lay it out. Block, because an inline canvas sits on a text
+   baseline and leaves a strip of frame under the pitch. */
+.court-frame canvas{display:block}
+/* The moment between two matches: the new one's socket is still connecting and
+   every sprite is still standing where the last match left it. Held back until
+   its first frame lands, so a cut is a cut rather than a look at the wrong
+   match. */
+.court-frame[data-waiting] canvas{opacity:0}
 
 /* Both dugouts, side by side down the rail. Two columns rather than one feed
    of everything: on a screen this size the question is not what was said, it

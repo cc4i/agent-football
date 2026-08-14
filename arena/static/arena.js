@@ -1,14 +1,16 @@
 /**
  * The big screen: centre court, the wall, and the director between them.
  *
- * The screen opens a room, so the screen holds that room's physics token and
- * the pitch it frames is the host. That is the rule stated by pointing:
- * whoever scanned the screen owns the screen.
+ * The screen opens a room and holds it, and that is all it holds. Every match
+ * in the venue is played on the grounds, so nothing on this page advances
+ * anybody's football -- including its own. What this page does is choose which
+ * match the room is looking at and draw it.
  *
- * Everything else in the venue is watched rather than run. The wall carries a
- * tile per live room off one socket, and centre court frames whichever of them
- * the director has chosen -- as a viewer, so nothing on this screen ever
- * advances a match somebody else is playing.
+ * Centre court is one canvas, mounted once from /pitch/viewer.js and pointed
+ * at a different match on a cut. It was an iframe per match until the venue
+ * grew past a handful: a click cost a page load, a Phaser boot and a texture
+ * decode, which is affordable on a twelve-second carousel and absurd on a wall
+ * of fifty tiles somebody is browsing.
  */
 
 import { get, post, Refused } from "/static/api.js";
@@ -66,6 +68,7 @@ let framedAt = 0;
 let turned = 0;             // the first tile of the strip's current page
 let stripped = "";          // the page the strip is drawing, so it is redrawn once
 let courtRoom = null;       // somebody else's room, open only while they are on
+let pitch = null;           // centre court's canvas, once /pitch has been loaded
 let leaving = false;        // this page is on its way out to a room that works
 let handover = 0;           // the countdown from a result to the next lobby
 let switching = false;      // a mode change is with the arena, awaiting its word
@@ -82,6 +85,10 @@ start();
 async function start() {
   try {
     venue = await get("/api/venue");
+    // Not awaited. Opening a room and drawing the lobby is what the person
+    // standing in front of the screen is waiting on, and there is nothing for
+    // centre court to show until the director has chosen something anyway.
+    bootCourt();
     ours = code ? await get(`/api/rooms/${code}`) : await open();
     // A tab that has come back to a room that died while it was away. Answered
     // before the room is drawn rather than after the socket says the same
@@ -172,8 +179,6 @@ function startFresh(mode) {
 
 const tokenKey = (roomCode) => `arena.screen.${roomCode}`;
 const screenToken = () => sessionStorage.getItem(tokenKey(code)) || "";
-/** Whether this tab is the one advancing its own room's physics right now. */
-const hostingLive = () => Boolean(ours && ours.status === "live" && screenToken());
 
 /* ── This screen's own room ─────────────────────────────────────────── */
 
@@ -500,12 +505,14 @@ function direct() {
   el("director").className = `dir-chip${chosen ? " pinned" : ""}`;
 }
 
+/**
+ * Which match centre court should be on, or null for this screen's own lobby.
+ *
+ * This screen's own room is in the running like every other. The physics is on
+ * a ground now, so cutting away from it costs nothing but the view: the match
+ * plays on, and the rail keeps the QR code up for the people in front of it.
+ */
 function choose(now) {
-  // Our own live match never leaves centre court while this tab is hosting it.
-  // The physics is in that iframe: re-pointing it to watch somebody else would
-  // stop the match this screen is responsible for, which no amount of a better
-  // game elsewhere is worth.
-  if (hostingLive()) return code;
   // A pin holds until the operator lifts it or the match ends -- but not
   // through a screen that has stopped reporting, because there is nothing on
   // the other end of it to hold. It takes the screen back if it comes round.
@@ -525,9 +532,9 @@ function choose(now) {
     .sort((a, b) => b.worth - a.worth)[0];
   const current = showing && live.get(showing);
   if (!current || !onNow(current, now)) return best.room.code;
-  // A match that is still nearly as interesting keeps the screen: switching
-  // costs a reload of the pitch, and the room somebody is watching is worth
-  // more than the arithmetic difference between it and the next one.
+  // A match that is still nearly as interesting keeps the screen. The cut is
+  // cheap now, but the watching is not: a screen that flicks away mid-move
+  // every time the arithmetic tilts is unwatchable however smooth each cut is.
   if (now - framedAt < DWELL_MS) return showing;
   return best.worth > worth(current, now) ? best.room.code : showing;
 }
@@ -547,6 +554,28 @@ const versus = (room) =>
 
 /* ── Centre court ───────────────────────────────────────────────────── */
 
+/**
+ * Boot centre court: one canvas, once, for as long as this page is open.
+ *
+ * The address comes off `venue.pitch_url`, which is `/pitch` where the arena
+ * serves the build and the dev server otherwise, so there is nothing new to
+ * configure. The module is named rather than hashed for exactly this reason:
+ * a wall cannot read a build manifest.
+ */
+async function bootCourt() {
+  const from = `${(venue.pitch_url || "").replace(/\/$/, "")}/viewer.js`;
+  try {
+    const { mount } = await import(from);
+    pitch = mount(el("pitch"));
+    // The director runs on its own clock and may have chosen while Phaser was
+    // still loading, in which case nobody is going to call the cut again.
+    if (showing) pitch.point(showing);
+  } catch (failure) {
+    console.error("centre court could not load the pitch", failure);
+    say("The pitch did not load, so the big screen can only show the wall.");
+  }
+}
+
 function cutTo(wanted, now) {
   showing = wanted;
   framedAt = now;
@@ -561,16 +590,18 @@ function cutTo(wanted, now) {
     courtRoom.close();
     courtRoom = null;
   }
+  // Including the cut to nothing: the scoreline, the clock and both nameplates
+  // belong to the match being left, and the next thing put on this canvas must
+  // not open on them.
+  if (pitch) pitch.point(wanted || null);
   if (!wanted) {
-    el("pitch").removeAttribute("src");
     for (const feed of Object.values(feeds)) feed.clear();
     return;
   }
-  watch(wanted);
   listen(wanted);
 }
 
-/** Whose match this is, over the two feeds. */
+/** Whose match this is, over the two feeds and on the pitch itself. */
 function label(wanted) {
   const room = live.get(wanted) || {};
   const solo = (wanted === code ? ours.mode : room.mode) === "solo";
@@ -580,22 +611,15 @@ function label(wanted) {
   el("relay-red").dataset.empty = solo
     ? "No dugout here. The house side plays the squad as it shipped."
     : "Nothing said yet.";
-}
-
-/** Point the pitch at a room: as its host if we hold the token, else watching. */
-function watch(wanted) {
-  // The pitch may be an origin or may be a path on this one. Two-argument form
-  // handles both: an absolute URL ignores the base, a path resolves against it.
-  const at = new URL(venue.pitch_url || location.origin, location.origin);
-  at.searchParams.set("room", wanted);
-  at.searchParams.set("team", "blue");
-  const token = wanted === code ? screenToken() : "";
-  at.searchParams.set("as", token ? "host" : "viewer");
-  if (token) at.searchParams.set("client_id", token);
-  const address = at.toString();
-  // Only if it moved. Re-setting the same src reloads the iframe, and if that
-  // iframe is the host of a live match, reloading it is losing the match.
-  if (el("pitch").src !== address) el("pitch").src = address;
+  // The two plates in the corners of the pitch. The framed page used to read
+  // these off its own room socket; mounted, it is told, and the wall already
+  // knows because the roster is what the tiles are drawn from. Every pass
+  // rather than only on a cut, because a manager who sat down after kick-off
+  // reaches the roster after the match they are in.
+  if (pitch) {
+    pitch.managers({ mode: solo ? "solo" : "versus",
+                     seats: { blue: { name: room.blue }, red: { name: room.red } } });
+  }
 }
 
 function listen(wanted) {
@@ -609,9 +633,23 @@ function listen(wanted) {
   });
 }
 
-/** Anything off centre court's room. Both feeds see it; each keeps its half. */
-function courtside(message) {
+/**
+ * Anything off centre court's room. Both feeds see it; each keeps its half.
+ *
+ * `sounding` is false for the log a cut re-reads. A match already in its
+ * second half has a dozen goals behind it, and every one of them would arrive
+ * at once: a dozen whistles and a dozen white flashes over a pitch that has
+ * not drawn a frame yet.
+ */
+function courtside(message, sounding = true) {
+  // Ten a second, and the only reason this socket carries more than the wall's
+  // does. Handed straight over: the scene draws it on its own next tick.
+  if (message.type === "state") {
+    if (pitch) pitch.frame(message);
+    return;
+  }
   if (message.type === "event") {
+    if (pitch && sounding) pitch.cheer(message.kind);
     feeds.blue.event(message);
     feeds.red.event(message);
     return;
@@ -629,7 +667,7 @@ async function replay(wanted) {
     const { events } = await get(`/api/rooms/${wanted}/events?since=0`);
     // The screen may have cut away while this was in flight.
     if (wanted !== showing) return;
-    for (const entry of events) courtside({ ...entry, type: "event" });
+    for (const entry of events) courtside({ ...entry, type: "event" }, false);
   } catch (failure) {
     if (!(failure instanceof Refused)) throw failure;
   }
@@ -638,10 +676,6 @@ async function replay(wanted) {
 /* ── The operator ───────────────────────────────────────────────────── */
 
 function pin(wanted) {
-  if (hostingLive()) {
-    return say(`This screen is hosting ${code}, so that match holds centre court `
-               + "until the whistle.");
-  }
   problem.hidden = true;
   pinned = wanted === pinned ? null : wanted;
   direct();
