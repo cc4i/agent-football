@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The sheet for the wall - Futsal WorldCup</title>
+<link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700;800&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body class="paper">
+
+<main class="poster">
+  <span class="eyebrow">Futsal WorldCup</span>
+  <h1>Scan to play</h1>
+  <p class="lede">Your phone becomes the dugout. You manage the squad by talking to
+    them, and they decide how to play it.</p>
+
+  <img class="code" id="code" src="/qr.svg" width="320" height="320"
+       alt="A QR code that opens the registration page">
+
+  <p class="address mono" id="address">&nbsp;</p>
+
+  <ol class="steps">
+    <li>Point your camera at the code</li>
+    <li>Put a name on the board</li>
+    <li>Take a dugout on any screen</li>
+  </ol>
+</main>
+
+<p class="printnote">Print this and pin it up. The code says <span class="mono">/scan</span> and
+  nothing about any one room, so the same sheet works all day: whoever has been
+  here before lands on their own page, and everybody else lands on the form.</p>
+
+<script type="module" src="/static/poster.js"></script>
+</body>
+</html>

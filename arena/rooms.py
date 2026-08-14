@@ -340,6 +340,54 @@ def live(conn):
     ]
 
 
+def open_now(conn):
+    """Every room still waiting for a manager, oldest first.
+
+    For a phone that has scanned the sheet on the wall rather than the code
+    beside one screen: it has to be told what is in the building, because it
+    was not pointed at anything in particular.
+
+    Not the workshop, which sits in its lobby for the life of the deployment
+    because it is where the dugout tunes profiles with nobody in a dugout seat.
+    Sending somebody there would seat them in a match with no screen.
+    """
+    waiting = []
+    for row in conn.execute(
+        "SELECT r.code, r.mode,"
+        "       MAX(CASE WHEN s.team = 'blue' THEN p.display_name END) AS blue_name,"
+        "       MAX(CASE WHEN s.team = 'red'  THEN p.display_name END) AS red_name "
+        "FROM room r "
+        "LEFT JOIN seat s ON s.room_id = r.id "
+        "LEFT JOIN player p ON p.id = s.player_id "
+        "WHERE r.status = 'lobby' AND r.code <> %s "
+        "GROUP BY r.id ORDER BY r.created_at, r.id",
+        (codes.WORKSHOP,),
+    ):
+        taken = {team: row[f"{team}_name"] for team in TEAMS if row[f"{team}_name"]}
+        # A solo room is full at one, because nobody sits in its red dugout.
+        free = [team for team in required_teams(row["mode"]) if team not in taken]
+        if free:
+            waiting.append({"code": row["code"], "mode": row["mode"],
+                            "open_seats": free, "seats": taken})
+    return waiting
+
+
+def current_seat(conn, player_id):
+    """The dugout this manager is still sitting in, if there is one.
+
+    Only a room that has not finished: a manager whose match ended is somebody
+    with a result, not somebody with somewhere to go back to. Most recent
+    first, so an afternoon of matches does not send anybody to the morning.
+    """
+    return conn.execute(
+        "SELECT r.code, r.mode, r.status, s.team FROM seat s "
+        "JOIN room r ON r.id = s.room_id "
+        "WHERE s.player_id = %s AND r.status IN ('lobby', 'live') "
+        "ORDER BY s.joined_at DESC, s.room_id DESC LIMIT 1",
+        (player_id,),
+    ).fetchone()
+
+
 def live_count(conn):
     """How many matches are live, for the cap to compare against.
 

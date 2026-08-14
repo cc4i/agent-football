@@ -35,7 +35,7 @@ shell wins where both say something, which is what lets one exported
 | `ARENA_EMAIL_SALT` | `arena-dev-salt` | Salts the email hash. Keeps a literal default on purpose: change it and every returning player loses their history. Production refuses to start without it. |
 | `ARENA_SECRET` | random per start | Signs session cookies. Unset means sessions do not survive a restart - set it in anything longer-lived than a demo. Production refuses to start without it. |
 | `ARENA_SERVICE_TOKEN` | unset | Lets a server-side caller patch profiles without a phone session. Unset refuses every such call. The specialist agents need the same value. Production refuses to start without it. |
-| `ARENA_PUBLIC_URL` | derived from request | What the QR codes encode. Unset, it is worked out from the request's forwarded headers - Cloud Run does not tell a service its own hostname before the first deploy. Set it explicitly once the service has a name, or for a tunnel or a LAN address. |
+| `ARENA_PUBLIC_URL` | derived from request | What the QR codes encode. Unset, it is worked out from the request's forwarded headers - Cloud Run does not tell a service its own hostname before the first deploy. Set it explicitly once the service has a name, or for a tunnel or a LAN address. Set it before anybody prints `/poster`: a screen can be reloaded, a sheet on a wall has to be reprinted. |
 | `ARENA_PITCH_DIR` | unset | Where the built pitch bundle is, when the arena is the thing serving it. Unset locally, where Vite serves the pitch on :5173. |
 | `ARENA_PLAYER_STATE_DIR` | unset | The directory the game's MCP server writes injuries into. Deployed this is a volume shared with the coach's container. |
 | `ARENA_PITCH_URL` | `http://localhost:5173` | Where the pitch is served from. The big screen frames it. |
@@ -142,8 +142,12 @@ cannot tell a measured 8 from another guess.
 | Path | What it is |
 |---|---|
 | `/arena` | The big screen: a room to scan into, then the match at the size of the room |
-| `/join/{code}` | Where a scanned QR lands - name, email, dugout, opening stance |
+| `/join/{code}` | Where a room's QR lands - name, email, dugout, opening stance |
 | `/play?room={code}` | The phone's dugout: the relay, the score, and the shout chips |
+| `/poster` | The sheet for the wall. Open it on any screen and print it: one code, printed once, that is not about any one room |
+| `/scan` | Where the printed code lands. A phone the venue knows goes to `/home`, everybody else to `/register` |
+| `/register` | A name, an optional address, and that is the whole of registering |
+| `/home` | A manager's own page: the match they walked away from, the rooms open now, the board |
 
 ## Endpoints
 
@@ -152,6 +156,10 @@ cannot tell a measured 8 from another guess.
 | GET | `/health` | anyone |
 | GET | `/api/venue` | anyone - where the pitch and the public address are |
 | POST | `/api/players` | anyone - name and email in, session cookie out |
+| GET | `/api/players/available` | anyone - is this name free, and if not, whose spelling of it |
+| GET | `/api/players/me` | a phone with a session - who it is, and any seat it left |
+| GET | `/api/rooms/open` | anyone - the rooms still waiting for a manager |
+| GET | `/qr.svg` | anyone - the venue's code, the one on the printed sheet |
 | POST | `/api/rooms` | anyone; the response is the only place the host token appears |
 | GET | `/api/rooms/{code}` | anyone |
 | GET | `/api/rooms/{code}/me` | a phone with a session - which dugout is mine |

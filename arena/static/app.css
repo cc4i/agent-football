@@ -109,6 +109,28 @@ body.phone.fixed .pscreen{height:100%;min-height:0}
 .field label .optional{
   font-weight:500;letter-spacing:.06em;text-transform:lowercase;opacity:.8;
 }
+/* A word in a line of text that does something. A button, because most of
+   these act on the page they are on rather than going anywhere, and the
+   underline is what tells a thumb it is tappable either way. */
+.linky{
+  background:none;border:none;padding:0;font:inherit;color:#93c5fd;cursor:pointer;
+  text-decoration:underline;text-underline-offset:3px;
+}
+/* In the bar at the top it is one of the two things on that line, so it takes
+   the eyebrow's shape and keeps only the underline to say it is not a label. */
+.pbar .linky{
+  font-size:.66rem;font-weight:700;text-transform:uppercase;letter-spacing:.18em;
+  color:var(--mute);text-underline-offset:4px;
+}
+
+/* Who the venue already thinks this phone is, in place of the two boxes. */
+.known{
+  display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;
+  background:rgba(255,255,255,.03);border:1px solid var(--line);border-radius:8px;
+  padding:11px 13px;margin-bottom:12px;font-size:.82rem;color:var(--mute);
+}
+.known b{color:var(--ink);font-weight:600;font-size:.9rem}
+
 .pills{display:grid;grid-template-columns:1fr 1fr;gap:7px}
 .pill{
   background:rgba(255,255,255,.03);border:1px solid var(--line);color:var(--mute);
@@ -128,6 +150,10 @@ body.phone.fixed .pscreen{height:100%;min-height:0}
 .btn.ghost{background:rgba(255,255,255,.05);border:1px solid var(--line);color:var(--mute);box-shadow:none}
 .btn.slim{width:auto;padding:8px 15px;font-size:.74rem;border-radius:8px}
 .btn:disabled{opacity:.45;cursor:not-allowed}
+/* Some of these are links: where the button leads to a page rather than doing
+   something, an anchor is what a long press expects. A button centres its own
+   label and a link does not, so the link is made to look like the button. */
+a.btn{display:block;text-align:center;text-decoration:none;line-height:1.2}
 .push{margin-top:auto}
 
 /* The parts of a phone screen that grow, so the relay takes the slack. */
@@ -391,7 +417,59 @@ body.phone.fixed .pscreen{height:100%;min-height:0}
 /* The way off the results screen. An anchor rather than a button, because the
    board is a page: a long press should offer to open it, not do nothing. */
 .after{margin-top:auto;padding-top:14px;display:grid;gap:7px}
-.after .btn{display:block;text-align:center;text-decoration:none;line-height:1.2}
+
+/* ══════════════════════════════════════════════════════════════════
+   A manager's own page: /home
+
+   The far side of the printed code for everybody who has scanned it once
+   already. Three things in the order somebody has the questions: the match
+   they walked away from, the rooms they can walk into, the board.
+   ══════════════════════════════════════════════════════════════════ */
+/* The way back into a match still running. Green, because it is the only thing
+   on this page that is already happening. */
+.resume{
+  display:flex;align-items:center;justify-content:space-between;gap:12px;flex:none;
+  text-decoration:none;color:inherit;margin-bottom:15px;
+  background:linear-gradient(90deg,rgba(16,185,129,.17),rgba(16,185,129,.04));
+  border:1px solid rgba(16,185,129,.45);border-radius:10px;padding:11px 13px;
+}
+.resume .eyebrow{color:#6ee7b7}
+.resume b{
+  display:block;margin-top:3px;
+  font-family:'Outfit',system-ui,sans-serif;font-size:1rem;font-weight:800;
+}
+.resume .code{color:var(--gold);font-weight:600;font-size:.95rem;letter-spacing:.2em}
+
+.rooms{display:grid;gap:8px;margin-top:9px}
+/* Anchors rather than buttons: a room is a page, so a long press should offer
+   to open it in a tab rather than do nothing. */
+.room{
+  display:grid;grid-template-columns:1fr auto;gap:3px 10px;
+  text-decoration:none;color:inherit;
+  background:rgba(255,255,255,.03);border:1px solid var(--line);
+  border-left:3px solid var(--line);border-radius:10px;padding:11px 13px;
+}
+/* The rail takes a side's colour only when the card is about that side. A room
+   with both dugouts free is not blue, it is empty. */
+.room.blue{border-left-color:var(--blue-line)}
+.room.red{border-left-color:var(--red-line)}
+.room b{
+  grid-column:1;font-size:1.05rem;font-weight:600;letter-spacing:.2em;color:var(--gold);
+}
+.room em{
+  grid-column:2;grid-row:1;align-self:center;font-style:normal;white-space:nowrap;
+  font-size:.64rem;font-weight:700;text-transform:uppercase;letter-spacing:.12em;color:var(--mute);
+}
+.room.blue em{color:#93c5fd}
+.room.red em{color:#fca5a5}
+.room span{grid-column:1/-1;font-size:.74rem;color:var(--mute);min-width:0}
+
+/* No room open is the ordinary state between matches, not a fault, so it is
+   drawn as an empty shelf rather than as a warning. */
+.roomless{
+  border:1px dashed rgba(255,255,255,.12);border-radius:10px;padding:20px 16px;margin-top:9px;
+  font-size:.76rem;color:var(--faint);line-height:1.55;text-align:center;
+}
 
 /* ══════════════════════════════════════════════════════════════════
    The big screen: /arena
@@ -720,6 +798,64 @@ body.big{padding:24px}
 }
 .board-empty b{display:block;font-family:'Outfit',system-ui,sans-serif;font-size:1.15rem;margin-bottom:7px}
 .board-empty span{font-size:.85rem;color:var(--faint)}
+
+/* ══════════════════════════════════════════════════════════════════
+   The sheet for the wall: /poster
+
+   The only page here that is not looked at on a screen. It is drawn as the
+   paper it is about to become - white, on the dark page, at roughly the
+   proportions of the sheet - so that what somebody sees before they press
+   print is what comes out of the printer.
+   ══════════════════════════════════════════════════════════════════ */
+body.paper{display:flex;flex-direction:column;align-items:center;padding:26px 16px 40px;gap:16px}
+.poster{
+  width:100%;max-width:540px;background:#fff;color:#0b1020;border-radius:16px;
+  padding:40px 34px 32px;text-align:center;box-shadow:0 22px 60px rgba(0,0,0,.55);
+}
+.poster .eyebrow{color:#6b7280}
+.poster h1{
+  font-family:'Outfit',system-ui,sans-serif;font-size:2.9rem;font-weight:800;
+  letter-spacing:-.02em;line-height:1;margin:7px 0 10px;
+}
+.poster .lede{font-size:.95rem;line-height:1.5;color:#374151;max-width:34ch;margin:0 auto}
+.poster .code{display:block;width:100%;max-width:300px;height:auto;margin:24px auto 16px}
+/* Big enough to read from where the code is being scanned from, because this
+   is the line somebody falls back on when a camera will not focus. */
+.poster .address{font-size:1.15rem;font-weight:600;color:#111827;word-break:break-all}
+.steps{
+  list-style:none;counter-reset:step;display:flex;justify-content:center;gap:20px;
+  margin-top:26px;padding-top:18px;border-top:1px solid #e5e7eb;
+}
+.steps li{
+  flex:1;max-width:14ch;font-size:.76rem;line-height:1.4;color:#4b5563;
+}
+.steps li::before{
+  counter-increment:step;content:counter(step);
+  display:flex;align-items:center;justify-content:center;
+  width:22px;height:22px;margin:0 auto 7px;border-radius:50%;
+  background:#0b1020;color:#fff;font-family:'Outfit',system-ui,sans-serif;
+  font-size:.72rem;font-weight:800;
+}
+.printnote{
+  max-width:540px;font-size:.74rem;line-height:1.6;color:var(--faint);text-align:center;
+}
+
+@media print{
+  /* Nothing but the sheet, at the size of the paper it is on. Everything on it
+     grows: on a screen this is a preview of a poster, on paper it is the
+     poster, and it is read from across a room rather than from a desk. */
+  body.paper{display:block;background:#fff;padding:0}
+  .poster{max-width:none;box-shadow:none;border-radius:0;padding:0}
+  .poster h1{font-size:3.6rem}
+  .poster .lede{font-size:1.1rem;max-width:40ch}
+  .poster .code{max-width:140mm;margin:30px auto 18px}
+  .poster .address{font-size:1.4rem}
+  .steps{gap:30px;margin-top:32px;padding-top:22px}
+  .steps li{max-width:18ch;font-size:.92rem}
+  .steps li::before{width:26px;height:26px;font-size:.86rem}
+  .printnote{display:none}
+  @page{margin:16mm}
+}
 
 @media (max-width:1180px){
   /* A 330px rail beside the pitch stops paying for itself around here: the

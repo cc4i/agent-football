@@ -13,6 +13,7 @@
 
 import { get } from "/static/api.js";
 import { icon } from "/static/dom.js";
+import { figure } from "/static/words.js";
 import { openWall } from "/static/socket.js";
 
 const CYCLE_MS = 12_000;
@@ -98,7 +99,7 @@ function drawSolo(runs) {
   podium("podium-solo", runs, (run) => ({
     lines: [`${count(run.goals_for, "goal", "goals", "No goals")} · ${run.goals_against} conceded`,
             run.first_goal_ms === null ? "never scored" : `first at ${clock(run.first_goal_ms)}`],
-    score: points(run.points),
+    score: figure(run.points),
     unit: "points",
   }));
 
@@ -114,7 +115,7 @@ function drawSolo(runs) {
       { head: "Shouts that scored",
         draw: (run) => cell("num", run.shouts ? `${run.effective} of ${run.shouts}` : "-") },
     ],
-    total: { head: "Points", draw: (run) => cell("tot", points(run.points)) },
+    total: { head: "Points", draw: (run) => cell("tot", figure(run.points)) },
   });
 }
 
@@ -141,7 +142,7 @@ function drawVersus(table_) {
     // standing here with nothing to show in this column.
     total: { head: "Rating",
              draw: (one) => cell("tot", one.rating === null ? "-"
-                                                            : points(Math.round(one.rating))) },
+                                                            : figure(Math.round(one.rating))) },
   });
 }
 
@@ -274,7 +275,6 @@ function nobody(title, line) {
 
 /* ── Numbers as a manager reads them ────────────────────────────────── */
 
-const points = (value) => value.toLocaleString("en-GB");
 const signed = (value) => (value > 0 ? `+${value}` : String(value));
 const titled = (word) => (word ? word.charAt(0).toUpperCase() + word.slice(1) : "-");
 

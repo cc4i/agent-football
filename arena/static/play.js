@@ -10,6 +10,7 @@ import { get, post, Refused } from "/static/api.js";
 import { icon } from "/static/dom.js";
 import { relayFeed } from "/static/relay.js";
 import { openRoom } from "/static/socket.js";
+import { figure, ordinal } from "/static/words.js";
 
 const CODE = (new URLSearchParams(location.search).get("room") || "").toUpperCase();
 const SIDE_LABEL = { blue: "Blue", red: "Red" };
@@ -435,16 +436,8 @@ function shoutsAside(yours) {
   return `${landed} landed, ${yours.effective} followed by a goal inside 45 seconds.`;
 }
 
-const figure = (points) => points.toLocaleString("en-GB");
 const signed = (points) =>
   (points ? `${points > 0 ? "+" : "-"}${figure(Math.abs(points))}` : "0");
-
-function ordinal(place) {
-  // 11th, 12th and 13th, which the last-digit rule below gets wrong.
-  const teens = place % 100;
-  if (teens >= 11 && teens <= 13) return `${place}th`;
-  return `${place}${["th", "st", "nd", "rd"][place % 10] || "th"}`;
-}
 
 /* ── Saying what went wrong ─────────────────────────────────────────── */
 

@@ -8,7 +8,6 @@ one person can play at once.
 
 import asyncio
 import hmac
-import io
 import json
 import logging
 import os
@@ -18,7 +17,6 @@ import time
 from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
 
-import segno
 from dotenv import load_dotenv
 from fastapi import (Depends, FastAPI, HTTPException, Request, Response, WebSocket,
                      WebSocketDisconnect)
@@ -44,6 +42,7 @@ import philosophies
 import presets
 import profiles
 import proxy
+import qr
 import rooms
 from bus import WALL, Bus, room_topic
 
@@ -444,6 +443,43 @@ async def front_door():
     return RedirectResponse("/arena")
 
 
+@app.get("/scan")
+async def scanned(request: Request):
+    """What the sheet on the wall leads to. Not a page: a door.
+
+    The printed code says this and only this, so the same sheet has to work for
+    somebody who arrived a minute ago and for somebody on their fourth match.
+    A phone whose cookie names a manager the venue still has goes to their own
+    page; everybody else goes to the form. A cookie from an event whose
+    database has since been emptied is the second of those rather than an
+    error, which is what `_player_or_none` is for.
+    """
+    known = _player_or_none(request, request.app.state.conn) is not None
+    return RedirectResponse("/home" if known else "/register")
+
+
+@app.get("/register")
+async def register_page():
+    """The form, with no room behind it. Where a scanned sheet sends a stranger."""
+    return _page("register.html")
+
+
+@app.get("/home")
+async def home_page():
+    """A manager's own page: where they stand, and what they can walk into.
+
+    Served to a phone with no session too. It asks who it belongs to and sends
+    a stranger to the form; refusing the file would make that a blank page.
+    """
+    return _page("home.html")
+
+
+@app.get("/poster")
+async def poster_page():
+    """The sheet itself, laid out to be printed and pinned to a wall."""
+    return _page("poster.html")
+
+
 @app.get("/join/{code}")
 async def join_page(code: str, request: Request):
     """The form a scanned QR lands on.
@@ -505,6 +541,29 @@ async def join(body: JoinRequest, request: Request, response: Response):
     return {"id": player_id,
             "display_name": player["display_name"],
             "email": player["email_masked"]}
+
+
+@app.get("/api/players/me")
+async def read_me(request: Request, player_id: int = Depends(current_player)):
+    """Who this phone is, and whether it left anybody sitting in a dugout.
+
+    The seat comes back with the name because a phone asking who it is has
+    almost always just been picked up again, and the first thing its owner
+    wants to know is whether the match they walked away from is still on.
+    """
+    connection = request.app.state.conn
+    player = rooms.get_player(connection, player_id)
+    seat = rooms.current_seat(connection, player_id)
+    return {"id": player_id,
+            "display_name": player["display_name"],
+            "email": player["email_masked"],
+            "room": dict(seat) if seat else None}
+
+
+@app.get("/api/rooms/open")
+async def read_open_rooms(request: Request):
+    """Which rooms are still waiting for a manager, for a phone with no room."""
+    return {"rooms": rooms.open_now(request.app.state.conn)}
 
 
 @app.get("/api/players/available")
@@ -633,18 +692,25 @@ async def read_board(request: Request):
 
 @app.get("/api/rooms/{code}/qr.svg")
 async def room_qr(code: str, request: Request):
-    """This room's join address as a scannable code.
-
-    SVG rather than PNG so the big screen can scale it to the wall without it
-    going soft, and so no image library has to be in the dependency list.
-    """
+    """This room's join address as a scannable code, for the screen beside it."""
     _, room = _profile_room(request, code)
-    drawing = io.BytesIO()
-    # Sized in mm with no class attributes, so the page's own CSS decides how
-    # big it is rather than the encoder.
-    segno.make(join_url(room["code"], request), error="m").save(
-        drawing, kind="svg", scale=1, border=2, unit="mm", svgclass=None, lineclass=None)
-    return Response(drawing.getvalue(), media_type="image/svg+xml",
+    return _code(join_url(room["code"], request))
+
+
+@app.get("/qr.svg")
+async def venue_qr(request: Request):
+    """The venue's own code: the one that goes on a sheet on a wall.
+
+    It says `/scan` and nothing else, because a sheet is printed in the morning
+    and every room in the building is opened after that. What it does when
+    somebody points a phone at it is the router below's business, which is the
+    other half of why the code itself never has to change.
+    """
+    return _code(f"{_origin(request)}/scan")
+
+
+def _code(url):
+    return Response(qr.svg(url), media_type="image/svg+xml",
                     headers={"Cache-Control": "no-store"})
 
 

@@ -23,24 +23,33 @@
 
   <p class="problem" id="problem" hidden></p>
 
-  <div class="field">
-    <label for="name">Name on the board</label>
-    <input id="name" class="input" name="name" autocomplete="name"
-           enterkeyhint="next" maxlength="40" placeholder="Alex Rivera"
-           aria-describedby="name-hint" required>
-    <p class="hint bad" id="name-hint" role="alert" hidden></p>
-  </div>
+  <!-- A phone that has been here before. Shown in place of the two boxes below
+       once the arena says whose phone it is. -->
+  <p class="known" id="known" hidden>
+    Playing as <b id="known-name"></b>
+    <button type="button" class="linky" id="change">change</button>
+  </p>
 
-  <div class="field">
-    <label for="email">Email <span class="optional">optional</span></label>
-    <input id="email" class="input" name="email" type="email" inputmode="email"
-           autocomplete="email" enterkeyhint="done" maxlength="254"
-           placeholder="alex@example.com" aria-describedby="email-hint email-note">
-    <p class="hint bad" id="email-hint" role="alert" hidden></p>
-    <p class="hint" id="email-note">Only so you keep one place on the board if you play again on
-      another phone. Leave it empty and nothing is lost but that. Never shown
-      whole - the board shows <span class="mono">a***x@example.com</span> - and
-      deleted after the event.</p>
+  <div id="boxes">
+    <div class="field">
+      <label for="name">Name on the board</label>
+      <input id="name" class="input" name="name" autocomplete="name"
+             enterkeyhint="next" maxlength="40" placeholder="Alex Rivera"
+             aria-describedby="name-hint" required>
+      <p class="hint bad" id="name-hint" role="alert" hidden></p>
+    </div>
+
+    <div class="field">
+      <label for="email">Email <span class="optional">optional</span></label>
+      <input id="email" class="input" name="email" type="email" inputmode="email"
+             autocomplete="email" enterkeyhint="done" maxlength="254"
+             placeholder="alex@example.com" aria-describedby="email-hint email-note">
+      <p class="hint bad" id="email-hint" role="alert" hidden></p>
+      <p class="hint" id="email-note">Only so you keep one place on the board if you play again
+        on another phone. Leave it empty and nothing is lost but that. Never shown
+        whole - the board shows <span class="mono">a***x@example.com</span> - and
+        deleted after the event.</p>
+    </div>
   </div>
 
   <div class="field">

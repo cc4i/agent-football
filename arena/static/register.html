@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#07090e">
+<title>Get on the board - Futsal WorldCup</title>
+<link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700;800&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body class="phone">
+<form class="pscreen" id="register" novalidate>
+  <div class="pbar">
+    <span class="eyebrow">Futsal WorldCup</span>
+    <span class="eyebrow" id="step">Step 1 of 2</span>
+  </div>
+
+  <h1 class="ptitle">Get on the board</h1>
+  <p class="psub">Your phone is the dugout: you manage the squad by talking to them, and they
+    decide how to play it. This is the only thing to fill in all day.</p>
+
+  <p class="problem" id="problem" hidden></p>
+
+  <div class="field">
+    <label for="name">Name on the board</label>
+    <input id="name" class="input" name="name" autocomplete="name"
+           enterkeyhint="next" maxlength="40" placeholder="Alex Rivera"
+           aria-describedby="name-hint name-note" required>
+    <p class="hint bad" id="name-hint" role="alert" hidden></p>
+    <p class="hint" id="name-note">What the big screen calls you, and what goes on the
+      standings. One of each in the building, so pick something the person next to
+      you would not.</p>
+  </div>
+
+  <div class="field">
+    <label for="email">Email <span class="optional">optional</span></label>
+    <input id="email" class="input" name="email" type="email" inputmode="email"
+           autocomplete="email" enterkeyhint="done" maxlength="254"
+           placeholder="alex@example.com" aria-describedby="email-hint email-note">
+    <p class="hint bad" id="email-hint" role="alert" hidden></p>
+    <p class="hint" id="email-note">Only so you keep one place on the board if you play again
+      on another phone. Leave it empty and nothing is lost but that. Never shown
+      whole - the board shows <span class="mono">a***x@example.com</span> - and
+      deleted after the event.</p>
+  </div>
+
+  <button class="btn primary push" id="done" type="submit">That's me</button>
+</form>
+<script type="module" src="/static/register.js"></script>
+</body>
+</html>

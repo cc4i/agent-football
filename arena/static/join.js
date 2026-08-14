@@ -5,45 +5,52 @@
  * and nothing to get wrong. Three calls in order: become a player, take a
  * seat, go to the dugout.
  *
- * The name is the one thing here that somebody else can already have taken, so
- * the arena is asked about it while it is being typed rather than only when
- * the button is tapped. The join itself is still what decides -- two phones can
- * type the same name in the same second -- and it says the same sentence.
+ * A phone the venue already knows skips the first of those. It has a cookie
+ * from the last match, and asking somebody to type their own name again in
+ * front of a screen with a queue behind it is asking them to make a typo. The
+ * two boxes are replaced by the name they already have and a way to change it,
+ * and the boxes themselves - what they check, and where they say it - are
+ * `signup.js`, because the register page asks exactly the same two questions.
  *
- * A refusal about one of these two boxes is said underneath that box. The
- * banner at the top is for the ones with no box to point at: a room that has
- * kicked off, a seat somebody else took, a phone off the wifi.
+ * A refusal with a box to point at is said underneath that box. The banner at
+ * the top is for the ones with no box: a room that has kicked off, a seat
+ * somebody took first, a phone off the wifi.
  */
 
 import { get, post, Refused } from "/static/api.js";
 import { icon } from "/static/dom.js";
+import { signup } from "/static/signup.js";
 
 const CODE = decodeURIComponent(location.pathname.split("/").pop() || "").toUpperCase();
 const SIDE = { blue: "blue", red: "red" };
-
-// How long a phone keyboard goes quiet before the name is worth asking about.
-// Long enough that typing a name is one question rather than a dozen, short
-// enough that the answer is there before a thumb reaches the button.
-const TYPING_PAUSE = 400;
 
 const form = document.getElementById("join");
 const problem = document.getElementById("problem");
 const pills = document.getElementById("pills");
 const blurb = document.getElementById("blurb");
 const take = document.getElementById("take");
+const boxes = document.getElementById("boxes");
+const known = document.getElementById("known");
+const knownName = document.getElementById("known-name");
+const change = document.getElementById("change");
 const name = document.getElementById("name");
-const nameHint = document.getElementById("name-hint");
-const email = document.getElementById("email");
-const emailHint = document.getElementById("email-hint");
 
 let stance = null;
 let seat = null;
-// Only a name the arena has actually refused blocks the button. Somewhere
-// between a keystroke and an answer it is unknown, and a form that will not be
-// submitted until a network call comes back is a form a bad wifi can lock.
-let nameTaken = false;
-let asking = 0;
-let pause = null;
+// Who the arena says this phone is, until the manager says otherwise. Null
+// means the two boxes are showing and the join has to be made.
+let me = null;
+// A join already on its way. The button is disabled for the whole of it, and
+// `ready` is what holds it there while the form clears its own marks.
+let sending = false;
+
+const who = signup({
+  name,
+  nameHint: document.getElementById("name-hint"),
+  email: document.getElementById("email"),
+  emailHint: document.getElementById("email-hint"),
+  changed: ready,
+});
 
 document.getElementById("code").textContent = CODE;
 
@@ -60,7 +67,33 @@ async function start() {
   } catch (failure) {
     complain(failure);
   }
+  // Separately, and after the room: a phone with no session is the ordinary
+  // case here rather than a problem, and nothing above should wait on it.
+  try {
+    greet(await get("/api/players/me"));
+  } catch {
+    // Nobody the venue knows. The boxes are already showing.
+  }
 }
+
+function greet(player) {
+  me = player;
+  knownName.textContent = player.display_name;
+  known.hidden = false;
+  boxes.hidden = true;
+}
+
+change.addEventListener("click", () => {
+  // Their own name back in the box, because most people changing it are fixing
+  // a typo in it rather than becoming somebody else.
+  name.value = me ? me.display_name : "";
+  me = null;
+  known.hidden = true;
+  boxes.hidden = false;
+  name.focus();
+  name.select();
+  ready();
+});
 
 function drawStances(stances) {
   pills.replaceChildren(...stances.map((entry) => {
@@ -98,109 +131,44 @@ function settle(room) {
 }
 
 function ready() {
-  take.disabled = !(stance && seat) || nameTaken;
-}
-
-name.addEventListener("input", () => {
-  // Whatever the arena last said was about a name that is no longer in the box.
-  aboutTheName(null);
-  clearTimeout(pause);
-  pause = setTimeout(askAboutTheName, TYPING_PAUSE);
-});
-
-async function askAboutTheName() {
-  const typed = name.value.trim();
-  if (!typed) return;
-  const question = ++asking;
-  let answer;
-  try {
-    answer = await get(`/api/players/available?name=${encodeURIComponent(typed)}`);
-  } catch {
-    // The join will say so for itself if the name really is taken. A phone that
-    // cannot reach the arena, or a name the check will not answer about at all,
-    // must not be reported to a manager as a name somebody else has.
-    return;
-  }
-  // A later keystroke has already overtaken this one, so its answer is about a
-  // name that is no longer in the box.
-  if (question !== asking) return;
-  aboutTheName(answer.available ? null : `${answer.name} is taken. Try another name.`);
-}
-
-email.addEventListener("input", () => aboutTheAddress(null));
-
-function aboutTheName(trouble) {
-  nameTaken = Boolean(trouble);
-  mark(name, nameHint, trouble);
-  ready();
-}
-
-function aboutTheAddress(trouble) {
-  // Nothing here blocks the button the way a taken name does. The arena is the
-  // only judge of what an address looks like, so the only way to find out
-  // whether the next thing typed suits it is to send it.
-  mark(email, emailHint, trouble);
-}
-
-function mark(box, hint, trouble) {
-  hint.textContent = trouble || "";
-  hint.hidden = !trouble;
-  box.classList.toggle("wrong", Boolean(trouble));
-}
-
-/**
- * A refused join, said under the box that has to change if there is one.
- *
- * A 409 is the name every time: it is the only thing on this form that somebody
- * else can be holding. A 422 names its own fields, and the arena's two are both
- * boxes here -- but only a refusal about exactly one of them can go under a box,
- * because the sentence covers every problem it found and half of it under each
- * would be two wrong sentences.
- */
-const BOXES = { display_name: aboutTheName, email: aboutTheAddress };
-
-function sayWhereItBelongs(failure) {
-  if (!(failure instanceof Refused)) throw failure;
-  if (failure.status === 409) return aboutTheName(failure.message);
-  const boxes = failure.fields.map((field) => BOXES[field]).filter(Boolean);
-  if (boxes.length === 1 && boxes.length === failure.fields.length) {
-    return boxes[0](failure.message);
-  }
-  complain(failure);
+  take.disabled = sending || !(stance && seat) || who.refused;
 }
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
   if (take.disabled) return;
-  // Everything the last tap was told is about to be answered again, and cleared
-  // before the button is held down rather than after, because clearing a mark
-  // reconsiders whether the button should be enabled.
   problem.hidden = true;
-  aboutTheName(null);
-  aboutTheAddress(null);
-  take.disabled = true;
-  // Nothing is going to answer about a name that is already being submitted.
-  clearTimeout(pause);
+  sending = true;
+  ready();
 
-  try {
-    await post("/api/players", {
-      display_name: name.value.trim(),
-      email: email.value.trim(),
-    });
-  } catch (failure) {
-    sayWhereItBelongs(failure);
-    ready();
-    return;
+  // A manager who has not touched the boxes is already a player, and joining
+  // again would be one more thing between them and the whistle.
+  if (!me) {
+    let player;
+    try {
+      player = await who.submit();
+    } catch (failure) {
+      return giveUp(failure);
+    }
+    if (!player) {
+      sending = false;
+      return ready();
+    }
   }
 
   try {
     await post(`/api/rooms/${CODE}/seats/${seat}`, { philosophy: stance });
     location.assign(`/play?room=${encodeURIComponent(CODE)}`);
   } catch (failure) {
-    complain(failure);
-    ready();
+    giveUp(failure);
   }
 });
+
+function giveUp(failure) {
+  sending = false;
+  complain(failure);
+  ready();
+}
 
 function complain(failure) {
   if (!(failure instanceof Refused)) throw failure;

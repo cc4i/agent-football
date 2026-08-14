@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#07090e">
+<title>Your dugout - Futsal WorldCup</title>
+<link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700;800&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body class="phone">
+<div class="pscreen">
+  <div class="pbar">
+    <span class="eyebrow">Futsal WorldCup</span>
+    <a class="linky" href="/register">Change name</a>
+  </div>
+
+  <h1 class="ptitle" id="who">&nbsp;</h1>
+  <p class="psub" id="standing">Looking you up…</p>
+
+  <p class="problem" id="problem" hidden></p>
+
+  <!-- A match this phone walked away from. First, because somebody whose squad
+       is on a pitch right now is not here to browse. -->
+  <a class="resume" id="resume" href="/play" hidden>
+    <span>
+      <span class="eyebrow">Your match is still on</span>
+      <b>Back to your dugout</b>
+    </span>
+    <span class="code mono" id="resume-code">····</span>
+  </a>
+
+  <div class="stack">
+    <span class="eyebrow">Rooms open now</span>
+    <div class="rooms" id="rooms"></div>
+  </div>
+
+  <a class="btn ghost push" href="/board">See the standings</a>
+</div>
+<script type="module" src="/static/home.js"></script>
+</body>
+</html>
