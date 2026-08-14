@@ -23,6 +23,12 @@ def idle(client):
     return status == psycopg.pq.TransactionStatus.IDLE
 
 
+def gone_quiet(client, code):
+    """Stamp this room as last heard from long enough ago to be given up on."""
+    conn = client.app.state.conn
+    rooms.heard_from(conn, rooms.by_code(conn, code)["id"], time.time() - 10_000)
+
+
 def test_a_boot_that_found_the_workshop_already_open_leaves_nothing_open(client):
     # The first boot creates the workshop and commits on the way; every boot
     # after it only reads. An instance can be up for a good while before its
@@ -319,7 +325,7 @@ def test_a_sweep_whose_write_failed_does_not_take_the_watchdog_with_it(client, l
     import app as arena
 
     code, _ = live_room()
-    client.app.state.heard[code] = time.monotonic() - 10_000
+    gone_quiet(client, code)
 
     def the_sweep_loses_the_race(conn, room_id, kind, payload, match_ms=None):
         for _ in range(2):
@@ -332,7 +338,7 @@ def test_a_sweep_whose_write_failed_does_not_take_the_watchdog_with_it(client, l
     assert idle(client)
 
     # The next sweep is the one that matters: it is the room's second chance.
-    client.app.state.heard[code] = time.monotonic() - 10_000
+    gone_quiet(client, code)
     turn_the_watchdog_over(client)
     assert client.get(f"/api/rooms/{code}").json()["status"] == "abandoned"
     assert client.get(f"/api/rooms/{codes.WORKSHOP}").status_code == 200

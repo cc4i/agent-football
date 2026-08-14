@@ -153,10 +153,6 @@ async def lifespan(fastapi_app: FastAPI):
     fastapi_app.state.conn = connection
     fastapi_app.state.bus = Bus()
     fastapi_app.state.chain = chain.Chain(fastapi_app.state.bus)
-    # When each live room was last heard from, by code. In memory on purpose:
-    # a restart has lost every host anyway, and the sweep below treats a room
-    # it has never heard from the same as one that has gone quiet.
-    fastapi_app.state.heard = {}
     # Install filter to redact client_id from access logs.
     access_logger = logging.getLogger("uvicorn.access")
     access_logger.addFilter(_RedactClientId())
@@ -858,6 +854,41 @@ async def _pump(socket, subscription):
         await socket.send_json(message)
 
 
+class _HostReporting:
+    """When this socket last told its room that the host is here.
+
+    The screen publishes a frame every 100ms while a match is running, and
+    stamping the room on each of them would be ten committing writes a second
+    per match down the one shared connection, in front of everything else the
+    arena has to say. Nothing needs that rate: the sweep runs every
+    SWEEP_SECONDS and gives a host HOST_GONE_SECONDS, so a stamp that lags by a
+    sweep changes no outcome a sweep can reach.
+
+    One of these belongs to each host socket rather than to the module, because
+    a socket lives exactly as long as "this host is reporting" and takes its
+    state away with it when it hangs up. A map keyed by room is the thing this
+    change removed, and its eviction problem would come back with it.
+    """
+
+    def __init__(self):
+        self.stamped = None
+
+    def stamp(self, connection, room_id):
+        """Write the room's liveness, unless this socket wrote it a moment ago.
+
+        The gap is measured on a monotonic clock because it never leaves this
+        process; what goes in the column is wall clock, because it does. The
+        first frame on a socket always writes, so an instance that has just come
+        up learns a match is live from the first thing it hears rather than a
+        sweep later.
+        """
+        now = time.monotonic()
+        if self.stamped is not None and now - self.stamped < SWEEP_SECONDS:
+            return
+        self.stamped = now
+        rooms.heard_from(connection, room_id)
+
+
 @app.websocket("/ws/rooms/{code}")
 async def room_socket(socket: WebSocket, code: str, client_id: str = ""):
     """One room's feed. Anyone may listen; only the host may drive."""
@@ -885,6 +916,7 @@ async def room_socket(socket: WebSocket, code: str, client_id: str = ""):
 
     subscription = match_bus.subscribe(room_topic(code))
     pump = asyncio.create_task(_pump(socket, subscription))
+    reporting = _HostReporting()
     try:
         while True:
             try:
@@ -893,7 +925,7 @@ async def room_socket(socket: WebSocket, code: str, client_id: str = ""):
                 continue
             try:
                 _handle_from_host(message, connection, match_bus, room, client_id,
-                                  socket.app.state.heard)
+                                  reporting)
             finally:
                 # One message is one unit of work. No middleware reaches a
                 # WebSocket route, so this socket puts the connection back
@@ -925,7 +957,7 @@ def _wire_bytes(value):
         return None
 
 
-def _handle_from_host(message, connection, match_bus, room, client_id, heard):
+def _handle_from_host(message, connection, match_bus, room, client_id, reporting):
     """Apply one up-message, if the sender is the client holding physics."""
     if not isinstance(message, dict):
         return
@@ -947,7 +979,7 @@ def _handle_from_host(message, connection, match_bus, room, client_id, heard):
     # The host is here. That is worth recording before the message is picked
     # over, because a frame the arena goes on to refuse is still proof that
     # somebody is on the other end of the socket running this match.
-    heard[room["code"]] = time.monotonic()
+    reporting.stamp(connection, current["id"])
 
     payload = message.get("payload")
     if payload is not None and not isinstance(payload, dict):
@@ -1027,7 +1059,7 @@ def _end_match(connection, match_bus, room, event_kind):
     match_bus.publish(WALL, {"type": "wall", "rooms": rooms.live(connection)})
 
 
-def _give_up_on_the_missing(connection, match_bus, heard, now):
+def _give_up_on_the_missing(connection, match_bus, now):
     """Abandon live rooms whose host has stopped reporting. Returns their codes.
 
     A room only leaves "live" when somebody blows a whistle on it, and a laptop
@@ -1035,28 +1067,35 @@ def _give_up_on_the_missing(connection, match_bus, heard, now):
     tile on every wall in the venue for the rest of the evening, and the two
     managers watch a clock that has stopped and are never told why.
 
-    A room nobody has been heard on yet is timed from the first sweep that sees
-    it rather than from kick-off, which is the same rule one sweep late. That
-    is what makes a restart safe: rooms left live by the process that died are
-    unreachable, and thirty seconds later they are marked as what they are.
-    """
-    playing = {room["code"] for room in rooms.live(connection)}
-    for code in [code for code in heard if code not in playing]:
-        del heard[code]
+    Liveness is a column rather than a dict in memory because a deploy runs two
+    instances at once for a few seconds. An arena that only trusted what it had
+    personally heard would spend those seconds abandoning matches whose hosts
+    are talking perfectly happily to the instance it is replacing.
 
+    A room nobody has reported on yet is stamped on the first sweep that sees
+    it rather than abandoned, which is the same rule one sweep late.
+    """
     gone = []
-    for code in sorted(playing):
-        if now - heard.setdefault(code, now) <= HOST_GONE_SECONDS:
+    for room in rooms.live_with_liveness(connection):
+        if room["last_heard_at"] is None:
+            # From this sweep's own clock rather than a `time.time()` of its
+            # own: the grace is measured against `now`, so `now` is what it
+            # should be measured from. In a running arena the two are the same
+            # reading; on a fixed clock only this one is.
+            rooms.heard_from(connection, room["id"], now)
             continue
-        room = rooms.by_code(connection, code)
-        del heard[code]
+        if now - room["last_heard_at"] <= HOST_GONE_SECONDS:
+            continue
+        full = rooms.by_code(connection, room["code"])
         said = {"reason": HOST_GONE_REASON}
-        seq = rooms.append_event(connection, room["id"], "abandoned", said)
-        match_bus.publish(room_topic(code), {"type": "event", "seq": seq, "kind": "abandoned",
-                                             "match_ms": None, "payload": said})
-        _end_match(connection, match_bus, room, "abandoned")
-        logger.info("room %s abandoned: nothing from its host in %ss", code, HOST_GONE_SECONDS)
-        gone.append(code)
+        seq = rooms.append_event(connection, full["id"], "abandoned", said)
+        match_bus.publish(room_topic(room["code"]),
+                          {"type": "event", "seq": seq, "kind": "abandoned",
+                           "match_ms": None, "payload": said})
+        _end_match(connection, match_bus, full, "abandoned")
+        logger.info("room %s abandoned: nothing from its host in %ss",
+                    room["code"], HOST_GONE_SECONDS)
+        gone.append(room["code"])
     return gone
 
 
@@ -1066,7 +1105,7 @@ async def _watch_for_the_missing(fastapi_app):
         await asyncio.sleep(SWEEP_SECONDS)
         try:
             _give_up_on_the_missing(fastapi_app.state.conn, fastapi_app.state.bus,
-                                    fastapi_app.state.heard, time.monotonic())
+                                    time.time())
         except Exception:
             # One bad sweep must not take the watchdog down for the life of the
             # process: every room after it would then hang live forever.

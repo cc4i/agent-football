@@ -259,6 +259,27 @@ def live(conn):
     ]
 
 
+def heard_from(conn, room_id, when=None):
+    """Record that this room's host just reported.
+
+    Wall clock rather than a monotonic one: the value is read by whichever
+    arena is sweeping, and a monotonic clock means nothing outside the process
+    that took it. `when` is for tests running on a fixed clock.
+    """
+    conn.execute("UPDATE room SET last_heard_at = %s WHERE id = %s",
+                 (time.time() if when is None else when, room_id))
+    conn.commit()
+
+
+def live_with_liveness(conn):
+    """Every live room's id, code and last report, for the watchdog."""
+    return [
+        {"id": row["id"], "code": row["code"], "last_heard_at": row["last_heard_at"]}
+        for row in conn.execute(
+            "SELECT id, code, last_heard_at FROM room WHERE status = 'live' ORDER BY code")
+    ]
+
+
 def unrank(conn, room_id):
     """Take this match off the boards, for good.
 
