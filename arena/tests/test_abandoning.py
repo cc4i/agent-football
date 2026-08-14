@@ -25,15 +25,21 @@ NOW = 10_000.0
 LATE = NOW + arena.HOST_GONE_SECONDS + 1
 
 
-def sweep(client, when):
+def sweep(client, when, holding=None):
     """Run one sweep, as at `when`, from inside the app's own event loop.
 
     The bus hands messages to sockets that are waiting on them, and waking one
     of those from the test's thread is not safe, so this goes the same way a
     route does.
+
+    `holding` is the app whose open host sockets vouch for their rooms, for the
+    tests that have one connected. Left out, nothing is holding anything, which
+    is what every test written before the socket counted assumes.
     """
     state = client.app.state
-    return client.portal.call(arena._give_up_on_the_missing, state.conn, state.bus, when)
+    held = holding.state.held if holding is not None else None
+    return client.portal.call(arena._give_up_on_the_missing, state.conn, state.bus,
+                              when, held)
 
 
 def heard_now(client, code):
@@ -114,6 +120,103 @@ def test_a_screen_holding_a_lobby_says_so_and_keeps_it(client, phones):
     assert sweep(client, heard + arena.HOST_GONE_SECONDS) == []
     assert rooms.by_code(client.app.state.conn, code)["status"] == "lobby"
     assert sweep(client, heard + arena.HOST_GONE_SECONDS + 1) == [code]
+
+
+# A screen that is still there and cannot say so.
+#
+# Liveness used to rest entirely on the screen speaking: `host.here` on a
+# ten-second setInterval, and the pitch's frames off requestAnimationFrame. A
+# browser suspends both of those for a tab that is not the one in front.
+# Measured in Chrome, against this arena: the frames stop on the same tick the
+# tab is hidden, and the interval is throttled and then starved, so the last
+# `host.here` of a backgrounded screen lands about a minute in and nothing
+# follows it. Thirty seconds later the sweep gives up on a match whose screen
+# is sitting right there, and both managers are told it stopped reporting.
+#
+# Somebody with two matches open in two tabs loses whichever one they are not
+# looking at, every time, which is both of them by the time they have looked at
+# each once.
+#
+# The socket is the thing a browser does not throttle. A tab that still exists
+# still holds its connection open, and answers the server's pings from the
+# network stack rather than from the JavaScript that has been put to sleep - so
+# the connection is the proof, and a lid that shuts stops answering and is
+# swept as it always was.
+
+
+def test_a_screen_whose_tab_went_to_the_background_keeps_its_match(client, live_room):
+    code, host_token = live_room()
+    with client.websocket_connect(f"/ws/rooms/{code}?client_id={host_token}") as screen:
+        screen.receive_json()
+        screen.send_json({"type": "host.here"})
+        heard = once_heard(client, code)
+
+        # Not a word since, for well past the grace: this is a tab whose timers
+        # Chrome has stopped calling. The socket is open the whole time.
+        assert sweep(client, heard + arena.HOST_GONE_SECONDS + 1, client.app) == []
+        assert rooms.by_code(client.app.state.conn, code)["status"] == "live"
+        # And still holding it minutes later, because a match this screen can
+        # still finish is not one to close under it.
+        assert sweep(client, heard + 600, client.app) == []
+        assert rooms.by_code(client.app.state.conn, code)["status"] == "live"
+
+
+def test_a_screen_holding_a_silent_lobby_keeps_that_too(client, phones):
+    # The same tab, backgrounded before anybody took a seat. Worse than losing
+    # a match, because the room is on every phone's list until it goes.
+    code, host_token = open_lobby(client, phones)
+    with client.websocket_connect(f"/ws/rooms/{code}?client_id={host_token}") as screen:
+        screen.receive_json()
+
+        assert sweep(client, NOW + arena.HOST_GONE_SECONDS + 1, client.app) == []
+        assert rooms.by_code(client.app.state.conn, code)["status"] == "lobby"
+
+
+def test_the_screen_that_hangs_up_loses_its_room_as_it_always_did(client, live_room):
+    # The whole point of the sweep. A closed tab, or a lid shut long enough for
+    # the ping to go unanswered, drops the socket - and then nothing is holding
+    # the room and the grace runs out on it.
+    code, host_token = live_room()
+    with client.websocket_connect(f"/ws/rooms/{code}?client_id={host_token}") as screen:
+        screen.receive_json()
+        screen.send_json({"type": "host.here"})
+        heard = once_heard(client, code)
+
+    assert sweep(client, heard + arena.HOST_GONE_SECONDS + 1, client.app) == [code]
+    assert rooms.by_code(client.app.state.conn, code)["status"] == "abandoned"
+
+
+def test_a_watcher_sitting_on_the_socket_holds_nothing(client, phones):
+    # Every screen in the venue has this room's socket open to watch it, and a
+    # phone in a dugout has one too. If any of them counted, the sweep would
+    # never fire in a full hall, which is the one place it has to.
+    code, _ = open_lobby(client, phones)
+    heard_now(client, code)
+    with client.websocket_connect(f"/ws/rooms/{code}") as watcher:
+        watcher.receive_json()
+        with client.websocket_connect(f"/ws/rooms/{code}?client_id=impostor") as liar:
+            liar.receive_json()
+
+            assert sweep(client, LATE, client.app) == [code]
+
+
+def test_the_pitch_and_the_screen_are_two_sockets_on_one_room(client, live_room):
+    # The arena page opens one and the pitch it frames opens another, both with
+    # the same token. Counted rather than remembered as a set, or the pitch
+    # reloading at kick-off would release a room the screen is still holding.
+    code, host_token = live_room()
+    with client.websocket_connect(f"/ws/rooms/{code}?client_id={host_token}") as screen:
+        screen.receive_json()
+        with client.websocket_connect(f"/ws/rooms/{code}?client_id={host_token}") as pitch:
+            pitch.receive_json()
+        # The pitch has gone; the screen has not.
+        assert sweep(client, LATE, client.app) == []
+
+    # Now both have. The grace runs from the last sweep that vouched for it
+    # rather than from the last thing the screen said, which is the point: a
+    # screen holding a room is heard from continuously until it hangs up.
+    assert sweep(client, LATE, client.app) == []
+    assert sweep(client, LATE + arena.HOST_GONE_SECONDS + 1, client.app) == [code]
 
 
 def test_saying_you_are_there_is_not_something_a_viewer_can_say(client, phones):

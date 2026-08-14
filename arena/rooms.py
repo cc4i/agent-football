@@ -466,6 +466,28 @@ def heard_from(conn, room_id, when=None):
     conn.commit()
 
 
+def heard_from_all(conn, room_codes, when):
+    """Stamp every room named, in one statement.
+
+    For the sweep, which vouches for every room this instance is holding a
+    screen's socket open for before it judges any of them. One UPDATE rather
+    than one per room: a full venue is a hundred-odd rooms and this runs every
+    few seconds for the life of the deployment, down the one shared connection.
+
+    Rooms that have ended are left alone. Their column is deliberately stale --
+    it is what says the screen stopped reporting when the match did -- and a
+    socket somebody left open on a finished room must not rewrite that.
+    """
+    if not room_codes:
+        return
+    conn.execute(
+        "UPDATE room SET last_heard_at = %s "
+        "WHERE code = ANY(%s) AND status IN ('lobby', 'live')",
+        (when, list(room_codes)),
+    )
+    conn.commit()
+
+
 def hosted_with_liveness(conn):
     """Every room a screen should be holding, with its last report.
 

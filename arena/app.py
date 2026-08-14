@@ -7,6 +7,7 @@ one person can play at once.
 """
 
 import asyncio
+import collections
 import hmac
 import json
 import logging
@@ -272,6 +273,10 @@ async def lifespan(fastapi_app: FastAPI):
     # the buckets above: a module-level counter is shared by every test in the
     # session, and one leaked socket would then fail an unrelated test later on.
     fastapi_app.state.walls = 0
+    # Which rooms this instance is holding a screen's socket open for, which is
+    # what keeps a backgrounded tab's match alive. Per app for the same reason
+    # as the counter above it.
+    fastapi_app.state.held = _HeldRooms()
     # Install filter to redact client_id from access logs.
     access_logger = logging.getLogger("uvicorn.access")
     access_logger.addFilter(_RedactClientId())
@@ -1251,6 +1256,53 @@ def _wall_thinner():
     return keep
 
 
+class _HeldRooms:
+    """The rooms this instance has a screen's socket open for, right now.
+
+    Liveness used to rest entirely on the screen speaking up: `host.here` every
+    ten seconds off a setInterval, and the pitch's frames off
+    requestAnimationFrame. A browser suspends both of those for a tab that is
+    not the one in front. Measured in Chrome against this arena, the frames
+    stop on the tick the tab is hidden and the interval is throttled and then
+    starved, so the last thing a backgrounded screen says lands about a minute
+    in -- and thirty seconds after that the sweep gives up on a match whose
+    screen is sitting right there, telling both managers it stopped reporting.
+
+    The socket is the part a browser does not throttle. A tab that still exists
+    still holds its connection, and answers the server's pings from the network
+    stack rather than from the JavaScript that has been put to sleep, so an
+    open host socket is proof of a screen where a message on a timer is not.
+    A lid that shuts stops answering those pings, uvicorn closes the socket,
+    and the room is swept exactly as it was before.
+
+    Counted rather than kept as a set of codes: the arena page and the pitch it
+    frames are two sockets on one room with one token, so the pitch reloading
+    at kick-off must not release a room the screen is still holding.
+
+    What is held is published into the shared column rather than consulted in
+    place, because a deploy runs two instances and only one of them has the
+    sockets. The other has to be able to read that somebody is holding this
+    room, and the column is the only thing both of them can see.
+    """
+
+    def __init__(self):
+        self._held = collections.Counter()
+
+    def took(self, code):
+        self._held[code] += 1
+
+    def gave_up(self, code):
+        if self._held[code] > 1:
+            self._held[code] -= 1
+        else:
+            # Popped rather than decremented to zero, so the counter is the size
+            # of the venue rather than of the evening.
+            self._held.pop(code, None)
+
+    def codes(self):
+        return list(self._held)
+
+
 class _HostReporting:
     """When this socket last told its room that the host is here.
 
@@ -1320,6 +1372,16 @@ async def room_socket(socket: WebSocket, code: str, client_id: str = ""):
         # read and the send would hold it forever.
         db.finish(connection)
 
+    # Whether this socket is the room's screen, settled once at the handshake:
+    # the token is minted when the room is opened and never changes, so a
+    # client that holds it now holds it for the life of the room. From here on
+    # this connection existing is what says a screen is still there, which is
+    # the one thing a backgrounded tab can still do.
+    holding = bool(client_id) and bool(room["host_client_id"]) and _same_secret(
+        _text_bytes(client_id), _text_bytes(room["host_client_id"]))
+    if holding:
+        socket.app.state.held.took(code)
+
     subscription = match_bus.subscribe(room_topic(code))
     pump = asyncio.create_task(_pump(socket, subscription))
     reporting = _HostReporting()
@@ -1340,6 +1402,11 @@ async def room_socket(socket: WebSocket, code: str, client_id: str = ""):
     except WebSocketDisconnect:
         pass
     finally:
+        # Before anything that can raise. Whatever else goes wrong on the way
+        # out, a socket that is gone must stop vouching for its room, or one
+        # bad hang-up leaves a match live for the rest of the evening.
+        if holding:
+            socket.app.state.held.gave_up(code)
         pump.cancel()
         if pump.done() and not pump.cancelled():
             exc = pump.exception()
@@ -1470,7 +1537,7 @@ def _end_match(connection, match_bus, room, event_kind, socket=None):
     match_bus.publish(WALL, {"type": "wall", "rooms": rooms.live(connection)})
 
 
-def _give_up_on_the_missing(connection, match_bus, now):
+def _give_up_on_the_missing(connection, match_bus, now, held=None):
     """Close rooms whose screen has stopped reporting. Returns their codes.
 
     A room only leaves "live" when somebody blows a whistle on it, and a laptop
@@ -1494,7 +1561,14 @@ def _give_up_on_the_missing(connection, match_bus, now):
 
     A room nobody has reported on yet is stamped on the first sweep that sees
     it rather than abandoned, which is the same rule one sweep late.
+
+    `held` is the sockets this instance has open for a room's own screen, and
+    every one of them is heard from before anything is judged. See `_HeldRooms`
+    for why the connection is better proof than anything a backgrounded tab can
+    be relied on to say.
     """
+    if held is not None:
+        rooms.heard_from_all(connection, held.codes(), now)
     gone = []
     for room in rooms.hosted_with_liveness(connection):
         if room["last_heard_at"] is None:
@@ -1616,7 +1690,8 @@ async def _watch_for_the_missing(fastapi_app):
         await asyncio.sleep(SWEEP_SECONDS)
         try:
             announced.update(_give_up_on_the_missing(
-                fastapi_app.state.conn, fastapi_app.state.bus, time.time()))
+                fastapi_app.state.conn, fastapi_app.state.bus, time.time(),
+                fastapi_app.state.held))
             _tell_our_own_rooms_it_is_over(fastapi_app.state.conn,
                                            fastapi_app.state.bus, announced)
             wall = _tell_our_own_wall_who_is_playing(
