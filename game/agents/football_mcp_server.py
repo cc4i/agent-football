@@ -23,73 +23,81 @@ Exposed tools:
   - report_injury(role, severity)     -> log an injury for a role
   - request_substitution(role, reason)-> log a substitution request for a role
 
-Both tools append an entry to one file per room and dugout. Locally that file
-lives under frontend/public/player_state/, which Vite serves. Deployed, the path
-is an in-memory volume shared with the arena, set via PLAYER_STATE_DIR. The
-browser polls the arena for it and shows a top-right notification toast. There
-is no roster/gameplay change for now -- this is notification-only.
+Both post the report to the arena, which logs it against the room and tells
+everything watching that match. It used to be a JSON file beside the pitch,
+polled every two seconds by whichever browser happened to be hosting: that
+reached one browser and nothing else, and it would have reached nothing at all
+once physics moved off the browser and onto the grounds farm. There is still no
+roster or gameplay change -- this is notification-only.
 """
 
 import json
 import os
-import time
+import urllib.error
+import urllib.parse
+import urllib.request
 
 from mcp.server.fastmcp import FastMCP
-
-# Resolve paths relative to this file (matches the convention in agent.py).
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-
-# Where injuries and substitution requests are written. Locally this defaults
-# to the pitch's public directory, which Vite serves. Deployed, the coach and
-# the arena are two containers in one instance with a shared in-memory volume,
-# and this points at the mount: the specialist writes here and the arena serves
-# what it finds.
-PLAYER_STATE_DIR = os.environ.get(
-    "PLAYER_STATE_DIR", os.path.join(BASE_DIR, "../frontend/public/player_state"))
 
 VALID_ROLES = {"defender", "midfielder", "forward", "goalkeeper"}
 VALID_TEAMS = ("blue", "red")
 
-# Duplicated from specialist_agents.arena_client because this module is also
-# launched as a standalone script, which puts a relative import out of reach.
+# Duplicated from specialist_agents.arena_client, along with the small request
+# below, because this module is also launched as a standalone script -- which
+# puts a relative import out of reach.
+DEFAULT_URL = "http://127.0.0.1:8003"
 DEFAULT_ROOM = "WRKS"
 DEFAULT_TEAM = "blue"
+TIMEOUT_SECONDS = 5
 
 mcp = FastMCP("football-condition")
 
 
-def substitutions_path(room: str, team: str) -> str:
-    """Where this dugout's injuries live.
+def whose_match(room: str, team: str) -> tuple[str, str]:
+    """Which room and dugout this report belongs to.
 
     One file for the whole venue meant a knock in one match subbed a player off
-    in another. Room and team come from a language model, so an unrecognised
-    one falls back to the workshop rather than becoming part of a path.
+    in another; a room event cannot do that, because it is addressed to a room.
+    Both still come from a language model, so an unrecognised one falls back to
+    the workshop rather than being posted at a match somewhere in the building.
     """
     if not room.isalnum() or len(room) > 8:
         room = DEFAULT_ROOM
     if team not in VALID_TEAMS:
         team = DEFAULT_TEAM
-    return os.path.join(PLAYER_STATE_DIR, "substitutions", f"{room.upper()}__{team}.json")
+    return room.upper(), team
 
 
-def _write_entry(role: str, entry: dict,
-                 room: str = DEFAULT_ROOM, team: str = DEFAULT_TEAM) -> None:
-    """Merge one entry into this dugout's file."""
-    path = substitutions_path(room, team)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+def report(role: str, action: str, detail: str, room: str, team: str) -> str:
+    """Tell the arena about one player's condition. Returns "" or why it failed.
 
-    data = {}
-    if os.path.exists(path):
-        try:
-            with open(path, "r") as f:
-                data = json.load(f)
-        except (json.JSONDecodeError, OSError):
-            data = {}
+    Everything that happens in a match goes in that match's log, and this is the
+    last thing that did not. In the log it reaches both dugouts on their phones,
+    the big screen's rail, and any screen that cuts to this match afterwards --
+    none of which the file it replaced could do.
+    """
+    room, team = whose_match(room, team)
+    token = os.environ.get("ARENA_SERVICE_TOKEN", "")
+    if not token:
+        return "ARENA_SERVICE_TOKEN is unset, so the arena refuses writes from the agents"
 
-    data[role] = entry
-
-    with open(path, "w") as f:
-        json.dump(data, f, indent=2)
+    url = "{}/api/rooms/{}/substitution".format(
+        os.environ.get("ARENA_URL", DEFAULT_URL).rstrip("/"),
+        urllib.parse.quote(room, safe=""))
+    asked = urllib.request.Request(
+        url,
+        data=json.dumps({"team": team, "role": role,
+                         "action": action, "detail": detail}).encode(),
+        method="POST",
+        headers={"Content-Type": "application/json", "X-Arena-Service": token},
+    )
+    try:
+        with urllib.request.urlopen(asked, timeout=TIMEOUT_SECONDS):
+            return ""
+    except urllib.error.HTTPError as refusal:
+        return f"the arena refused the report ({refusal.code})"
+    except (urllib.error.URLError, TimeoutError, OSError) as unreachable:
+        return f"the arena did not answer ({unreachable})"
 
 
 @mcp.tool()
@@ -108,13 +116,9 @@ def report_injury(role: str, severity: str = "knock",
     if role not in VALID_ROLES:
         return f"Error: unknown role '{role}'. Use one of {sorted(VALID_ROLES)}."
 
-    entry = {
-        "action": "injury",
-        "severity": severity,
-        "reason": f"{severity} injury",
-        "ts": time.time(),
-    }
-    _write_entry(role, entry, room, team)
+    failed = report(role, "injury", severity, room, team)
+    if failed:
+        return f"Error: {failed}."
     print(f"--> [MCP] {role.upper()} reported an injury ({severity}).")
     return f"Logged: {role} reported a {severity} injury. Medical staff notified."
 
@@ -135,12 +139,9 @@ def request_substitution(role: str, reason: str = "tired",
     if role not in VALID_ROLES:
         return f"Error: unknown role '{role}'. Use one of {sorted(VALID_ROLES)}."
 
-    entry = {
-        "action": "substitute",
-        "reason": reason,
-        "ts": time.time(),
-    }
-    _write_entry(role, entry, room, team)
+    failed = report(role, "substitution", reason, room, team)
+    if failed:
+        return f"Error: {failed}."
     print(f"--> [MCP] {role.upper()} requested a substitution ({reason}).")
     return f"Logged: {role} requested a substitution ({reason}). Bench notified."
 

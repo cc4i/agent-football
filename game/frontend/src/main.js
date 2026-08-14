@@ -17,7 +17,7 @@ import Phaser from 'phaser';
 import { SoccerGameScene, GAME_DURATION_SEC, STATUS_CHECK_MS } from './game';
 import { Sound } from './audio';
 import { createStatusHook } from './status.js';
-import { createSubstitutionPoll } from './substitutions.js';
+import { showCondition } from './substitutions.js';
 import { room, isHost, isViewer, shouldRunStatusCheck, opposite, readProfiles, connect, keepAwake } from './arena.js';
 
 let gameInstance = null;
@@ -802,59 +802,6 @@ function runStatusCheck() {
   );
 }
 
-// ---- Substitution / injury notification toasts (top-right) ----
-
-let notificationStack = null;
-function ensureNotificationStack() {
-  if (notificationStack) return notificationStack;
-  notificationStack = document.createElement('div');
-  notificationStack.id = 'notification-stack';
-  document.body.appendChild(notificationStack);
-  return notificationStack;
-}
-
-function showNotification(role, action, reason) {
-  const stack = ensureNotificationStack();
-  const isInjury = action === 'injury';
-  const toast = document.createElement('div');
-  toast.className = `pitch-toast ${isInjury ? 'toast-injury' : 'toast-sub'}`;
-  const icon = isInjury ? '⚠️' : '🔁';
-  const verb = isInjury ? 'reported an injury' : 'requested a substitution';
-  const iconEl = document.createElement('span');
-  iconEl.className = 'toast-icon';
-  iconEl.textContent = icon;
-
-  const textEl = document.createElement('span');
-  textEl.className = 'toast-text';
-  const strong = document.createElement('strong');
-  strong.textContent = String(role).toUpperCase();
-  textEl.append(strong, ` ${verb}`);
-  if (reason) {
-    const reasonEl = document.createElement('span');
-    reasonEl.className = 'toast-reason';
-    reasonEl.textContent = `(${reason})`;
-    textEl.append(' ', reasonEl);
-  }
-
-  toast.append(iconEl, textEl);
-  stack.appendChild(toast);
-  setTimeout(() => toast.classList.add('toast-hide'), 5000);
-  setTimeout(() => toast.remove(), 5600);
-}
-
-// One file per room and dugout, because a knock in one match must not sub a
-// player off in another. football_mcp_server.py writes it and vite serves it.
-const SUBSTITUTIONS_URL = `/player_state/substitutions/${room.code}__${room.team}.json`;
-
-const substitutions = createSubstitutionPoll({
-  url: SUBSTITUTIONS_URL,
-  fetch: window.fetch.bind(window),
-  notify: (role, action, reason) => {
-    console.log(`Player condition event: ${role} -> ${action} (${reason})`);
-    showNotification(role, action, reason);
-  },
-});
-
 // The room as the arena last described it. Held here because it arrives on
 // connect and Phaser takes a moment longer to boot than a socket does.
 let seated = null;
@@ -877,6 +824,10 @@ const feed = connect(room.code, {
   },
   onEvent: (message) => {
     if (message.kind === 'profile.patch') return applyPatch(message.payload);
+    // A knock arrives on the same feed as everything else that happens in this
+    // match, addressed to this room. It used to be a file this page polled,
+    // which is how a knock in one match once toasted in another.
+    if (message.kind === 'substitution') return showCondition(message.payload);
     const watching = gameInstance && gameInstance.scene.getScene('SoccerGameScene');
     if (watching) watching.cheer(message.kind);
   },
@@ -903,14 +854,6 @@ if (room.inMatch) {
   // asked for rather than assumed.
   console.log("--> [SYSTEM] Workshop: resetting to the shipped baseline...");
   sendInstructionToAgent("RESTORE_BASELINE", { showHuddle: false }).then(loadProfiles);
-}
-
-// The squad's own housekeeping. A viewer is a picture of a match somebody else
-// is running: polling its specialists would put four agents to work on behalf
-// of a screen, and act on the answer in a room this tab does not hold physics
-// for. A shout can injure somebody, so a real match still watches for toasts.
-if (!isViewer()) {
-  substitutions.prime().then(() => setInterval(() => substitutions.check(), 2000));
 }
 
 // The autonomous "are you tired?" chain, and the workshop alone. It fires

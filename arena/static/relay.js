@@ -49,6 +49,7 @@ export function relayFeed({
     if (only && payload.team && payload.team !== only) return;
     if (message.kind === "shout.sent") return drawShout(message);
     if (message.kind === "profile.patch") return drawPatch(message);
+    if (message.kind === "substitution") return drawCondition(message);
     if (goals && message.kind === "goal") return drawGoal(message);
   }
 
@@ -83,6 +84,33 @@ export function relayFeed({
     // branch, so the write itself is the answer. A live chain lights its own.
     if (!branch.state) mark(block, message.payload.role, "done", "");
     branch.body.append(deltas(message.payload.changed));
+  }
+
+  /**
+   * A player agent reporting on itself: a knock, or a request to come off.
+   *
+   * A banner in the dugout that owns the player rather than a toast over the
+   * pitch. A toast was right when this was a poll on the one browser running
+   * the match; it is wrong for a log every screen and every phone reads, where
+   * a wall cutting to an hour-old match would flash a dozen of them at once.
+   * Where the goals go, so it is still there thirty seconds later when the
+   * manager looks up.
+   */
+  function drawCondition(message) {
+    const { team, role, action, detail } = message.payload;
+    const hurt = action === "injury";
+    const banner = document.createElement("div");
+    banner.className = `banner ${hurt ? "warn" : "info"}`;
+    const words = document.createElement("div");
+    const who = document.createElement("b");
+    // On the big screen the column is the dugout, so naming it again would be
+    // saying "Blue" twice. In a hand there is one column for both.
+    const whose = mine ? (team === mine ? "Your " : "Their ") : "";
+    who.textContent = `${whose}${ROLE_TAGS[role] || role} `
+      + (hurt ? "is hurt" : "wants to come off");
+    words.append(who, detail || "");
+    banner.append(icon(hurt ? "🚑" : "🔁"), words);
+    into.prepend(banner);
   }
 
   function drawGoal(message) {

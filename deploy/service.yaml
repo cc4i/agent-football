@@ -94,12 +94,6 @@ spec:
       # futsal-arena, not arena: six characters is the minimum for an account
       # ID and arena is five.
       serviceAccountName: futsal-arena@__PROJECT__.iam.gserviceaccount.com
-      volumes:
-        - name: player-state
-          emptyDir:
-            medium: Memory
-            sizeLimit: 128Mi
-
       containers:
         # The only container with a port. Everything else is loopback.
         - name: arena
@@ -114,9 +108,6 @@ spec:
             limits:
               cpu: "4"
               memory: 8Gi
-          volumeMounts:
-            - name: player-state
-              mountPath: /shared/player_state
           env:
             - name: ARENA_ENV
               value: production
@@ -168,9 +159,6 @@ spec:
             limits:
               cpu: "2"
               memory: 4Gi
-          volumeMounts:
-            - name: player-state
-              mountPath: /shared/player_state
           env:
             - name: GOOGLE_GENAI_USE_VERTEXAI
               value: "true"

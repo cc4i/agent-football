@@ -59,17 +59,7 @@ describe('who runs the autonomous status check', () => {
     expect(isViewer()).toBe(false);
   });
 
-  it('still polls for injuries in a real match, because a shout can cause one', async () => {
-    // A host in a real match runs the substitution poll (!isViewer() is false)
-    // but not the status check (shouldRunStatusCheck() is false).
-    const { shouldRunStatusCheck, isViewer } = await arenaIn('?room=ABCD&as=host&client_id=host-1');
-    expect(shouldRunStatusCheck()).toBe(false);
-    expect(isViewer()).toBe(false);
-  });
-
-  it('does not poll for a viewer, whose match somebody else is running', async () => {
-    // A viewer runs neither: no status check (shouldRunStatusCheck() is false)
-    // and no substitution poll (isViewer() is true, so !isViewer() is false).
+  it('does not run it for a viewer, whose match somebody else is running', async () => {
     const { shouldRunStatusCheck, isViewer } = await arenaIn('?room=ABCD');
     expect(shouldRunStatusCheck()).toBe(false);
     expect(isViewer()).toBe(true);

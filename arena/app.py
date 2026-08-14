@@ -190,6 +190,10 @@ MAX_CHANGES = 64
 # touchline, so the agent is who the log says shouted.
 WORKSHOP_ACTOR = "Antigravity"
 
+# The two things a player agent may report about itself. The same two words the
+# MCP server's tools are named after, because there is no third thing to say.
+CONDITIONS = ("injury", "substitution")
+
 # How much of a room's log one catch-up read may return. A three-minute match
 # produces tens of events, so this only bites on a room somebody has left open.
 MAX_REPLAY_EVENTS = 500
@@ -230,12 +234,6 @@ if PRODUCTION and not PUBLIC_URL:
 # Vite serves the pitch on :5173 and this mount does not exist.
 PITCH_DIR = os.environ.get("ARENA_PITCH_DIR", "")
 
-# Where the game's MCP server writes injuries and substitution requests. In one
-# Cloud Run instance this is an in-memory volume mounted into both this
-# container and the coach's, which is the whole of the mechanism: the
-# specialist writes a file and the browser polls it. Unset locally, where Vite
-# serves the same directory out of the pitch's public/ folder.
-PLAYER_STATE_DIR = os.environ.get("ARENA_PLAYER_STATE_DIR", "")
 
 # Where the pitch is served from. The big screen frames it rather than drawing
 # it: physics is 2000 lines of Phaser that already exist and already work, and
@@ -433,6 +431,23 @@ class ShoutRequest(BaseModel):
         if bool(self.preset) == bool(self.text):
             raise ValueError("a shout is either a chip or some words, not both and not neither")
         return self
+
+
+class SubstitutionRequest(BaseModel):
+    """A player agent reporting on itself: a knock, or a request to come off."""
+    team: str
+    role: str
+    action: str
+    # What the specialist said in its own words. Bounded and never trusted: it
+    # comes from a language model and it is drawn on a wall.
+    detail: str = Field(default="", max_length=120)
+
+    @field_validator("action")
+    @classmethod
+    def known_condition(cls, value):
+        if value not in CONDITIONS:
+            raise ValueError(f"action must be one of {', '.join(CONDITIONS)}")
+        return value
 
 
 class ProfilePatchRequest(BaseModel):
@@ -893,6 +908,43 @@ def _say(fastapi_app, connection, room, team, text, actor, preset=None):
          "payload": said},
     )
     return {"seq": seq, "ahead": 0, **said}
+
+
+@app.post("/api/rooms/{code}/substitution")
+async def substitution(code: str, body: SubstitutionRequest, request: Request):
+    """A player agent's own condition: a knock, or a request to come off.
+
+    The one thing that happened in a match and did not go through here. It was
+    a JSON file beside the pitch, polled every two seconds by whichever browser
+    was hosting -- so it reached that browser and nothing else, and when physics
+    left the browser it would have reached nothing at all.
+
+    In the log instead: the dugout that owns the player sees it on a phone, the
+    big screen sees it on the rail, and a screen that cuts to this match a
+    minute later reads it off the log on the way in. Service-token only. A
+    specialist reports on itself; a manager does not get to injure a rival's
+    keeper by posting one of these.
+    """
+    if not _is_service_caller(request):
+        raise HTTPException(403, "only a squad's own agents report on the squad")
+    connection, room = _profile_room(request, code)
+    _known_team(body.team)
+    _known_role(body.role)
+    # The workshop never kicks off and reports all day, so this is not `live`.
+    # What it refuses is a specialist that finished thinking after the whistle:
+    # a finished match's log is what it was scored against.
+    if room["status"] not in ("lobby", "live"):
+        raise HTTPException(409, "that match is over")
+
+    said = {"team": body.team, "role": body.role,
+            "action": body.action, "detail": body.detail}
+    seq = rooms.append_event(connection, room["id"], "substitution", said)
+    request.app.state.bus.publish(
+        room_topic(room["code"]),
+        {"type": "event", "seq": seq, "kind": "substitution", "match_ms": None,
+         "payload": said},
+    )
+    return {"seq": seq, **said}
 
 
 @app.post("/api/rooms/{code}/start")
@@ -1973,16 +2025,6 @@ if PITCH_DIR:
 
     app.mount("/pitch/bundle", Immutable(directory=Path(PITCH_DIR) / "bundle"), name="bundle")
     app.mount("/pitch", Revalidated(directory=PITCH_DIR), name="pitch")
-
-if PLAYER_STATE_DIR:
-    # The arena only reads this directory; the MCP server writes to it. Create
-    # it at startup so an empty volume does not 500 every poll until the first
-    # injury, and so how the volume is mounted cannot break this mount.
-    Path(PLAYER_STATE_DIR).mkdir(parents=True, exist_ok=True)
-    # Revalidated, not Immutable: this file changes when somebody gets hurt and
-    # a cached copy would show a stale toast or hide a live one.
-    app.mount("/player_state", Revalidated(directory=PLAYER_STATE_DIR),
-              name="player_state")
 
 # Mounted last so no page or API path can ever be shadowed by a file on disk.
 app.mount("/static", Revalidated(directory=STATIC), name="static")

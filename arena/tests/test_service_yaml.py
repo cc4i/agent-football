@@ -134,13 +134,6 @@ def scalar(key, service=SERVICE):
     return found.group(1)
 
 
-def mounted():
-    """Every path the shared volume is mounted at."""
-    found = re.findall(r"^\s+mountPath: (\S+)$", SERVICE, re.MULTILINE)
-    assert found, "the service mounts the shared volume nowhere"
-    return found
-
-
 def port_of(url):
     """The port a URL in the yaml dials."""
     found = re.match(r"https?://[^:/]+:(\d+)", url)
@@ -184,13 +177,14 @@ def well_known_path():
     return read.stdout.strip()
 
 
-def test_both_containers_mount_the_volume_where_their_images_look_for_it():
-    # The coach's MCP server writes a substitution and the arena serves it, and
-    # that is the whole of the mechanism. A mountPath differing from either
-    # image by a character is a poll that 404s and a toast that never appears.
-    shared = env(COACH, "PLAYER_STATE_DIR")
-    assert shared == env(ARENA, "ARENA_PLAYER_STATE_DIR")
-    assert mounted() == [shared, shared]
+def test_the_containers_share_no_filesystem():
+    # They shared one in-memory volume, and the only thing that ever crossed it
+    # was a substitution: a file the coach's MCP server wrote and the arena
+    # served back. A knock is a room event now, so the three containers of an
+    # instance are three processes on a network and nothing else. Asserted
+    # rather than left as an absence, because a volume is the kind of thing
+    # that comes back the next time two containers need to say something.
+    assert "volumes:" not in SERVICE and "volumeMounts:" not in SERVICE
 
 
 def test_the_service_publishes_the_port_the_arena_listens_on():

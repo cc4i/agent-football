@@ -230,9 +230,17 @@ a.btn{display:block;text-align:center;text-decoration:none;line-height:1.2}
 }
 .relay-hd .eyebrow{color:var(--violet)}
 .relay-hd .elapsed{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:.7rem;color:var(--faint)}
+/* Every line in here is somebody else's words - typed into a phone in a hurry,
+   or written by a language model - and none of them promise a space. Inherited
+   from the one container all three rails share, so a block added to the feed
+   later is wrapped without having to remember this. `anywhere` for the reason
+   spelt out over the join code below, and it does the work `min-width:0` would
+   have as well: with a break opportunity between any two characters, a flex
+   item's min-content width is one character and the box stops being pushed
+   wider than the rail by a word nobody can read anyway. */
 .relay-scroll{
   overflow-y:auto;min-height:0;flex:1;-webkit-overflow-scrolling:touch;
-  scrollbar-width:thin;
+  scrollbar-width:thin;overflow-wrap:anywhere;
 }
 /* An empty panel this tall reads as something broken rather than as a match
    nobody has said anything in yet. */

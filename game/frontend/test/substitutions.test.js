@@ -12,100 +12,71 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { describe, expect, it, vi } from 'vitest';
-import { createSubstitutionPoll } from '../src/substitutions.js';
+// @vitest-environment jsdom
+//
+// The only file in the pitch that builds DOM rather than football, so the only
+// one that needs a DOM to be tested in. Everything else here runs in node.
 
-const POLL_URL = '/player_state/substitutions/ABCD__blue.json';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { showCondition } from '../src/substitutions.js';
 
-// One fetch stub, handed a queue of what the file says on each successive poll.
-const serving = (...bodies) => {
-  const calls = [];
-  const fetch = vi.fn(async (url) => {
-    calls.push(url);
-    const body = bodies[Math.min(calls.length - 1, bodies.length - 1)];
-    if (body === undefined) return { ok: false, json: async () => ({}) };
-    return { ok: true, json: async () => body };
-  });
-  return { fetch, calls };
-};
+// There is no poll left to test. A knock is a room event now, so what this
+// file holds on to is the drawing: the words a manager reads off the corner of
+// the pitch, and the toast clearing itself up afterwards.
+const knock = { role: 'forward', action: 'injury', detail: 'hamstring' };
 
-const pollFor = (fetch) => {
-  const notify = vi.fn();
-  return { notify, poll: createSubstitutionPoll({ url: POLL_URL, fetch, notify }) };
-};
+const stack = () => document.getElementById('notification-stack');
 
-const knock = (ts) => ({ forward: { ts, action: 'injury', reason: 'hamstring' } });
+beforeEach(() => {
+  document.body.replaceChildren();
+  vi.useFakeTimers();
+});
 
-describe('the substitution poll', () => {
-  it('asks for the file itself, with nothing on the end of it', async () => {
-    // A `?t=${Date.now()}` made every poll a fresh URL, so the `no-cache` on the
-    // mount could never answer with the 304 it exists for.
-    const { fetch, calls } = serving({});
-    await pollFor(fetch).poll.check();
-    expect(calls).toEqual([POLL_URL]);
-    expect(calls[0]).not.toContain('?');
+afterEach(() => {
+  vi.useRealTimers();
+});
+
+describe('the condition toast', () => {
+  it('names the player and says what they reported', () => {
+    const toast = showCondition(knock);
+    expect(toast.textContent).toContain('FORWARD');
+    expect(toast.textContent).toContain('reported an injury');
+    expect(toast.textContent).toContain('(hamstring)');
   });
 
-  it('says nothing about an entry it has already shown', async () => {
-    const { fetch } = serving(knock(1700), knock(1700));
-    const { notify, poll } = pollFor(fetch);
-    await poll.check();
-    expect(notify).toHaveBeenCalledTimes(1);
-    await poll.check();
-    expect(notify).toHaveBeenCalledTimes(1);
+  it('tells an injury and a substitution request apart', () => {
+    expect(showCondition(knock).className).toContain('toast-injury');
+    const asked = showCondition({ role: 'goalkeeper', action: 'substitution', detail: 'tired' });
+    expect(asked.className).toContain('toast-sub');
+    expect(asked.textContent).toContain('requested a substitution');
   });
 
-  it('says something when the same player asks again', async () => {
-    const { fetch } = serving(knock(1700), knock(1701));
-    const { notify, poll } = pollFor(fetch);
-    await poll.check();
-    await poll.check();
-    expect(notify).toHaveBeenCalledTimes(2);
-    expect(notify).toHaveBeenLastCalledWith('forward', 'injury', 'hamstring');
+  it('renders the detail as text rather than as markup', () => {
+    // It is a language model's words, arriving over a socket, and drawn on a
+    // wall in a room full of people.
+    const toast = showCondition({ ...knock, detail: '<img src=x onerror=alert(1)>' });
+    expect(toast.querySelector('img')).toBeNull();
+    expect(toast.textContent).toContain('<img src=x onerror=alert(1)>');
   });
 
-  it('keeps each role to its own timestamp', async () => {
-    const { fetch } = serving({
-      forward: { ts: 1700, action: 'injury', reason: 'hamstring' },
-      defender: { ts: 1200, action: 'substitution', reason: 'tired' },
-    });
-    const { notify, poll } = pollFor(fetch);
-    await poll.check();
-    expect(notify).toHaveBeenCalledTimes(2);
+  it('leaves the brackets out when the player said nothing', () => {
+    expect(showCondition({ role: 'defender', action: 'injury' }).textContent)
+      .not.toContain('(');
   });
 
-  it('primes from a file left by an earlier match rather than toasting it', async () => {
-    const { fetch } = serving(knock(1700));
-    const { notify, poll } = pollFor(fetch);
-    await poll.prime();
-    await poll.check();
-    expect(notify).not.toHaveBeenCalled();
+  it('stacks one match\'s reports in the order they arrived', () => {
+    showCondition(knock);
+    showCondition({ role: 'defender', action: 'substitution', detail: 'tired' });
+    expect([...stack().children].map((toast) => toast.querySelector('strong').textContent))
+      .toEqual(['FORWARD', 'DEFENDER']);
   });
 
-  it('still reports what happens after priming', async () => {
-    const { fetch } = serving(knock(1700), knock(1800));
-    const { notify, poll } = pollFor(fetch);
-    await poll.prime();
-    await poll.check();
-    expect(notify).toHaveBeenCalledWith('forward', 'injury', 'hamstring');
-  });
-
-  it('ignores a response that is not ok, because the file may not exist yet', async () => {
-    const fetch = vi.fn(async () => ({ ok: false, json: async () => knock(1700) }));
-    const { notify, poll } = pollFor(fetch);
-    await expect(poll.check()).resolves.toBeUndefined();
-    expect(notify).not.toHaveBeenCalled();
-  });
-
-  it('ignores a fetch that throws, and a body that is not json', async () => {
-    const refused = vi.fn(async () => { throw new Error('offline'); });
-    await expect(pollFor(refused).poll.check()).resolves.toBeUndefined();
-
-    const garbled = vi.fn(async () => ({
-      ok: true, json: async () => { throw new SyntaxError('half-written'); },
-    }));
-    const { notify, poll } = pollFor(garbled);
-    await expect(poll.check()).resolves.toBeUndefined();
-    expect(notify).not.toHaveBeenCalled();
+  it('clears itself up, so a long match does not fill the corner', () => {
+    showCondition(knock);
+    expect(stack().children).toHaveLength(1);
+    vi.advanceTimersByTime(5000);
+    expect(stack().firstChild.className).toContain('toast-hide');
+    vi.advanceTimersByTime(600);
+    expect(stack().children).toHaveLength(0);
   });
 });

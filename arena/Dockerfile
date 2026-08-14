@@ -29,16 +29,10 @@ RUN uv sync --frozen --no-dev
 COPY arena/ ./
 COPY --from=pitch /build/dist /srv/pitch
 
-# The shared player_state volume is mounted at a plain directory rather than
-# under /var/run, which is a symlink to /run in this base image: two containers
-# resolving that symlink differently would show up as the arena 404ing a
-# substitution the coach had already written, which nothing is watching for.
-#
 # ARENA_ENV=production is deliberate, and so is what it does: the arena refuses
 # to start without ARENA_SECRET, ARENA_EMAIL_SALT and ARENA_SERVICE_TOKEN. A
 # container that will not boot without its secrets is this file working.
 ENV ARENA_PITCH_DIR=/srv/pitch \
-    ARENA_PLAYER_STATE_DIR=/shared/player_state \
     ARENA_ENV=production \
     PATH="/app/.venv/bin:$PATH"
 

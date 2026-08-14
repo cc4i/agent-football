@@ -12,53 +12,63 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Watches the file the game's MCP server writes when a player asks to come off
-// or reports a knock. Out here rather than in main.js because the rule inside
-// it - act on an entry once, the first time its timestamp moves - is the kind
-// of thing a test should be able to hold on its own.
-const ROLES = ['defender', 'midfielder', 'forward', 'goalkeeper'];
+// The toast in the top-right corner when a player reports a knock or asks to
+// come off. This file used to hold the poll that noticed one: a JSON file
+// beside the pitch, read every two seconds, with the whole rule about acting on
+// an entry once. The report is a room event now, so noticing it is the socket's
+// job and the only thing left here is the drawing -- which is still worth its
+// own file, because it is the one thing on this page that is not a football.
 
-export function createSubstitutionPoll({ url, fetch, notify }) {
-  // The last timestamp acted on per role, so each request shows exactly once.
-  const lastSeen = { defender: 0, midfielder: 0, forward: 0, goalkeeper: 0 };
+const VERB = {
+  injury: 'reported an injury',
+  substitution: 'requested a substitution',
+};
 
-  // No cache-buster on the URL. The mount serving this sends `no-cache`, which
-  // already means the browser asks every time and only reuses the body when the
-  // ETag still matches. A `?t=` would make every poll a fresh URL and so a full
-  // 200 forever - at a poll every two seconds per pitch, a venue's worth of JSON
-  // bodies a second that could each have been an empty 304.
-  async function read() {
-    try {
-      const response = await fetch(url);
-      if (!response.ok) return null; // The file may not exist yet.
-      return await response.json();
-    } catch (err) {
-      // No file, or a half-written one. Either way there is nothing to act on.
-      return null;
-    }
+// How long a toast stays up, and how long its fade lasts afterwards.
+const SHOWN_MS = 5000;
+const FADING_MS = 600;
+
+function stack() {
+  let found = document.getElementById('notification-stack');
+  if (found) return found;
+  found = document.createElement('div');
+  found.id = 'notification-stack';
+  document.body.appendChild(found);
+  return found;
+}
+
+/**
+ * Draw one condition report.
+ *
+ * @param {object} report - a `substitution` event's payload.
+ * @param {string} report.role - whose it is: defender, midfielder, forward, goalkeeper.
+ * @param {string} report.action - 'injury' or 'substitution'.
+ * @param {string} report.detail - what the player said about it, in its own words.
+ */
+export function showCondition({ role, action, detail } = {}) {
+  const injured = action === 'injury';
+  const toast = document.createElement('div');
+  toast.className = `pitch-toast ${injured ? 'toast-injury' : 'toast-sub'}`;
+
+  const iconEl = document.createElement('span');
+  iconEl.className = 'toast-icon';
+  iconEl.textContent = injured ? '⚠️' : '🔁';
+
+  const textEl = document.createElement('span');
+  textEl.className = 'toast-text';
+  const strong = document.createElement('strong');
+  strong.textContent = String(role || '').toUpperCase();
+  textEl.append(strong, ` ${VERB[action] || VERB.substitution}`);
+  if (detail) {
+    const reasonEl = document.createElement('span');
+    reasonEl.className = 'toast-reason';
+    reasonEl.textContent = `(${detail})`;
+    textEl.append(' ', reasonEl);
   }
 
-  return {
-    // Seed the timestamps from whatever is already there, so a knock from an
-    // earlier match does not toast the moment this page loads.
-    async prime() {
-      const data = await read();
-      if (!data) return;
-      ROLES.forEach((role) => {
-        if (data[role] && data[role].ts) lastSeen[role] = data[role].ts;
-      });
-    },
-
-    async check() {
-      const data = await read();
-      if (!data) return;
-      ROLES.forEach((role) => {
-        const entry = data[role];
-        if (entry && entry.ts && entry.ts > lastSeen[role]) {
-          lastSeen[role] = entry.ts;
-          notify(role, entry.action, entry.reason);
-        }
-      });
-    },
-  };
+  toast.append(iconEl, textEl);
+  stack().appendChild(toast);
+  setTimeout(() => toast.classList.add('toast-hide'), SHOWN_MS);
+  setTimeout(() => toast.remove(), SHOWN_MS + FADING_MS);
+  return toast;
 }

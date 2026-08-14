@@ -16,13 +16,7 @@ RUN uv sync --frozen --no-dev
 
 COPY game/agents/ ./agents/
 
-# The MCP server the specialists spawn over stdio writes here, and the arena
-# serves the same directory. It is an in-memory volume mounted into both, at a
-# plain directory rather than under /var/run, which is a symlink to /run in this
-# base image: two containers resolving that symlink differently would show up as
-# the arena 404ing a substitution this one had already written.
-ENV PLAYER_STATE_DIR=/shared/player_state \
-    PATH="/app/.venv/bin:$PATH"
+ENV PATH="/app/.venv/bin:$PATH"
 
 EXPOSE 8000
 

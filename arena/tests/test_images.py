@@ -1,10 +1,9 @@
 """The contract the four images share, read as text so no runtime is needed.
 
-Four Dockerfiles agree on a set of ports and two directory paths, and the
-service yamls repeat every one of them. Nothing else would notice them drifting
-apart, and the drift that matters is the shared player_state path: get it wrong
-in one image and the coach writes a substitution the arena answers with a 404
-that the browser's poll swallows.
+Four Dockerfiles agree on a set of ports and a couple of directory paths, and
+the service yamls repeat every one of them. Nothing else would notice them
+drifting apart: a port that agrees with nothing is not a build failure, it is a
+probe that never passes and a revision that never serves a request.
 """
 
 import re
@@ -16,7 +15,6 @@ COACH = (ROOT / "game" / "Dockerfile.coach").read_text()
 CAPTAIN = (ROOT / "game" / "Dockerfile.captain").read_text()
 GROUNDS = (ROOT / "grounds" / "Dockerfile").read_text()
 DOCKERIGNORE = (ROOT / ".dockerignore").read_text()
-ENV_EXAMPLE = (ROOT / "arena" / ".env.example").read_text()
 # The two callers. An image's port is only right if it is the one being dialled,
 # so the numbers below are read out of these rather than written down twice.
 COACH_PY = (ROOT / "arena" / "coach.py").read_text()
@@ -82,26 +80,15 @@ def dialled(source, name):
     return found.group(1)
 
 
-def test_the_two_images_share_one_player_state_directory():
-    # One in-memory volume is mounted into both containers and this is the whole
-    # of the mechanism behind a substitution: the coach's MCP server writes a
-    # file and the arena serves it. A path differing by a character is a poll
-    # that 404s quietly.
-    assert env(COACH, "PLAYER_STATE_DIR") == env(ARENA, "ARENA_PLAYER_STATE_DIR")
-
-
-def test_the_documented_player_state_path_is_the_one_the_images_use():
-    documented = re.search(r"^# ARENA_PLAYER_STATE_DIR=(\S+)", ENV_EXAMPLE, re.MULTILINE)
-    assert documented, ".env.example no longer documents ARENA_PLAYER_STATE_DIR"
-    assert documented.group(1) == env(ARENA, "ARENA_PLAYER_STATE_DIR")
-
-
-def test_the_shared_directory_is_not_underneath_a_symlink():
-    # /var/run is a symlink to /run in python:3.14-slim. Mounting the volume
-    # under it in two containers makes both depend on the runtime resolving that
-    # symlink the same way, and the failure when they diverge is the silent 404
-    # above rather than anything that says so.
-    assert not env(ARENA, "ARENA_PLAYER_STATE_DIR").startswith("/var/run")
+def test_no_image_expects_a_directory_another_image_writes():
+    # There was one, and it was the whole of the mechanism behind a
+    # substitution: an in-memory volume mounted into both containers, the
+    # coach's MCP server writing a file into it and the arena serving the file
+    # back. A path differing by a character was a poll that 404d quietly. A
+    # knock is a room event now, so the coupling is gone and the two images
+    # share nothing but a network namespace.
+    for image in (ARENA, COACH, CAPTAIN, GROUNDS):
+        assert "PLAYER_STATE" not in image
 
 
 def test_the_arena_serves_the_pitch_its_build_stage_wrote():

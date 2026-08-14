@@ -110,6 +110,26 @@ def test_every_scrolling_surface_inherits_a_scrollbar_the_dark_theme_can_hold(
             "the root already states it; a second copy is one that can drift")
 
 
+def test_the_relay_breaks_a_word_no_rail_is_wide_enough_for(client):
+    # Everything drawn into a rail is somebody else's words: a manager typing
+    # one-handed with a match running, and a language model reporting on the
+    # player it is playing. Neither of them promises a space. A shout of fifty
+    # w's, and an injury a specialist described in one unbroken run of
+    # characters, both painted straight out through the right border of their
+    # box and off the side of the rail.
+    #
+    # Asserted on the container for the same reason the scrollbar above is:
+    # overflow-wrap inherits, all three rails are this one class, and a block
+    # added to the feed next week cannot forget a rule it never has to write.
+    css = re.sub(r"/\*.*?\*/", "", client.get("/static/app.css").text, flags=re.S)
+    rail = css.split(".relay-scroll{", 1)[1].split("}", 1)[0]
+    assert "overflow-wrap:anywhere" in rail.replace(" ", "")
+    # Inheritance is only a guarantee while nothing underneath declines it.
+    assert "overflow-wrap:normal" not in css.replace(" ", ""), (
+        "something inside the feed turns this back off, which is the overflow"
+        " coming back on whichever block it was turned off for")
+
+
 def test_no_field_a_thumb_lands_on_is_small_enough_for_ios_to_zoom_the_page(client):
     # Safari on iOS zooms the whole page in whenever it focuses a field whose
     # text is under 16px, and it does not zoom back out again. The shout box
