@@ -350,18 +350,39 @@ thousand rows and the tier will not notice, but they are there.
 
 ## If the first revision never goes ready
 
-The coach and the captain bind `127.0.0.1`, on the argument that the containers
-of one Cloud Run instance share a network namespace - the same argument
-`ARENA_COACH_URL=http://127.0.0.1:8000` rests on, and one that has been
-reproduced under a `podman pod`. What that reproduction cannot tell us is where
-Cloud Run runs a `tcpSocket` startup probe from.
+The coach and the captain bound `127.0.0.1` once, on the argument that the
+containers of one Cloud Run instance share a network namespace - the same
+argument `ARENA_COACH_URL=http://127.0.0.1:8000` rests on, and one that had been
+reproduced under a `podman pod`. What that reproduction could not tell us is
+where Cloud Run runs a `tcpSocket` startup probe from.
 
-If the revision fails with a startup-probe timeout on `coach` or `captain`,
-test that first: the probe may be dialling from outside the instance, where a
-loopback bind is not reachable. Widen that one image's bind to `0.0.0.0`
-(`game/Dockerfile.coach`'s `--host`, or `CAPTAIN_HOST` in
-`game/Dockerfile.captain`), redeploy, and keep the deploy log as the evidence
-for which way it went.
+Revision `arena-00001` answered it: not from in there. The captain logged
+
+```
+INFO:     Uvicorn running on http://127.0.0.1:8001
+ERROR:    STARTUP TCP probe failed 40 times consecutively for container
+          "captain" on port 8001. Connection failed with status DEADLINE_EXCEEDED.
+```
+
+- the server up and listening, the probe against that same port timing out
+every time, over five instance starts. The coach never ran to fail the same way
+because it sits behind the captain in `container-dependencies`, so both were
+widened together rather than one failed deploy apart.
+
+So both sidecars bind `0.0.0.0` now, and a bind narrowed back to the loopback is
+a revision that never goes ready. `arena/tests/test_images.py` holds that.
+
+Widening published nothing. Neither server authenticates anything, and what
+isolates them is that neither declares a port: Cloud Run routes external
+requests to the ingress container alone, and Direct VPC egress is egress, so
+nothing in the VPC can dial an instance either. The bind was never the lock.
+
+The captain's bind is a second variable rather than a wider `CAPTAIN_HOST`.
+`to_a2a` writes `CAPTAIN_HOST` into the agent card's `rpc_url`, and the coach
+dials the url out of the card rather than the address it fetched the card from,
+so that one stays `127.0.0.1` - an address to connect to - while `CAPTAIN_BIND`
+is the wildcard to listen on. Collapsing them back into one breaks whichever end
+loses.
 
 If the one that fails is `arena`, the database is the first thing to rule out.
 Its `/health` opens a connection, so an unreachable database reads as a startup
@@ -372,9 +393,8 @@ unreachable and all three are in this file: the peering
 `$REGION` and in the same network as the peering, and the instance still having
 no public address for `deploy.sh` to have picked up instead.
 
-Widen only the one that failed, and do not pre-empt it. The arena's `0.0.0.0`
-is a different case and stays: Cloud Run's container contract requires the
-ingress container to listen on `0.0.0.0:$PORT`.
+The arena's `0.0.0.0` was never in question and stays: Cloud Run's container
+contract requires the ingress container to listen on `0.0.0.0:$PORT`.
 
 ## Building the images here instead
 

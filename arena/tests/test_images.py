@@ -20,10 +20,16 @@ ENV_EXAMPLE = (ROOT / "arena" / ".env.example").read_text()
 # so the numbers below are read out of these rather than written down twice.
 COACH_PY = (ROOT / "arena" / "coach.py").read_text()
 AGENT_PY = (ROOT / "game" / "agents" / "agent.py").read_text()
+# The captain's server, which is the one place a bind and an advertised address
+# are two different things rather than one.
+CAPTAIN_PY = (ROOT / "game" / "agents" / "captain_server.py").read_text()
 
 # What a container reaches its own instance on, written out rather than left to
 # `localhost`, which is two addresses wherever IPv6 is up.
 LOOPBACK = "127.0.0.1"
+# Every interface. What a container has to bind to be probed, which is not the
+# same address as the one anything dials it on.
+WIDE = "0.0.0.0"
 
 
 def env(dockerfile, name):
@@ -112,20 +118,42 @@ def test_the_captain_serves_the_port_the_coach_calls():
     assert env(CAPTAIN, "CAPTAIN_PORT") == exposed(CAPTAIN)
 
 
-def test_the_sidecars_bind_the_loopback_and_nothing_wider():
-    # Neither server authenticates anything, and the isolation that protects
-    # them is having no published port. The bind is the second lock: in one
-    # Cloud Run instance the containers share a network namespace, so loopback
-    # is all the reach either of them needs.
-    assert bound(COACH) == LOOPBACK
+def test_the_sidecars_bind_wide_because_the_probe_is_not_on_their_loopback():
+    # Settled by a deploy rather than by argument. Both sidecars bound loopback
+    # on the reasoning that the containers of one instance share a network
+    # namespace, which is true and is not the question: the startup probe is
+    # run by Cloud Run and does not dial from inside that namespace. Revision
+    # arena-00001 has the captain logging `Uvicorn running on
+    # http://127.0.0.1:8001` and, against the same port, forty consecutive
+    # `STARTUP TCP probe failed ... DEADLINE_EXCEEDED`. The instance never
+    # started, so the coach behind it in `container-dependencies` never ran to
+    # fail the same way.
+    #
+    # Widening costs nothing that was holding: neither server authenticates
+    # anything, and what isolates them is that neither publishes a port. There
+    # is no path in - Cloud Run routes external requests to the ingress
+    # container alone, and Direct VPC egress is egress, so nothing in the VPC
+    # can dial an instance either.
+    assert bound(COACH) == WIDE
+    assert env(CAPTAIN, "CAPTAIN_BIND") == WIDE
+
+
+def test_the_captain_advertises_the_loopback_rather_than_the_bind():
+    # Two variables, and collapsing them to one is the regression this guards.
+    # `to_a2a` writes host into the agent card's rpc_url, and the coach dials
+    # the card's url rather than the address it fetched the card from - so the
+    # card has to name an address that can be dialled, and 0.0.0.0 is not one.
+    # The bind is the wide address; the card keeps the loopback.
+    assert 'os.environ.get("CAPTAIN_HOST"' in CAPTAIN_PY
+    assert 'os.environ.get("CAPTAIN_BIND"' in CAPTAIN_PY
     assert env(CAPTAIN, "CAPTAIN_HOST") == LOOPBACK
 
 
 def test_the_arena_binds_wide_because_cloud_run_requires_it_of_the_ingress():
-    # The bind that must not be tidied to match the two above. Cloud Run's
-    # container contract has the ingress container listening on 0.0.0.0:$PORT,
-    # and a revision that binds loopback instead never serves a request.
-    assert bound(ARENA) == "0.0.0.0"
+    # The ingress container's case is documented rather than discovered: the
+    # container contract has it listening on 0.0.0.0:$PORT, and a revision that
+    # binds loopback instead never serves a request.
+    assert bound(ARENA) == WIDE
 
 
 def test_the_build_context_excludes_what_must_not_reach_an_image():

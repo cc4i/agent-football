@@ -28,8 +28,17 @@ import uvicorn
 from agents.captain import captain_agent
 from agents.specialist_agents.arena_client import DUGOUT_KEYS
 
+# The address the coach dials, which is not the interface this binds. `to_a2a`
+# writes HOST into the agent card's rpc_url, and `RemoteA2aAgent` fetches the
+# card and then sends every request to the url it found there - so HOST has to
+# be an address something can connect to, and the wildcard is not one.
 HOST = os.environ.get("CAPTAIN_HOST", "localhost")
 PORT = int(os.environ.get("CAPTAIN_PORT", "8001"))
+# The interface uvicorn binds. Wide in the image, because Cloud Run's startup
+# probe does not dial from inside the instance's network namespace and a
+# loopback bind is unreachable to it. Defaults to HOST so that running this by
+# hand is unchanged: one address, and it is the one in the card.
+BIND = os.environ.get("CAPTAIN_BIND", HOST)
 
 
 def take_the_dugout(request, part_converter=convert_a2a_part_to_genai_part):
@@ -61,4 +70,4 @@ app = to_a2a(
 if __name__ == "__main__":
     print(f"Serving Team Captain over A2A at http://{HOST}:{PORT}")
     print(f"Agent card: http://{HOST}:{PORT}/.well-known/agent-card.json")
-    uvicorn.run(app, host=HOST, port=PORT)
+    uvicorn.run(app, host=BIND, port=PORT)

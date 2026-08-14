@@ -16,12 +16,23 @@ RUN uv sync --frozen --no-dev
 
 COPY game/agents/ ./agents/
 
-# Loopback, and the literal rather than the name captain_server.py defaults to.
-# The isolation is that this container publishes no port; the coach still
-# reaches it over the network namespace the instance shares. `localhost` would
-# be two addresses in a dual-stack container, which leaves this bind and the
-# dial in game/agents/agent.py agreeing by resolution order.
+# Two addresses, because they answer two different questions.
+#
+# CAPTAIN_HOST is the one the coach dials. It goes into the agent card's
+# rpc_url, which is where `RemoteA2aAgent` sends every request after fetching
+# the card, so it has to be connectable: the loopback the instance's containers
+# share, and the literal rather than the name captain_server.py defaults to.
+# `localhost` would be two addresses in a dual-stack container, which leaves
+# this and the dial in game/agents/agent.py agreeing by resolution order.
+#
+# CAPTAIN_BIND is the interface uvicorn listens on, and it is wide because
+# Cloud Run's startup probe does not dial from inside the instance's network
+# namespace. Bound to the loopback this container was unreachable to the probe
+# while serving perfectly well - see deploy/README.md. Nothing is published by
+# widening it: this container declares no port to Cloud Run, so no external
+# request is ever routed here.
 ENV CAPTAIN_HOST=127.0.0.1 \
+    CAPTAIN_BIND=0.0.0.0 \
     CAPTAIN_PORT=8001 \
     PATH="/app/.venv/bin:$PATH"
 

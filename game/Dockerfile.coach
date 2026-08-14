@@ -28,10 +28,17 @@ EXPOSE 8000
 
 # `adk web .` scans the working directory for the agent package beside it.
 #
-# Loopback, and the literal rather than the name. The isolation is that this
-# container publishes no port; the arena still reaches it because the containers
-# of one Cloud Run instance share a network namespace, and so share the loopback
-# interface this binds. `localhost` would be two addresses in a dual-stack
-# container, which leaves the bind here and the dial in arena/coach.py agreeing
-# by resolution order rather than by having been written down.
-CMD ["adk", "web", ".", "--host", "127.0.0.1", "--port", "8000"]
+# Wide, because Cloud Run's startup probe does not dial from inside the
+# instance's network namespace: the captain bound the loopback and was
+# unreachable to its probe while serving perfectly well, and this container has
+# the same tcpSocket probe against it. See deploy/README.md.
+#
+# The isolation is unchanged, and it was never the bind. This container
+# declares no port to Cloud Run, so no external request is routed to it -
+# external traffic reaches the ingress container alone, and Direct VPC egress
+# is egress, so nothing in the VPC can dial an instance either.
+#
+# The arena still dials 127.0.0.1:8000, which this bind covers. It stays a
+# literal there: `localhost` is two addresses in a dual-stack container, and
+# 0.0.0.0 is not IPv6, so a name dial would reach ::1 first and be refused.
+CMD ["adk", "web", ".", "--host", "0.0.0.0", "--port", "8000"]
