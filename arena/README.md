@@ -42,11 +42,82 @@ shell wins where both say something, which is what lets one exported
 | `ARENA_COACH_URL` | `http://127.0.0.1:8000` | The ADK server a shout is carried to. |
 | `ARENA_COACH_APP` | `agents` | The application name `adk web .` registers for the package beside it. |
 | `ARENA_COACH_IDLE_SECONDS` | `90` | How long one hop of the chain may go quiet. The slowest specialist sets it. |
-| `ARENA_CHAIN_LIMIT` | `4` | How many shouts may be talking to Gemini at once, across every room. The quota belongs to the venue, not to a room. |
+| `ARENA_CHAIN_LIMIT` | `4` | How many shouts may be talking to Gemini at once, across every room. The quota belongs to the venue, not to a room. Sizing it is arithmetic - see below. |
 | `ARENA_CHAIN_SECONDS` | `150` | The whole chain, slot to huddle. A match is three minutes long. |
 | `ARENA_MAX_LIVE_ROOMS` | `120` | How many matches may be live at once. When reached, opening another room is a 503 saying the venue is full - wait for a match to finish. |
 | `ARENA_WALL_HZ` | `2` | How often one room's tile may redraw on the wall. A host reports at 10 Hz because its match needs it; fifty thumbnails at that rate is five hundred messages a second down every wall socket. Whoever is watching one match still gets every frame, on the room socket. Zero or less turns the thinning off rather than the wall. |
 | `ARENA_MAX_WALL_SOCKETS` | `60` | How many big screens may watch the wall at once. Sized above the spec's 50 rooms, because `/arena` opens a wall socket on every screen that hosts one, and below `ARENA_MAX_LIVE_ROOMS`, because the cost is rooms x `ARENA_WALL_HZ` x screens. One beyond the cap is accepted and then closed with code 4429 and the reason `too many screens are watching the wall`: it loses its filmstrip and keeps its match. |
+
+## Sizing `ARENA_CHAIN_LIMIT`
+
+The shipped `4` is a deliberately conservative floor rather than a measured
+number: it is small enough to sit inside any Vertex quota this venue is likely
+to be given, and nobody has yet read a real one. Once you have a project, the
+limit is arithmetic and the whole of it is below.
+
+**One shout is ten Gemini calls, not one.** Counted from `arena/chain.py` and
+`game/agents/`, all of them on `GEMINI_FLASH_LITE` - `GEMINI_FLASH` is defined
+in `game/agents/constants.py` and used nowhere, so this needs one model's quota
+and not two:
+
+| Where | Calls | Why |
+|---|---|---|
+| `ManagerAgent` (`agent.py`) | 1 | Reads the shout and transfers to the captain. It is told not to answer one itself. |
+| The four specialists (`specialist_agents/*.py`) | 4 to 12 | Each is one call to choose the `update_profile` arguments and a second to say its 3-5 words once the tool has answered. A specialist the shout does not touch skips the tool and costs one; one that also fires `report_injury` or `request_substitution` costs three. |
+| `SynthesisCaptain` (`captain.py`) | 1 | Merges the four replies into the huddle JSON. |
+
+Six at the floor, **ten in the ordinary case** where every specialist patches
+its profile, fourteen if all four also report a condition. `RemoteA2aAgent` and
+`ParallelAgent` add none of their own: one is a proxy over HTTP and the other
+is a fan-out.
+
+**The formula.**
+
+```
+ARENA_CHAIN_LIMIT = Q / (C x R)
+
+Q  requests a minute the project's quota allows for the model
+C  Gemini calls in one chain: 10 typical, 6 floor, 14 worst
+R  chains one slot turns over in a minute, 60 / chain seconds - about 2,
+   a chain being roughly 30 seconds against the 150 ARENA_CHAIN_SECONDS
+   allows it
+```
+
+`C x R` is what one slot costs a minute: about 20 requests. The limit is per
+instance, which is per venue only because `maxScale` is 1; two instances would
+be twice this and the yaml is what keeps that from happening.
+
+**Reading Q.**
+
+```bash
+gcloud alpha services quota list \
+    --service=aiplatform.googleapis.com \
+    --consumer="projects/$PROJECT" \
+    --filter="metric:generate_content_requests_per_minute_per_project_per_base_model" \
+    --format=yaml
+```
+
+Take `effectiveLimit` from the bucket whose `dimensions.base_model` is the
+model in `game/agents/constants.py`, and whose region is the one the chain
+calls: `global`, per `service.yaml`, rather than `$REGION`. The same numbers
+are under IAM & Admin > Quotas in the console if the alpha component is not
+installed. A fresh project is often given the smallest limit Vertex hands out,
+so read it rather than assume the generous case.
+
+**Worked example.** Q = 200 a minute:
+
+```
+200 / (10 x 2) = 10
+```
+
+Ten slots would spend the whole 200 with nothing left over, and a hop that
+fails and retries then spends quota the arithmetic has already promised to
+somebody else. Take eight. The shipped 4 asks for at most `4 x 10 x 2 = 80` a
+minute, which is why it is safe to leave alone until somebody has run the
+command: it costs a manager a place in the queue and it costs the venue
+nothing. Once you have the number, set `ARENA_CHAIN_LIMIT` in `service.yaml`
+and write the Q it came from in a comment beside it, because the next person
+cannot tell a measured 8 from another guess.
 
 ## Pages
 

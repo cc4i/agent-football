@@ -190,6 +190,60 @@ at all, and the ADK resolves them lazily at the first model call. A missing
 chain. So open the deployed arena, take a seat, kick off and shout once. It is
 the only check that covers the half of the service the probes cannot see.
 
+## Rehearsing the load before the room does
+
+`arena/tests/test_load_rehearsal.py` drives fifty rooms at ten frames a second
+for a full three-minute match. It runs against a laptop by default and the
+numbers it prints there are worth having, but three of the things it is meant
+to check exist only up here:
+
+- **TLS termination.** Fifty rooms is a hundred and fifty-one websockets
+  through the front end rather than straight onto a socket, and the frames are
+  `wss` rather than `ws`.
+- **The 3600-second timeout, actually holding.** A three-minute match is the
+  first thing that has run long enough on one socket to tell you the
+  `timeoutSeconds` in `service.yaml` is the number in force. A default of 300
+  looks identical until a match passes five minutes.
+- **CPU that is not throttled between requests.** `cpu-throttling: false` is
+  what lets the sweep and the bus run in the gaps. Throttled, the frames
+  arrive in bursts behind each request and the latency is somebody else's
+  scheduler.
+
+```bash
+cd arena
+ARENA_LOAD=1 \
+ARENA_LOAD_URL="$(gcloud run services describe arena --region="$REGION" \
+    --format='value(status.url)')" \
+    uv run pytest tests/test_load_rehearsal.py -s
+```
+
+`-s` is not optional: the report is printed and pytest swallows the stdout of a
+test that passed. Do it after "Letting the phones in", because every socket in
+it is an anonymous one and a 403 looks like a venue that will not open. The
+laptop still needs its own Postgres running: this is a pytest run and the
+suite's fixtures make their throwaway database whether or not this particular
+test looks at it.
+
+Two things it cannot measure from out here, and says so in its own output: the
+event-loop lag and the bus's drop counters are read from inside the process,
+and the row counts come from a database that is not this laptop's to query. The
+frame rate, the latency and the delivery counts are measured from this end and
+are the same numbers either way.
+
+It plays real matches. A hundred players named `Blue 0` through `Red 49`, fifty
+finished rooms and a hundred results land in Cloud SQL and on the leaderboard.
+Rehearse before the workshop rather than during it. The board is computed from
+`result`, so clearing that clears the board:
+
+```sql
+DELETE FROM result WHERE player_id IN (
+    SELECT id FROM player WHERE email_masked LIKE '%@rehearsal.example.com');
+```
+
+That leaves the fifty rooms and their event logs behind, which nothing renders
+and nothing reaps. They are a few thousand rows and the tier will not notice,
+but they are there.
+
 ## If the first revision never goes ready
 
 The coach and the captain bind `127.0.0.1`, on the argument that the containers
