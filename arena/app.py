@@ -71,6 +71,19 @@ MAX_LIVE_ROOMS = int(os.environ.get("ARENA_MAX_LIVE_ROOMS", "120"))
 PLAYER_RATE, PLAYER_BURST = 1.0, 120
 ROOM_RATE, ROOM_BURST = 0.5, 120
 
+# Asking whether a name is free costs one indexed lookup and creates nothing,
+# but the join form asks while somebody is still typing, so one manager
+# produces several of these before they produce a join. Its own bucket for
+# exactly that reason: sharing the join's would mean a careful typist spends
+# the budget they need to actually join. Sized so a venue arriving at once is
+# comfortable and a script is not.
+NAME_RATE, NAME_BURST = 5.0, 240
+
+# How long a name on the board can be. In one place because the join and the
+# check that runs ahead of it have to agree: a form that says a name is fine and
+# then refuses it on the button is worse than one that never asked.
+NAME_LIMIT = 40
+
 # The coach spends money on every call, and its callers are not phones: both of
 # these routes are called by the pitch, the big screen running the match, from
 # a venue's one address. So this bucket is taken from under one constant key on
@@ -247,6 +260,7 @@ async def lifespan(fastapi_app: FastAPI):
     # the suite cannot fail in whichever test happens to run last. There is one
     # instance, so per app is per process anyway.
     fastapi_app.state.players = limits.Bucket(PLAYER_RATE, PLAYER_BURST)
+    fastapi_app.state.names = limits.Bucket(NAME_RATE, NAME_BURST)
     fastapi_app.state.rooms_opened = limits.Bucket(ROOM_RATE, ROOM_BURST)
     fastapi_app.state.coach = limits.Bucket(COACH_RATE, COACH_BURST)
     # How many screens are on the wall right now, here for the same reason as
@@ -296,9 +310,17 @@ async def put_the_connection_back(request: Request, call_next):
 
 
 class JoinRequest(BaseModel):
-    display_name: str = Field(min_length=1, max_length=40)
-    # RFC 5321 caps email addresses at 254 octets.
-    email: str = Field(max_length=254)
+    # Both bounds are the validator's below rather than the field's, because
+    # pydantic words its own -- "String should have at least 1 character" -- for
+    # whoever wrote the request, and what reads this one is a manager holding a
+    # phone in a room with a QR code in it.
+    display_name: str
+    # RFC 5321 caps email addresses at 254 octets. Optional, and defaulted to
+    # the empty string the form sends for a box nobody touched: the only thing
+    # an address buys a manager is one place on the board across two phones, so
+    # a venue that asks for it as a condition of playing is collecting a
+    # personal detail it has no use for.
+    email: str = Field(default="", max_length=254)
 
     @field_validator("display_name", "email")
     @classmethod
@@ -310,13 +332,30 @@ class JoinRequest(BaseModel):
             raise ValueError("that cannot contain a NUL character")
         return value
 
+    @field_validator("display_name")
+    @classmethod
+    def a_name_the_board_can_show(cls, value):
+        # Measured after the tidying rather than before it, so a name is judged
+        # as it will be stored: `min_length` would count the spaces in a name of
+        # nothing else, and `max_length` would count the ones between the words
+        # that are about to be collapsed to one.
+        name = identity.normalise_name(value)
+        if not name:
+            raise ValueError("that needs a name in it")
+        if len(name) > NAME_LIMIT:
+            raise ValueError(f"that is longer than the {NAME_LIMIT} characters the board shows")
+        return name
+
     @field_validator("email")
     @classmethod
     def looks_like_an_address(cls, value):
-        local, at_sign, domain = value.strip().partition("@")
+        value = value.strip()
+        if not value:
+            return ""
+        local, at_sign, domain = value.partition("@")
         if not (local and at_sign and "." in domain):
             raise ValueError("that does not look like an email address")
-        return value.strip()
+        return value
 
 
 class RoomRequest(BaseModel):
@@ -443,11 +482,19 @@ async def read_venue(request: Request):
 
 @app.post("/api/players")
 async def join(body: JoinRequest, request: Request, response: Response):
-    """Name plus email in, session cookie out. This is the whole of identity."""
+    """A name in, a session cookie out. The address is theirs to withhold.
+
+    The name is not optional and is nobody else's: it is what the board shows,
+    what the wall calls a dugout and what the other manager reads, so two of
+    them would be two people the venue cannot tell apart. A clash comes back as
+    a 409 the form shows under the field.
+    """
     if not request.app.state.players.take(limits.client_ip(request)):
         raise HTTPException(429, "slow down a moment and try that again")
     connection = request.app.state.conn
-    player_id = rooms.create_player(connection, body.display_name, body.email, EMAIL_SALT)
+    with _rules():
+        player_id = rooms.upsert_player(connection, body.display_name, body.email,
+                                        EMAIL_SALT, _player_or_none(request, connection))
     response.set_cookie(
         COOKIE,
         identity.sign_token(player_id, SESSION_SECRET),
@@ -458,6 +505,34 @@ async def join(body: JoinRequest, request: Request, response: Response):
     return {"id": player_id,
             "display_name": player["display_name"],
             "email": player["email_masked"]}
+
+
+@app.get("/api/players/available")
+async def name_available(name: str, request: Request):
+    """Whether this name is free, answered for whoever is asking.
+
+    Your own name is free to you. A manager coming back for a second match on
+    the same phone would otherwise be told the name on their own board entry
+    was taken, by themselves, and asked to think of another.
+
+    A taken name is answered in its holder's spelling rather than in the one
+    that was typed, because that is the spelling the board shows and the one the
+    join itself refuses in. The form says the two back word for word or it looks
+    like it is arguing about something else.
+    """
+    if not request.app.state.names.take(limits.client_ip(request)):
+        raise HTTPException(429, "slow down a moment and try that again")
+    tidy = identity.normalise_name(name)
+    # The same bounds the join itself applies, checked here rather than left to
+    # the lookup: psycopg will not bind a NUL at all, so one has to be turned
+    # away before it reaches a query.
+    if not tidy or len(tidy) > NAME_LIMIT or "\x00" in tidy:
+        raise HTTPException(422, "that is not a name the board can show")
+    connection = request.app.state.conn
+    holder = rooms.name_holder(connection, tidy)
+    if holder is None or holder["id"] == _player_or_none(request, connection):
+        return {"name": tidy, "available": True}
+    return {"name": holder["display_name"], "available": False}
 
 
 @app.post("/api/rooms")
@@ -917,9 +992,23 @@ def _text_bytes(value):
 
 def _player_or_401(request, connection):
     """The player id in the session cookie, or a 401 a phone can read."""
+    player_id = _player_or_none(request, connection)
+    if player_id is None:
+        raise HTTPException(401, "join first - your phone has no session")
+    return player_id
+
+
+def _player_or_none(request, connection):
+    """The player in the session cookie, if there is one and they still exist.
+
+    The twin above is for the routes that need a session. Joining is the route
+    that makes one, so there a phone with no cookie and a phone holding one
+    from an event whose database has since been emptied are both simply
+    somebody new, rather than somebody to turn away.
+    """
     player_id = identity.verify_token(request.cookies.get(COOKIE), SESSION_SECRET)
     if player_id is None or rooms.get_player(connection, player_id) is None:
-        raise HTTPException(401, "join first - your phone has no session")
+        return None
     return player_id
 
 

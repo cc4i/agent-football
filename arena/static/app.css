@@ -98,8 +98,17 @@ body.phone.fixed .pscreen{height:100%;min-height:0}
 }
 .input:focus{outline:none;border-color:var(--blue);background:var(--blue-dim)}
 .input::placeholder{color:var(--faint)}
+/* A field the arena has already said no to. After :focus, so that a name the
+   arena refuses still looks refused while it is being retyped. */
+.input.wrong,.input.wrong:focus{border-color:var(--red-line);background:rgba(239,68,68,.07)}
 .hint{font-size:.68rem;color:var(--faint);line-height:1.5;margin-top:6px}
 .hint a{color:var(--blue)}
+.hint.bad{color:#fca5a5}
+/* Said in the label rather than only in the hint under it: a form you have to
+   read to the end to learn what you may skip is a form people fill in twice. */
+.field label .optional{
+  font-weight:500;letter-spacing:.06em;text-transform:lowercase;opacity:.8;
+}
 .pills{display:grid;grid-template-columns:1fr 1fr;gap:7px}
 .pill{
   background:rgba(255,255,255,.03);border:1px solid var(--line);color:var(--mute);

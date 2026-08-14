@@ -7,10 +7,16 @@
  */
 
 export class Refused extends Error {
-  constructor(message, status) {
+  /**
+   * `fields` is whichever of the request's fields the arena named, if it named
+   * any. A form that has a box for one of them can say the refusal underneath
+   * that box instead of in a banner above the whole page.
+   */
+  constructor(message, status, fields = []) {
     super(message);
     this.name = "Refused";
     this.status = status;
+    this.fields = fields;
   }
 }
 
@@ -27,7 +33,9 @@ export async function call(method, path, body) {
     throw new Refused("Cannot reach the arena. Check the wifi and try again.", 0);
   }
   const payload = await response.json().catch(() => null);
-  if (!response.ok) throw new Refused(reason(payload, response.status), response.status);
+  if (!response.ok) {
+    throw new Refused(reason(payload, response.status), response.status, blamed(payload));
+  }
   return payload;
 }
 
@@ -36,7 +44,11 @@ export const post = (path, body) => call("POST", path, body ?? {});
 
 function reason(payload, status) {
   const detail = payload && payload.detail;
-  if (typeof detail === "string") return detail;
+  // Through `sentences` like every other shape below it. The arena words its
+  // refusals lower-case and unpunctuated, the way the rest of its messages are
+  // written, and one that is about to be the only thing on a phone's screen
+  // should still start like a sentence and end like one.
+  if (typeof detail === "string") return sentences([detail]);
   if (Array.isArray(detail)) {
     // Pydantic hands back one entry per bad field. All of them are shown: a
     // form that reports its problems one at a time is a form you submit twice.
@@ -45,6 +57,23 @@ function reason(payload, status) {
   }
   if (detail && Array.isArray(detail.problems)) return sentences(detail.problems);
   return `The arena refused that (${status}).`;
+}
+
+/**
+ * Which fields the refusal was about, in the order it named them.
+ *
+ * Only pydantic locates its complaints, and it locates each one as a path from
+ * the request down: `["body", "email"]`, or `["query", "name"]`. The last step
+ * is the field, which is what a form knows its boxes by. A refusal about the
+ * body as a whole names no field, and neither does one the arena raised itself.
+ */
+function blamed(payload) {
+  const detail = payload && payload.detail;
+  if (!Array.isArray(detail)) return [];
+  const named = detail
+    .map((entry) => (Array.isArray(entry.loc) && entry.loc.length > 1 ? entry.loc.at(-1) : null))
+    .filter((field) => typeof field === "string");
+  return [...new Set(named)];
 }
 
 function tidy(message) {

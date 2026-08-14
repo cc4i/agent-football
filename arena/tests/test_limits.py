@@ -127,6 +127,25 @@ def test_joining_too_fast_is_a_429(client):
     assert refused.status_code == 429
 
 
+def test_asking_whether_a_name_is_free_does_not_spend_the_join_budget(client):
+    # The form asks while somebody is still typing, so one manager produces
+    # several of these before they produce a join. Sharing the join's bucket
+    # would mean a careful typist cannot join at all.
+    client.app.state.players = limits.Bucket(rate=0.0, burst=1)
+    for _ in range(5):
+        assert client.get("/api/players/available",
+                          params={"name": "Alex Rivera"}).status_code == 200
+    assert client.post("/api/players", json={"display_name": "Alex Rivera"}
+                       ).status_code == 200
+
+
+def test_asking_about_names_too_fast_is_a_429(client):
+    client.app.state.names = limits.Bucket(rate=0.0, burst=1)
+    asking = {"params": {"name": "Alex Rivera"}}
+    assert client.get("/api/players/available", **asking).status_code == 200
+    assert client.get("/api/players/available", **asking).status_code == 429
+
+
 def test_the_default_budget_is_bigger_than_a_test_run_needs():
     # 50 people is the spec's first line and a venue is one address, so the
     # shipped burst has to carry all fifty of those joins. A number chosen

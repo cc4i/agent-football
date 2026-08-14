@@ -33,22 +33,103 @@ def required_teams(mode):
     return ("blue",) if mode == "solo" else TEAMS
 
 
-def create_player(conn, display_name, email, salt):
-    """Insert or find a player, keyed on the hashed email. Returns the id."""
-    email_hash = identity.hash_email(email, salt)
-    # A repeat player keeps one row so the board keeps one entry for them, but
-    # they may well have typed a different name this time. One statement rather
-    # than a look and then a write: a rollout runs two instances at once, and a
-    # join arriving at both of them is an ordinary Saturday, not an edge case.
-    row = conn.execute(
-        "INSERT INTO player (display_name, email_hash, email_masked, created_at) "
-        "VALUES (%s, %s, %s, %s) "
-        "ON CONFLICT (email_hash) DO UPDATE SET display_name = EXCLUDED.display_name "
-        "RETURNING id",
-        (display_name, email_hash, identity.mask_email(email), time.time()),
-    ).fetchone()
+def upsert_player(conn, display_name, email, salt, player_id=None):
+    """Insert or find a player, and give them the name they just typed.
+
+    Which player this is, in order: the address if it names one, then the
+    session the phone arrived with, then nobody and a new row. The address goes
+    first even though it is the optional half of the form, because it is the
+    deliberate claim of the two -- somebody typing their own address on a
+    borrowed phone is asking for their own place on the board back, and a
+    cookie its owner left behind must not take it from them.
+
+    A name belongs to one manager, so a name another player already holds is a
+    RoomError worded for a phone rather than a second row on the board that
+    nobody can tell from the first. `player_id` is a session the caller has
+    already verified; a stale or absent one is simply somebody new.
+    """
+    display_name = identity.normalise_name(display_name)
+    email_hash = identity.hash_email(email, salt) if email else None
+    mine = _player_by_email(conn, email_hash)
+    if mine is None:
+        mine = player_id
+
+    holder = name_holder(conn, display_name)
+    if holder is not None and holder["id"] != mine:
+        # Worded with the name as its holder spells it rather than as this
+        # caller typed it, so somebody who tried `alex rivera` is shown the
+        # `Alex Rivera` that is actually on the board and can see why.
+        raise RoomError(_already_managing(holder["display_name"]))
+
+    try:
+        return _write_player(conn, mine, display_name, email, email_hash)
+    except psycopg.errors.UniqueViolation as clash:
+        # The check above is a read and this is a write, and between the two
+        # another request can take the name: two phones typing it at the same
+        # moment, or one tapped twice during a rollout that has both instances
+        # serving. The loser is told what the check would have told them rather
+        # than handed a 500, and the rollback is what lets everybody else carry
+        # on -- a refused statement leaves the transaction in error, and every
+        # later one fails until it is ended.
+        conn.rollback()
+        if clash.diag.constraint_name != "one_player_per_name":
+            raise
+        raise RoomError(_already_managing(display_name)) from clash
+
+
+def _already_managing(display_name):
+    """What a phone is told when the name it typed is somebody else's."""
+    return f"somebody at this event is already managing as {display_name} - pick another name"
+
+
+def _write_player(conn, player_id, display_name, email, email_hash):
+    """Insert this manager, or move the row they already have. Returns the id."""
+    if player_id is None:
+        row = conn.execute(
+            "INSERT INTO player (display_name, email_hash, email_masked, created_at) "
+            "VALUES (%s, %s, %s, %s) RETURNING id",
+            (display_name, email_hash, identity.mask_email(email) if email else None,
+             time.time()),
+        ).fetchone()
+        conn.commit()
+        return row["id"]
+
+    # An address is added or replaced, never cleared. A manager coming back who
+    # leaves the optional box empty this time has not asked to give up the
+    # thing that has been keeping their one place on the board.
+    if email_hash is None:
+        conn.execute("UPDATE player SET display_name = %s WHERE id = %s",
+                     (display_name, player_id))
+    else:
+        conn.execute(
+            "UPDATE player SET display_name = %s, email_hash = %s, email_masked = %s "
+            "WHERE id = %s",
+            (display_name, email_hash, identity.mask_email(email), player_id))
     conn.commit()
-    return row["id"]
+    return player_id
+
+
+def _player_by_email(conn, email_hash):
+    """Whoever gave this address before, or None -- including for no address."""
+    if email_hash is None:
+        return None
+    row = conn.execute("SELECT id FROM player WHERE email_hash = %s",
+                       (email_hash,)).fetchone()
+    return row["id"] if row else None
+
+
+def name_holder(conn, display_name):
+    """The player holding this name, or None if it is free.
+
+    Matched the way `db.ONE_NAME_EACH` is built -- lower-cased, over a name
+    whose whitespace has been collapsed -- so what this reports and what the
+    database will accept are the same question asked twice. The row rather than
+    the id, because a refusal is worded with the spelling its holder chose.
+    """
+    return conn.execute(
+        "SELECT id, display_name FROM player WHERE lower(display_name) = lower(%s)",
+        (identity.normalise_name(display_name),),
+    ).fetchone()
 
 
 def get_player(conn, player_id):

@@ -11,17 +11,17 @@ SALT = "test-salt"
 
 @pytest.fixture
 def alex(conn):
-    return rooms.create_player(conn, "Alex Rivera", "alex@example.com", SALT)
+    return rooms.upsert_player(conn, "Alex Rivera", "alex@example.com", SALT)
 
 
 @pytest.fixture
 def sam(conn):
-    return rooms.create_player(conn, "Sam Okafor", "sam@example.com", SALT)
+    return rooms.upsert_player(conn, "Sam Okafor", "sam@example.com", SALT)
 
 
 @pytest.fixture
 def priya(conn):
-    return rooms.create_player(conn, "Priya Raman", "priya@example.com", SALT)
+    return rooms.upsert_player(conn, "Priya Raman", "priya@example.com", SALT)
 
 
 def played(conn, mode, seats, goals, shouts=()):

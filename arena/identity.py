@@ -1,12 +1,28 @@
-"""Player identity: an email becomes a hash and a mask, never a stored address.
+"""Player identity: a name that is theirs alone, and an address they may keep.
 
-The email exists only so one player keeps one place on the leaderboard across
-repeat plays. Nothing here can recover the address it was handed.
+A name is what the board shows and what the wall calls somebody, so it is
+unique across the venue and tidied here before anything compares two of them.
+
+The email is optional and exists only so one player keeps one place on the
+leaderboard across repeat plays, on a phone that is not the one they started
+on. Nothing here can recover the address it was handed.
 """
 
 import base64
 import hashlib
 import hmac
+
+
+def normalise_name(name):
+    """Trim, and collapse every run of whitespace to one space.
+
+    `Alex  Rivera ` and `Alex Rivera` are one person by any reading a human
+    gives them, so they are one name here too -- and the difference is removed
+    before the name is stored rather than only when two are compared, so the
+    board never shows a gap nobody typed on purpose. A name of nothing but
+    whitespace comes back empty, which is what refuses it upstream.
+    """
+    return " ".join(name.split())
 
 
 def normalise_email(email):

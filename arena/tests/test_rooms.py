@@ -11,12 +11,12 @@ SALT = "test-salt"
 
 @pytest.fixture
 def alex(conn):
-    return rooms.create_player(conn, "Alex Rivera", "alex@example.com", SALT)
+    return rooms.upsert_player(conn, "Alex Rivera", "alex@example.com", SALT)
 
 
 @pytest.fixture
 def sam(conn):
-    return rooms.create_player(conn, "Sam Okafor", "sam@example.com", SALT)
+    return rooms.upsert_player(conn, "Sam Okafor", "sam@example.com", SALT)
 
 
 def live_solo(conn, player_id):
@@ -36,10 +36,50 @@ def test_a_new_player_keeps_a_masked_email_and_no_address(conn, alex):
 
 
 def test_the_same_email_comes_back_as_the_same_player(conn, alex):
-    again = rooms.create_player(conn, "Alex R", "ALEX@example.com", SALT)
+    again = rooms.upsert_player(conn, "Alex R", "ALEX@example.com", SALT)
     assert again == alex
     # They typed a shorter name this time, and the board follows the latest.
     assert rooms.get_player(conn, alex)["display_name"] == "Alex R"
+
+
+def test_a_player_who_gave_no_email_is_still_a_player(conn):
+    anonymous = rooms.upsert_player(conn, "Taylor Quinn", "", SALT)
+    row = rooms.get_player(conn, anonymous)
+    assert row["display_name"] == "Taylor Quinn"
+    assert row["email_hash"] is None
+
+
+def test_a_name_another_player_holds_is_refused(conn, alex):
+    with pytest.raises(rooms.RoomError, match="already managing as Alex Rivera"):
+        rooms.upsert_player(conn, "alex rivera", "sam@example.com", SALT)
+    # The refusal left nothing behind: a name clash is not half a join.
+    assert conn.execute("SELECT count(*) AS n FROM player").fetchone()["n"] == 1
+
+
+def test_a_session_keeps_its_own_name_across_a_second_join(conn, alex):
+    assert rooms.upsert_player(conn, "Alex Rivera", "", SALT, player_id=alex) == alex
+
+
+def test_a_session_may_not_take_a_name_another_player_holds(conn, alex, sam):
+    with pytest.raises(rooms.RoomError, match="already managing as Alex Rivera"):
+        rooms.upsert_player(conn, "Alex Rivera", "", SALT, player_id=sam)
+
+
+def test_an_address_outranks_the_session_it_arrived_with(conn, alex, sam):
+    # Alex on Sam's phone. The address is the deliberate claim of the two.
+    assert rooms.upsert_player(conn, "Alex Rivera", "alex@example.com", SALT,
+                               player_id=sam) == alex
+
+
+def test_a_name_nobody_holds_has_no_holder(conn, alex):
+    assert rooms.name_holder(conn, "Priya Raman") is None
+
+
+def test_a_name_is_held_however_it_is_typed(conn, alex):
+    held = rooms.name_holder(conn, "  ALEX   rivera ")
+    assert held["id"] == alex
+    # The spelling its holder chose, which is what a refusal is worded with.
+    assert held["display_name"] == "Alex Rivera"
 
 
 def test_a_new_room_opens_in_the_lobby_with_a_typable_code(conn):

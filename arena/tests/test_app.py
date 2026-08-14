@@ -35,7 +35,7 @@ def test_an_empty_name_is_refused(client):
 
 def test_a_nul_in_a_name_is_refused_rather_than_bound(client):
     # psycopg will not bind a NUL into a text column, so one that got as far as
-    # create_player would be a 500 handed out for unauthenticated input.
+    # upsert_player would be a 500 handed out for unauthenticated input.
     assert client.post("/api/players",
                        json={"display_name": "Al\x00ex",
                              "email": "a@b.com"}).status_code == 422

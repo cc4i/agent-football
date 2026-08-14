@@ -141,7 +141,7 @@ def test_a_write_that_failed_mid_request_does_not_brick_the_arena(client, monkey
     """The middleware is the net under every write nobody has hardened yet.
 
     The two writes a rollout could actually lose a race on now answer for
-    themselves - `create_player` upserts, `take_seat` catches its violation -
+    themselves - `upsert_player` upserts, `take_seat` catches its violation -
     so neither of them can be used to abort the connection any more. The fault
     here is injected rather than raced for: a genuine server-side refusal in
     the middle of a route's write, which is the state a lost race leaves

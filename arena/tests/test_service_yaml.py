@@ -41,10 +41,12 @@ SECRETS = {
     "ARENA_SERVICE_TOKEN": "arena-service-token",
 }
 
-# A token deploy.sh renders. Underscores on both sides so that it cannot occur
-# inside an identifier the yaml also uses; see the O2 test at the foot of this
-# file for what that costs when it does.
-PLACEHOLDER = re.compile(r"^__[A-Z]+__$")
+# A token deploy.sh renders. Two underscores on both sides so that it cannot
+# occur inside an identifier the yaml also uses; see the O2 test at the foot of
+# this file for what that costs when it does. Single underscores are allowed
+# between words -- __DB_HOST__ is as well delimited as __TAG__ is -- but never
+# doubled inside, which would give one token two places sed could end it.
+PLACEHOLDER = re.compile(r"^__[A-Z]+(_[A-Z]+)*__$")
 
 
 def valued(name):

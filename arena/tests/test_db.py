@@ -93,6 +93,55 @@ def test_init_db_over_an_existing_database_keeps_the_rows(dsn):
     second.close()
 
 
+def test_a_player_may_hold_no_address_at_all(conn):
+    conn.execute("INSERT INTO player (display_name, created_at) VALUES ('Alex Rivera', 0)")
+    row = conn.execute("SELECT email_hash, email_masked FROM player").fetchone()
+    assert row == {"email_hash": None, "email_masked": None}
+
+
+def test_any_number_of_players_may_hold_no_address(conn):
+    # The hash is still unique, and the unique index on it is what this could
+    # have fallen foul of: Postgres counts NULLs as distinct from one another,
+    # so withholding an address is not a claim on the one empty slot.
+    for name in ("Alex Rivera", "Sam Okafor"):
+        conn.execute("INSERT INTO player (display_name, created_at) VALUES (%s, 0)", (name,))
+    assert conn.execute("SELECT count(*) AS n FROM player").fetchone()["n"] == 2
+
+
+def test_two_players_cannot_share_a_name_whatever_the_case(conn):
+    conn.execute("INSERT INTO player (display_name, created_at) VALUES ('Alex Rivera', 0)")
+    with pytest.raises(psycopg.errors.UniqueViolation):
+        conn.execute("INSERT INTO player (display_name, created_at) "
+                     "VALUES ('alex rivera', 0)")
+    db.finish(conn)
+
+
+def test_two_alexes_from_before_the_rule_are_pulled_apart_on_the_next_boot(conn):
+    """A database made when names were free of each other still has to open.
+
+    Names became a manager's identity the day the address stopped being
+    required, and the index below cannot be created over a table that already
+    holds two of them. The older row keeps the name, because it is the one the
+    board has been showing all along.
+    """
+    conn.execute("DROP INDEX one_player_per_name")
+    for made in (1.0, 2.0):
+        conn.execute("INSERT INTO player (display_name, created_at) VALUES ('Alex', %s)",
+                     (made,))
+    conn.commit()
+
+    db.init_db(conn)
+
+    names = [row["display_name"] for row in conn.execute(
+        "SELECT display_name FROM player ORDER BY created_at")]
+    assert names[0] == "Alex"
+    assert names[1].startswith("Alex #")
+    # And the rule is in force from here on, which is the point of the renaming.
+    with pytest.raises(psycopg.errors.UniqueViolation):
+        conn.execute("INSERT INTO player (display_name, created_at) VALUES ('Alex', 3)")
+    db.finish(conn)
+
+
 def test_two_rooms_cannot_share_a_code(conn):
     conn.execute("INSERT INTO room (code, mode, status, ranked, created_at) "
                  "VALUES ('K7F2', 'solo', 'lobby', 1, 0)")

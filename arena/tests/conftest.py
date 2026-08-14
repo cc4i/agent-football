@@ -156,6 +156,10 @@ def phones(client):
             client.cookies.clear()
             client.cookies.update(jar)
 
+        def fresh(self):
+            """A phone nobody has joined on. Joining reads the cookie now."""
+            client.cookies.clear()
+
     return Phones()
 
 

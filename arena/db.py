@@ -24,11 +24,16 @@ from psycopg.rows import dict_row
 DEFAULT_DSN = "postgresql:///arena"
 
 SCHEMA = """
+-- The address is optional, so both of its columns are. Unique among the
+-- players who gave one and no constraint at all on those who did not, because
+-- Postgres counts NULLs as distinct from one another: withholding an address
+-- is not a claim on the one empty slot. What identifies a manager who gave
+-- none is their name, which `one_player_per_name` below keeps theirs alone.
 CREATE TABLE IF NOT EXISTS player (
     id           INTEGER PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
     display_name TEXT    NOT NULL,
-    email_hash   TEXT    NOT NULL UNIQUE,
-    email_masked TEXT    NOT NULL,
+    email_hash   TEXT    UNIQUE,
+    email_masked TEXT,
     created_at   DOUBLE PRECISION NOT NULL
 );
 
@@ -125,6 +130,32 @@ CREATE INDEX IF NOT EXISTS result_by_player ON result (player_id);
 CREATE UNIQUE INDEX IF NOT EXISTS one_dugout_per_player ON seat (room_id, player_id);
 """
 
+# Columns whose rules changed after somebody's database was already made.
+# `CREATE TABLE IF NOT EXISTS` does nothing at all to a table that is already
+# there, so the email columns above would stay NOT NULL forever on every
+# database that predates the address becoming optional, and the first manager
+# to withhold one would get a 500. Each statement here is a no-op against a
+# table that already has the shape it asks for, so this runs on every boot.
+MIGRATIONS = """
+ALTER TABLE player ALTER COLUMN email_hash DROP NOT NULL;
+ALTER TABLE player ALTER COLUMN email_masked DROP NOT NULL;
+"""
+
+# What makes a name a manager's own. Compared case-insensitively, over names
+# `identity.normalise_name` has already collapsed the whitespace in, so `Alex
+# Rivera` and `alex  rivera` are one name and the second person to type it is
+# asked for another. An index rather than a table constraint for the reason
+# above: `CREATE TABLE IF NOT EXISTS` will not add one to a table that exists.
+ONE_NAME_EACH = ("CREATE UNIQUE INDEX IF NOT EXISTS one_player_per_name "
+                 "ON player (lower(display_name))")
+
+# How many renaming rounds `_pull_apart_shared_names` may take. Each round
+# leaves strictly fewer clashes than it found, and one that changes nothing
+# ends it early, so this only bounds the case where a rename keeps landing on a
+# name that is itself taken. Running out means the index below fails to create
+# and the arena does not boot, which is the right way to be wrong about this.
+RENAME_ROUNDS = 5
+
 # Every table, newest dependency last. The test suite truncates these between
 # tests; nothing in the arena itself reads it.
 TABLES = ("result", "event", "profile", "seat", "room", "player")
@@ -201,7 +232,37 @@ def init_db(connection):
     """
     connection.execute("SELECT pg_advisory_xact_lock(%s)", (SCHEMA_LOCK,))
     connection.execute(SCHEMA)
+    connection.execute(MIGRATIONS)
+    _pull_apart_shared_names(connection)
+    connection.execute(ONE_NAME_EACH)
     connection.commit()
+
+
+def _pull_apart_shared_names(connection):
+    """Rename any manager who shares a name with an older one.
+
+    A name became a manager's identity the day the address stopped being
+    required, and a database made before that day may well hold two Alexes.
+    The unique index cannot be created over a table that already holds a pair,
+    so this is what lets it be created at all -- and it has to run on every
+    boot, because there is nowhere to record that it has run before.
+
+    The oldest row keeps the name, because it is the one the board has been
+    showing. The rest get their own id appended, which is unique by
+    construction, so no two rows renamed in the same round can collide with
+    each other; only with a name that was already sitting there, which is what
+    the second round is for.
+    """
+    for _ in range(RENAME_ROUNDS):
+        renamed = connection.execute(
+            "UPDATE player SET display_name = player.display_name || ' #' || player.id "
+            "FROM (SELECT id, row_number() OVER (PARTITION BY lower(display_name) "
+            "                                    ORDER BY created_at, id) AS seniority "
+            "        FROM player) ranked "
+            "WHERE ranked.id = player.id AND ranked.seniority > 1"
+        ).rowcount
+        if not renamed:
+            return
 
 
 def finish(connection):
