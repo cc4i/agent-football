@@ -13,6 +13,7 @@ session state where `update_profile` already looks for them.
 import json
 import logging
 import os
+from urllib.parse import quote
 
 import httpx
 
@@ -32,6 +33,17 @@ CONNECT_SECONDS = 5.0
 # How long one hop of the chain may go quiet. The specialists are parallel and
 # the slowest of them sets this; the whole-chain budget lives in `chain`.
 IDLE_SECONDS = float(os.environ.get("ARENA_COACH_IDLE_SECONDS", "90"))
+
+
+def session_path(user):
+    """The ADK path for opening a session for a given user.
+
+    The user segment is percent-encoded to prevent path rewriting via
+    dot-segment removal or query string injection. Dots are explicitly
+    encoded because quote() treats them as unreserved.
+    """
+    encoded = quote(user, safe='').replace('.', '%2E')
+    return f"/apps/{COACH_APP}/users/{encoded}/sessions"
 
 
 class Unreachable(Exception):
@@ -75,8 +87,7 @@ async def stream(text, state):
 async def _open_session(http, state):
     """Open an ADK session carrying the room and dugout, and return its id."""
     try:
-        reply = await http.post(
-            f"/apps/{COACH_APP}/users/{COACH_USER}/sessions", json={"state": state})
+        reply = await http.post(session_path(COACH_USER), json={"state": state})
     except httpx.HTTPError as silence:
         raise Unreachable(f"the coach at {COACH_URL} did not answer") from silence
     if reply.status_code >= 400:

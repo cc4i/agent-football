@@ -42,6 +42,7 @@ import identity
 import philosophies
 import presets
 import profiles
+import proxy
 import rooms
 from bus import WALL, Bus, room_topic
 
@@ -179,6 +180,11 @@ async def lifespan(fastapi_app: FastAPI):
 
 
 app = FastAPI(title="Arena", lifespan=lifespan)
+
+# Two paths onto the coach, for the pitch's own coach bar and status check.
+# Mounted on the app rather than reached for directly so that the allowlist is
+# one file somebody can read in full.
+app.include_router(proxy.router)
 
 
 @app.middleware("http")
