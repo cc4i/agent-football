@@ -21,6 +21,7 @@ from . import arena_client
 from google.adk.tools.mcp_tool import McpToolset
 from google.adk.tools.mcp_tool.mcp_session_manager import StdioConnectionParams
 from mcp import StdioServerParameters
+from mcp.client.stdio import get_default_environment
 
 # Resolve paths relative to this file.
 # BASE_DIR is game/agents/specialist_agents/
@@ -78,11 +79,30 @@ def dummy_request_substitution(role: str, reason: str = "tired") -> str:
     print(f"--> [DUMMY MCP] {role.upper()} requested a substitution ({reason}).")
     return f"Successfully logged substitution request for {role}: {reason}"
 
+# What the condition server reads out of its environment to reach the arena.
+CONDITION_SERVER_VARS = ("ARENA_SERVICE_TOKEN", "ARENA_URL")
+
+
+def condition_server_env() -> dict:
+    """The arena settings to hand the MCP server, of those that are set.
+
+    Spawning it inherits nothing by default: the MCP client passes a fixed safe
+    list -- HOME, PATH, SHELL and three others -- and drops the rest, so a
+    captain server started with the token set spawned a server that could not
+    see it and refused every injury it was asked to file. An unset variable is
+    left out rather than passed empty, because an empty ARENA_URL would beat
+    the server's own default and point it at nothing.
+    """
+    return {name: os.environ[name] for name in CONDITION_SERVER_VARS
+            if os.environ.get(name)}
+
+
 def make_condition_toolset() -> list:
     """Build an MCP toolset (stdio) exposing the injury/substitution tools.
 
     A fresh toolset per player keeps each agent's MCP session isolated. The
-    server is spawned on demand with the same Python interpreter running ADK.
+    server is spawned on demand with the same Python interpreter running ADK,
+    and with the arena settings added to the safe list it would otherwise get.
     """
     if USE_REAL_MCP_SERVER:
         toolset = McpToolset(
@@ -90,6 +110,7 @@ def make_condition_toolset() -> list:
                 server_params=StdioServerParameters(
                     command=sys.executable,
                     args=[MCP_SERVER_PATH],
+                    env={**get_default_environment(), **condition_server_env()},
                 ),
             ),
             tool_filter=["report_injury", "request_substitution"],
