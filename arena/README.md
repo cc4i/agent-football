@@ -30,11 +30,14 @@ shell wins where both say something, which is what lets one exported
 
 | Variable | Default | What it does |
 |---|---|---|
+| `ARENA_ENV` | unset | Set to `production` and the arena refuses to start without the three secrets, rather than warning and carrying on with defaults. |
 | `ARENA_DB` | `postgresql:///arena` | The Postgres connection string. Tests point it at a throwaway database. |
-| `ARENA_EMAIL_SALT` | `arena-dev-salt` | Salts the email hash. Keeps a literal default on purpose: change it and every returning player loses their history. |
-| `ARENA_SECRET` | random per start | Signs session cookies. Unset means sessions do not survive a restart - set it in anything longer-lived than a demo. |
-| `ARENA_SERVICE_TOKEN` | unset | Lets a server-side caller patch profiles without a phone session. Unset refuses every such call. The specialist agents need the same value. |
-| `ARENA_PUBLIC_URL` | `http://localhost:8003` | What the QR codes encode. A phone on the venue wifi cannot reach the laptop's loopback, so a real event sets this to the machine's LAN name or a tunnel. |
+| `ARENA_EMAIL_SALT` | `arena-dev-salt` | Salts the email hash. Keeps a literal default on purpose: change it and every returning player loses their history. Production refuses to start without it. |
+| `ARENA_SECRET` | random per start | Signs session cookies. Unset means sessions do not survive a restart - set it in anything longer-lived than a demo. Production refuses to start without it. |
+| `ARENA_SERVICE_TOKEN` | unset | Lets a server-side caller patch profiles without a phone session. Unset refuses every such call. The specialist agents need the same value. Production refuses to start without it. |
+| `ARENA_PUBLIC_URL` | derived from request | What the QR codes encode. Unset, it is worked out from the request's forwarded headers - Cloud Run does not tell a service its own hostname before the first deploy. Set it explicitly once the service has a name, or for a tunnel or a LAN address. |
+| `ARENA_PITCH_DIR` | unset | Where the built pitch bundle is, when the arena is the thing serving it. Unset locally, where Vite serves the pitch on :5173. |
+| `ARENA_PLAYER_STATE_DIR` | unset | The directory the game's MCP server writes injuries into. Deployed this is a volume shared with the coach's container. |
 | `ARENA_PITCH_URL` | `http://localhost:5173` | Where the pitch is served from. The big screen frames it. |
 | `ARENA_COACH_URL` | `http://127.0.0.1:8000` | The ADK server a shout is carried to. |
 | `ARENA_COACH_APP` | `agents` | The application name `adk web .` registers for the package beside it. |

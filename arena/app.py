@@ -53,6 +53,10 @@ logger = logging.getLogger(__name__)
 # host cannot flood the wall's queues with one message.
 MAX_PAYLOAD_BYTES = 102400
 
+# Host validation pattern: letters, digits, dot, hyphen, colon (for port). An
+# allowlist is a list of characters we did not have to reason about.
+_HOST_PATTERN = re.compile(r'^[a-zA-Z0-9.\-:]+$')
+
 
 class _RedactClientId(logging.Filter):
     """Redact client_id from uvicorn access logs.
@@ -74,16 +78,41 @@ class _RedactClientId(logging.Filter):
         return True
 
 
-# EMAIL_SALT keeps its literal default: if it randomised, every email hash would
-# change on restart and players would lose their history. SESSION_SECRET must never
-# fall back to a public literal, even if that means sessions don't survive a restart.
-EMAIL_SALT = os.environ.get("ARENA_EMAIL_SALT", "arena-dev-salt")
-if "ARENA_EMAIL_SALT" not in os.environ:
+class Misconfigured(Exception):
+    """A public deployment missing something it must not guess at."""
+
+
+# On a laptop, a missing secret is a warning and a sensible default. On a URL
+# anyone can reach it is neither: a random session secret logs every phone out
+# on each deploy, a defaulted salt makes every returning player a stranger the
+# day it changes, and an unset service token fails the agent chain at its last
+# hop with a 403 nobody is watching for.
+PRODUCTION = os.environ.get("ARENA_ENV") == "production"
+
+
+def _insist(name, why):
+    """Read a secret, or say exactly what is missing and why it matters."""
+    value = os.environ.get(name, "")
+    if value:
+        return value
+    if PRODUCTION:
+        raise Misconfigured(f"{name} must be set when ARENA_ENV=production: {why}")
+    return ""
+
+
+# EMAIL_SALT keeps its literal default outside production: if it randomised,
+# every email hash would change on restart and players would lose their history.
+EMAIL_SALT = _insist("ARENA_EMAIL_SALT",
+                     "changing it later makes every returning player a stranger") \
+    or "arena-dev-salt"
+if not os.environ.get("ARENA_EMAIL_SALT"):
     logger.warning("ARENA_EMAIL_SALT unset; set it before a real event or every "
                    "returning player is a stranger the next time you change it")
-if "ARENA_SECRET" in os.environ:
-    SESSION_SECRET = os.environ["ARENA_SECRET"]
-else:
+
+# SESSION_SECRET must never fall back to a public literal, even if that means
+# sessions do not survive a restart.
+SESSION_SECRET = _insist("ARENA_SECRET", "a random one logs every phone out on each deploy")
+if not SESSION_SECRET:
     SESSION_SECRET = secrets.token_urlsafe(32)
     logger.warning("ARENA_SECRET unset; sessions will not survive a restart")
 COOKIE = "arena_session"
@@ -91,7 +120,7 @@ COOKIE = "arena_session"
 # The specialist agents run in another process with no phone and no cookie, so
 # they carry a shared secret instead. Unset means they are refused: an unset
 # secret must authenticate nobody rather than everybody.
-SERVICE_TOKEN = os.environ.get("ARENA_SERVICE_TOKEN", "")
+SERVICE_TOKEN = _insist("ARENA_SERVICE_TOKEN", "the agent chain cannot write without it")
 if not SERVICE_TOKEN:
     logger.warning("ARENA_SERVICE_TOKEN unset; server-side profile writes are refused")
 
@@ -125,10 +154,14 @@ SWEEP_SECONDS = 5
 # reloads afterwards is still told why their match stopped.
 HOST_GONE_REASON = "The screen running this match stopped reporting, so it was abandoned."
 
-# What a QR code should encode. A phone on the venue wifi cannot reach the
-# laptop's loopback address, so a real event sets this to the machine's LAN
-# name or its tunnel. The default is right for one person testing alone.
-PUBLIC_URL = os.environ.get("ARENA_PUBLIC_URL", "http://localhost:8003").rstrip("/")
+# What a QR code should encode. Unset, it is worked out from the request, which
+# is what lets a first deploy be a first deploy: Cloud Run does not tell a
+# service its own hostname until it exists, and every QR in the venue encodes
+# this. Set it explicitly for a tunnel or a LAN name.
+PUBLIC_URL = os.environ.get("ARENA_PUBLIC_URL", "").rstrip("/")
+if PRODUCTION and not PUBLIC_URL:
+    logger.warning("ARENA_PUBLIC_URL unset; the public URL is being worked out per "
+                   "request and should be set explicitly now that the service has a name")
 
 # The built pitch, when the arena is the thing serving it. Unset locally, where
 # Vite serves the pitch on :5173 and this mount does not exist.
@@ -350,9 +383,9 @@ async def board_page():
 
 
 @app.get("/api/venue")
-async def read_venue():
+async def read_venue(request: Request):
     """Where the other halves of the venue live, for the pages to link to."""
-    return {"pitch_url": PITCH_URL, "public_url": PUBLIC_URL}
+    return {"pitch_url": PITCH_URL, "public_url": _origin(request)}
 
 
 @app.post("/api/players")
@@ -381,13 +414,13 @@ async def open_room(body: RoomRequest, request: Request):
             room = rooms.create_room(connection, body.mode)
     except codes.CodesExhausted as problem:
         raise HTTPException(503, str(problem)) from problem
-    return {**_snapshot(connection, room["id"]), "host_token": room["host_client_id"]}
+    return {**_snapshot(connection, room["id"], request), "host_token": room["host_client_id"]}
 
 
 @app.get("/api/rooms/{code}")
 async def read_room(code: str, request: Request):
     connection, room = _profile_room(request, code)
-    return _snapshot(connection, room["id"])
+    return _snapshot(connection, room["id"], request)
 
 
 @app.get("/api/rooms/{code}/me")
@@ -411,7 +444,7 @@ async def sit_down(code: str, team: str, body: SeatRequest, request: Request,
     connection, room = _profile_room(request, code)
     with _rules():
         rooms.take_seat(connection, room["id"], team, player_id, body.philosophy)
-    return _announce(request.app, room)
+    return _announce(request.app, room, request)
 
 
 @app.post("/api/rooms/{code}/seats/{team}/ready")
@@ -422,7 +455,7 @@ async def set_ready(code: str, team: str, body: ReadyRequest, request: Request,
     _require_own_seat(connection, room["id"], team, player_id)
     with _rules():
         rooms.set_ready(connection, room["id"], team, body.ready)
-    return _announce(request.app, room)
+    return _announce(request.app, room, request)
 
 
 @app.get("/api/rooms/{code}/events")
@@ -475,7 +508,7 @@ async def room_qr(code: str, request: Request):
     drawing = io.BytesIO()
     # Sized in mm with no class attributes, so the page's own CSS decides how
     # big it is rather than the encoder.
-    segno.make(join_url(room["code"]), error="m").save(
+    segno.make(join_url(room["code"], request), error="m").save(
         drawing, kind="svg", scale=1, border=2, unit="mm", svgclass=None, lineclass=None)
     return Response(drawing.getvalue(), media_type="image/svg+xml",
                     headers={"Cache-Control": "no-store"})
@@ -616,7 +649,7 @@ async def start(code: str, request: Request, player_id: int = Depends(current_pl
             _record_patch(request.app, connection, room, team, result,
                           reason=seat["philosophy"], actor="kick-off")
 
-    snapshot = _announce(request.app, room)
+    snapshot = _announce(request.app, room, request)
     request.app.state.bus.publish(WALL, {"type": "wall", "rooms": rooms.live(connection)})
     return snapshot
 
@@ -836,24 +869,53 @@ def _require_seated(connection, room_id, player_id):
         raise HTTPException(403, "only somebody in this match can start it")
 
 
-def join_url(code):
-    """The address a phone lands on after scanning this room's code."""
-    return f"{PUBLIC_URL}/join/{code}"
+def join_url(code, request=None):
+    """The address a phone lands on after scanning this room's code.
+
+    Configured if somebody said so, otherwise whatever the request came in on.
+    Behind Cloud Run that means the forwarded scheme and the Host header, which
+    together are the *.run.app name with its certificate.
+    """
+    return f"{_origin(request)}/join/{code}"
 
 
-def _snapshot(connection, room_id):
+def _origin(request):
+    if PUBLIC_URL:
+        return PUBLIC_URL
+    if request is None:
+        return "http://localhost:8003"
+    # Websockets have scheme ws/wss; map them to http/https for the origin URL.
+    scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
+    if scheme == "ws":
+        scheme = "http"
+    elif scheme == "wss":
+        scheme = "https"
+    host = request.headers.get("host", request.url.netloc)
+    # The host header is attacker-controlled. Validate before trusting: an
+    # allowlist is a list of characters we did not have to reason about. Letters,
+    # digits, dot, hyphen, and an optional :port. Everything else falls back.
+    if scheme not in ("http", "https"):
+        return "http://localhost:8003"
+    if not host:
+        return "http://localhost:8003"
+    if not _HOST_PATTERN.match(host):
+        return "http://localhost:8003"
+    return f"{scheme}://{host}"
+
+
+def _snapshot(connection, room_id, request=None):
     """A room as clients see it, with the address its QR encodes.
 
     `rooms.snapshot` is deliberately ignorant of HTTP, so the URL is glued on
     here rather than threading a base address through the data layer.
     """
     snapshot = rooms.snapshot(connection, room_id)
-    return {**snapshot, "join_url": join_url(snapshot["code"])}
+    return {**snapshot, "join_url": join_url(snapshot["code"], request)}
 
 
-def _announce(fastapi_app, room):
+def _announce(fastapi_app, room, request=None):
     """Publish the room's new shape to everyone watching it, and return it."""
-    snapshot = _snapshot(fastapi_app.state.conn, room["id"])
+    snapshot = _snapshot(fastapi_app.state.conn, room["id"], request)
     fastapi_app.state.bus.publish(room_topic(room["code"]), {"type": "room", **snapshot})
     return snapshot
 
@@ -925,7 +987,7 @@ async def room_socket(socket: WebSocket, code: str, client_id: str = ""):
 
     await socket.accept()
     try:
-        await socket.send_json({"type": "room", **_snapshot(connection, room["id"])})
+        await socket.send_json({"type": "room", **_snapshot(connection, room["id"], socket)})
     finally:
         # The snapshot is a read, and a read opens a transaction like anything
         # else. A viewer that never says a word would otherwise hold one open
@@ -944,7 +1006,7 @@ async def room_socket(socket: WebSocket, code: str, client_id: str = ""):
                 continue
             try:
                 _handle_from_host(message, connection, match_bus, room, client_id,
-                                  reporting)
+                                  reporting, socket)
             finally:
                 # One message is one unit of work. No middleware reaches a
                 # WebSocket route, so this socket puts the connection back
@@ -976,7 +1038,7 @@ def _wire_bytes(value):
         return None
 
 
-def _handle_from_host(message, connection, match_bus, room, client_id, reporting):
+def _handle_from_host(message, connection, match_bus, room, client_id, reporting, socket):
     """Apply one up-message, if the sender is the client holding physics."""
     if not isinstance(message, dict):
         return
@@ -1041,7 +1103,7 @@ def _handle_from_host(message, connection, match_bus, room, client_id, reporting
                               "match_ms": match_ms, "payload": payload})
 
     if event_kind in ("full_time", "abandoned"):
-        _end_match(connection, match_bus, room, event_kind)
+        _end_match(connection, match_bus, room, event_kind, socket)
 
 
 def _watch_the_clock(connection, room, payload):
@@ -1061,7 +1123,7 @@ def _watch_the_clock(connection, room, payload):
         rooms.unrank(connection, room["id"])
 
 
-def _end_match(connection, match_bus, room, event_kind):
+def _end_match(connection, match_bus, room, event_kind, socket=None):
     """Close the room the host says is over, and pay out if it was played out.
 
     The host is trusted for physics and not for scoring, and when a match ended
@@ -1074,7 +1136,7 @@ def _end_match(connection, match_bus, room, event_kind):
     if status == "finished":
         board.record(connection, rooms.by_code(connection, room["code"]))
     match_bus.publish(room_topic(room["code"]),
-                      {"type": "room", **_snapshot(connection, room["id"])})
+                      {"type": "room", **_snapshot(connection, room["id"], socket)})
     match_bus.publish(WALL, {"type": "wall", "rooms": rooms.live(connection)})
 
 
@@ -1111,6 +1173,9 @@ def _give_up_on_the_missing(connection, match_bus, now):
         match_bus.publish(room_topic(room["code"]),
                           {"type": "event", "seq": seq, "kind": "abandoned",
                            "match_ms": None, "payload": said})
+        # No socket to pass: this is announcing a room that has just been
+        # abandoned, and a wrong but inert URL on a dead room beats an
+        # attacker-settable one anywhere.
         _end_match(connection, match_bus, full, "abandoned")
         logger.info("room %s abandoned: nothing from its host in %ss",
                     room["code"], HOST_GONE_SECONDS)
