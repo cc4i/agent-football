@@ -9,21 +9,23 @@ import json
 
 import pytest
 
+import rooms
+
 
 @pytest.fixture
 def waiting_room(client, phones):
-    """A room in its lobby. Returns (code, host_token)."""
+    """A room in its lobby. Returns (code, screen_token)."""
 
     def _waiting_room(mode="solo"):
         phones.join("Alex Rivera", "alex@example.com")
         opened = client.post("/api/rooms", json={"mode": mode}).json()
-        return opened["code"], opened["host_token"]
+        return opened["code"], opened["screen_token"]
 
     return _waiting_room
 
 
 def change(client, code, mode, token):
-    return client.post(f"/api/rooms/{code}/mode", json={"mode": mode, "host_token": token})
+    return client.post(f"/api/rooms/{code}/mode", json={"mode": mode, "screen_token": token})
 
 
 def test_the_screen_turns_its_own_room_head_to_head(client, waiting_room):
@@ -67,9 +69,12 @@ def test_one_room_s_token_does_not_open_another_room(client, waiting_room):
     assert change(client, theirs, "versus", mine).status_code == 403
 
 
-def test_a_match_that_has_kicked_off_keeps_its_mode(client, live_room):
-    code, token = live_room("solo")
-    response = change(client, code, "versus", token)
+def test_a_match_that_has_kicked_off_keeps_its_mode(client, conn, live_room):
+    # The screen's own token, not the grounds': the point is that a kicked-off
+    # match refuses the one hand that would otherwise be allowed to reshape it.
+    code, _ = live_room("solo")
+    response = change(client, code, "versus",
+                      rooms.by_code(conn, code)["screen_client_id"])
     assert response.status_code == 409
     assert "already started" in response.text
     assert client.get(f"/api/rooms/{code}").json()["mode"] == "solo"

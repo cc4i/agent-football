@@ -48,11 +48,11 @@ def heard_now(client, code):
     rooms.heard_from(state.conn, rooms.by_code(state.conn, code)["id"], NOW)
 
 
-def open_lobby(client, phones, mode="solo"):
-    """A room on a screen, with nobody in it yet. Returns (code, host_token)."""
+def open_lobby(client, conn, phones, mode="solo"):
+    """A room on a screen, with nobody in it yet. Returns (code, physics token)."""
     phones.join("Alex Rivera", "alex@example.com")
     opened = client.post("/api/rooms", json={"mode": mode}).json()
-    return opened["code"], opened["host_token"]
+    return opened["code"], rooms.by_code(conn, opened["code"])["host_client_id"]
 
 
 def once_heard(client, code, within=2.0):
@@ -81,24 +81,24 @@ def test_a_room_whose_screen_has_stopped_reporting_is_given_up_on(client, live_r
     assert rooms.by_code(client.app.state.conn, code)["status"] == "abandoned"
 
 
-def test_a_room_waiting_on_a_screen_that_has_gone_is_closed(client, phones):
+def test_a_room_waiting_on_a_screen_that_has_gone_is_closed(client, conn, phones):
     # The one a manager hit in production. A screen opened a solo room and its
     # tab was closed half an hour before anybody scanned anything. The room sat
     # in its lobby, so nothing swept it; it was still in the open list, so every
     # phone in the building was offered it as "Score attack, nobody in it yet".
     # The manager who took it kicked off into a room with no screen behind it.
-    code, _ = open_lobby(client, phones)
+    code, _ = open_lobby(client, conn, phones)
     heard_now(client, code)
 
     assert sweep(client, LATE) == [code]
     assert rooms.by_code(client.app.state.conn, code)["status"] == "abandoned"
 
 
-def test_a_room_nobody_can_run_is_off_the_list_phones_choose_from(client, phones):
+def test_a_room_nobody_can_run_is_off_the_list_phones_choose_from(client, conn, phones):
     # The symptom the sweep above exists to remove. Asserted through the
     # endpoint the phone actually reads, because a room being "abandoned" in the
     # database is worth nothing if it is still being advertised.
-    code, _ = open_lobby(client, phones)
+    code, _ = open_lobby(client, conn, phones)
     heard_now(client, code)
     assert [room["code"] for room in client.get("/api/rooms/open").json()["rooms"]] == [code]
 
@@ -107,12 +107,12 @@ def test_a_room_nobody_can_run_is_off_the_list_phones_choose_from(client, phones
     assert client.get("/api/rooms/open").json()["rooms"] == []
 
 
-def test_a_screen_holding_a_lobby_says_so_and_keeps_it(client, phones):
+def test_a_screen_holding_a_lobby_says_so_and_keeps_it(client, conn, phones):
     # The other half. A screen waiting in front of a queue looks exactly like a
     # screen that was closed, unless it says otherwise, and the pitch that would
     # normally speak for it is not loaded until somebody takes a seat.
-    code, host_token = open_lobby(client, phones)
-    with client.websocket_connect(f"/ws/rooms/{code}?client_id={host_token}") as screen:
+    code, physics = open_lobby(client, conn, phones)
+    with client.websocket_connect(f"/ws/rooms/{code}?client_id={physics}") as screen:
         screen.receive_json()
         screen.send_json({"type": "host.here"})
         heard = once_heard(client, code)
@@ -145,8 +145,8 @@ def test_a_screen_holding_a_lobby_says_so_and_keeps_it(client, phones):
 
 
 def test_a_screen_whose_tab_went_to_the_background_keeps_its_match(client, live_room):
-    code, host_token = live_room()
-    with client.websocket_connect(f"/ws/rooms/{code}?client_id={host_token}") as screen:
+    code, physics = live_room()
+    with client.websocket_connect(f"/ws/rooms/{code}?client_id={physics}") as screen:
         screen.receive_json()
         screen.send_json({"type": "host.here"})
         heard = once_heard(client, code)
@@ -161,11 +161,11 @@ def test_a_screen_whose_tab_went_to_the_background_keeps_its_match(client, live_
         assert rooms.by_code(client.app.state.conn, code)["status"] == "live"
 
 
-def test_a_screen_holding_a_silent_lobby_keeps_that_too(client, phones):
+def test_a_screen_holding_a_silent_lobby_keeps_that_too(client, conn, phones):
     # The same tab, backgrounded before anybody took a seat. Worse than losing
     # a match, because the room is on every phone's list until it goes.
-    code, host_token = open_lobby(client, phones)
-    with client.websocket_connect(f"/ws/rooms/{code}?client_id={host_token}") as screen:
+    code, physics = open_lobby(client, conn, phones)
+    with client.websocket_connect(f"/ws/rooms/{code}?client_id={physics}") as screen:
         screen.receive_json()
 
         assert sweep(client, NOW + arena.HOST_GONE_SECONDS + 1, client.app) == []
@@ -176,8 +176,8 @@ def test_the_screen_that_hangs_up_loses_its_room_as_it_always_did(client, live_r
     # The whole point of the sweep. A closed tab, or a lid shut long enough for
     # the ping to go unanswered, drops the socket - and then nothing is holding
     # the room and the grace runs out on it.
-    code, host_token = live_room()
-    with client.websocket_connect(f"/ws/rooms/{code}?client_id={host_token}") as screen:
+    code, physics = live_room()
+    with client.websocket_connect(f"/ws/rooms/{code}?client_id={physics}") as screen:
         screen.receive_json()
         screen.send_json({"type": "host.here"})
         heard = once_heard(client, code)
@@ -186,11 +186,11 @@ def test_the_screen_that_hangs_up_loses_its_room_as_it_always_did(client, live_r
     assert rooms.by_code(client.app.state.conn, code)["status"] == "abandoned"
 
 
-def test_a_watcher_sitting_on_the_socket_holds_nothing(client, phones):
+def test_a_watcher_sitting_on_the_socket_holds_nothing(client, conn, phones):
     # Every screen in the venue has this room's socket open to watch it, and a
     # phone in a dugout has one too. If any of them counted, the sweep would
     # never fire in a full hall, which is the one place it has to.
-    code, _ = open_lobby(client, phones)
+    code, _ = open_lobby(client, conn, phones)
     heard_now(client, code)
     with client.websocket_connect(f"/ws/rooms/{code}") as watcher:
         watcher.receive_json()
@@ -204,10 +204,10 @@ def test_the_pitch_and_the_screen_are_two_sockets_on_one_room(client, live_room)
     # The arena page opens one and the pitch it frames opens another, both with
     # the same token. Counted rather than remembered as a set, or the pitch
     # reloading at kick-off would release a room the screen is still holding.
-    code, host_token = live_room()
-    with client.websocket_connect(f"/ws/rooms/{code}?client_id={host_token}") as screen:
+    code, physics = live_room()
+    with client.websocket_connect(f"/ws/rooms/{code}?client_id={physics}") as screen:
         screen.receive_json()
-        with client.websocket_connect(f"/ws/rooms/{code}?client_id={host_token}") as pitch:
+        with client.websocket_connect(f"/ws/rooms/{code}?client_id={physics}") as pitch:
             pitch.receive_json()
         # The pitch has gone; the screen has not.
         assert sweep(client, LATE, client.app) == []
@@ -219,11 +219,11 @@ def test_the_pitch_and_the_screen_are_two_sockets_on_one_room(client, live_room)
     assert sweep(client, LATE + arena.HOST_GONE_SECONDS + 1, client.app) == [code]
 
 
-def test_saying_you_are_there_is_not_something_a_viewer_can_say(client, phones):
+def test_saying_you_are_there_is_not_something_a_viewer_can_say(client, conn, phones):
     # Every other screen in the venue has this room's socket open to watch it.
     # If any of them could hold it open, the sweep would never fire in a full
     # hall, which is the one place it matters.
-    code, _ = open_lobby(client, phones)
+    code, _ = open_lobby(client, conn, phones)
     with client.websocket_connect(f"/ws/rooms/{code}?client_id=impostor") as liar:
         liar.receive_json()
         liar.send_json({"type": "host.here"})
@@ -231,11 +231,11 @@ def test_saying_you_are_there_is_not_something_a_viewer_can_say(client, phones):
     assert rooms.by_code(client.app.state.conn, code)["last_heard_at"] is None
 
 
-def test_a_manager_already_sitting_in_it_is_told_why_it_closed(client, phones):
+def test_a_manager_already_sitting_in_it_is_told_why_it_closed(client, conn, phones):
     # Somebody can take the seat in the seconds between the screen going and the
     # sweep noticing. They are in a lobby that is about to stop existing, and
     # "Ready when you are" forever is the worst way to find that out.
-    code, _ = open_lobby(client, phones)
+    code, _ = open_lobby(client, conn, phones)
     client.post(f"/api/rooms/{code}/seats/blue", json={"philosophy": "high press"})
     heard_now(client, code)
 
@@ -254,12 +254,12 @@ def test_a_manager_already_sitting_in_it_is_told_why_it_closed(client, phones):
     assert ending["status"] == "abandoned"
 
 
-def test_a_room_that_shut_before_it_started_is_not_a_match_that_ended(client, phones):
+def test_a_room_that_shut_before_it_started_is_not_a_match_that_ended(client, conn, phones):
     # The status cannot carry this on its own. A lobby whose screen went and a
     # match whose screen went are both "abandoned", and a dugout that cannot
     # tell them apart draws a 0-0 scoreline and an empty pitch over a match
     # that never happened, for somebody who watched it not happen.
-    code, _ = open_lobby(client, phones)
+    code, _ = open_lobby(client, conn, phones)
     assert client.get(f"/api/rooms/{code}").json()["started"] is False
     heard_now(client, code)
     sweep(client, LATE)
@@ -411,10 +411,10 @@ def test_it_comes_off_the_wall(client, live_room):
 
 
 def test_a_frame_from_the_host_is_the_room_saying_it_is_still_here(client, live_room):
-    code, host_token = live_room()
+    code, physics = live_room()
     with client.websocket_connect(f"/ws/rooms/{code}") as phone:
         phone.receive_json()
-        with client.websocket_connect(f"/ws/rooms/{code}?client_id={host_token}") as host:
+        with client.websocket_connect(f"/ws/rooms/{code}?client_id={physics}") as host:
             host.receive_json()
             host.send_json({"type": "host.state", "payload": {"clock": 170}})
             # Waiting for the frame to come out the other side is what makes
@@ -431,10 +431,10 @@ def test_a_run_of_frames_from_one_screen_costs_one_write(client, live_room):
     # the room on each of them would be ten committing writes a second per
     # match down the one shared connection. The first frame writes and the ones
     # behind it are carried by the first, which is exact enough for a sweep.
-    code, host_token = live_room()
+    code, physics = live_room()
     with client.websocket_connect(f"/ws/rooms/{code}") as phone:
         phone.receive_json()
-        with client.websocket_connect(f"/ws/rooms/{code}?client_id={host_token}") as host:
+        with client.websocket_connect(f"/ws/rooms/{code}?client_id={physics}") as host:
             host.receive_json()
             host.send_json({"type": "host.state", "payload": {"clock": 100}})
             phone.receive_json()
@@ -452,10 +452,10 @@ def test_a_screen_that_keeps_talking_keeps_the_column_moving(client, live_room, 
     # hand its match to the sweep. The hold-off is shortened rather than waited
     # out, and the socket is then closed to show the sweep still bites.
     monkeypatch.setattr(arena, "SWEEP_SECONDS", 0.01)
-    code, host_token = live_room()
+    code, physics = live_room()
     with client.websocket_connect(f"/ws/rooms/{code}") as phone:
         phone.receive_json()
-        with client.websocket_connect(f"/ws/rooms/{code}?client_id={host_token}") as host:
+        with client.websocket_connect(f"/ws/rooms/{code}?client_id={physics}") as host:
             host.receive_json()
             host.send_json({"type": "host.state", "payload": {"clock": 100}})
             phone.receive_json()
@@ -484,8 +484,8 @@ def test_a_match_that_ended_properly_is_left_alone(client, live_room):
     # a venue ever saw. Liveness lives on the room now, so there is nothing to
     # leak, and what is left worth asserting is that the sweep only looks at
     # matches that are still live.
-    code, host_token = live_room()
-    with client.websocket_connect(f"/ws/rooms/{code}?client_id={host_token}") as host:
+    code, physics = live_room()
+    with client.websocket_connect(f"/ws/rooms/{code}?client_id={physics}") as host:
         host.receive_json()
         host.send_json({"type": "host.event", "kind": "full_time",
                         "payload": {"score": [1, 0]}})
@@ -567,11 +567,11 @@ def test_a_match_ended_by_the_other_arena_still_reaches_the_phones_here(client, 
     assert ending["status"] == "abandoned"
 
 
-def test_a_lobby_closed_by_the_other_arena_reaches_them_too(client, phones):
+def test_a_lobby_closed_by_the_other_arena_reaches_them_too(client, conn, phones):
     # The room the manager in production was sitting in. Nothing had kicked
     # off, so there is no clock to notice has stopped: the page would sit on
     # "Ready when you are" for as long as they were willing to look at it.
-    code, _ = open_lobby(client, phones)
+    code, _ = open_lobby(client, conn, phones)
     client.post(f"/api/rooms/{code}/seats/blue", json={"philosophy": "high press"})
 
     with client.websocket_connect(f"/ws/rooms/{code}") as phone:

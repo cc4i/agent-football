@@ -386,7 +386,7 @@ class ModeRequest(BaseModel):
     """
 
     mode: str
-    host_token: str
+    screen_token: str
 
     @field_validator("mode")
     @classmethod
@@ -633,7 +633,11 @@ async def name_available(name: str, request: Request):
 
 @app.post("/api/rooms")
 async def open_room(body: RoomRequest, request: Request):
-    """Open a room. This response is the only place its host token appears."""
+    """Open a room. This response is the only place its screen token appears.
+
+    Not its physics token, which no HTTP response has carried since the grounds
+    took over simulating: that one goes down the control socket to one server.
+    """
     if not request.app.state.rooms_opened.take(limits.client_ip(request)):
         raise HTTPException(429, "slow down a moment and try that again")
     connection = request.app.state.conn
@@ -644,7 +648,8 @@ async def open_room(body: RoomRequest, request: Request):
             room = rooms.create_room(connection, body.mode)
     except codes.CodesExhausted as problem:
         raise HTTPException(503, str(problem)) from problem
-    return {**_snapshot(connection, room["id"], request), "host_token": room["host_client_id"]}
+    return {**_snapshot(connection, room["id"], request),
+            "screen_token": room["screen_client_id"]}
 
 
 @app.get("/api/rooms/{code}")
@@ -664,7 +669,7 @@ async def change_mode(code: str, body: ModeRequest, request: Request):
     scanned the code follows it without being asked.
     """
     connection, room = _profile_room(request, code)
-    _require_host(room, body.host_token)
+    _require_screen(room, body.screen_token)
     with _rules():
         rooms.set_mode(connection, room["id"], body.mode)
     return _announce(request.app, room, request)
@@ -1137,15 +1142,19 @@ def _require_seated(connection, room_id, player_id):
         raise HTTPException(403, "only somebody in this match can start it")
 
 
-def _require_host(room, offered):
-    """Refuse anybody but the client this room's physics was handed to.
+def _require_screen(room, offered):
+    """Refuse anybody but the screen that opened this room.
 
-    The same test `_handle_from_host` applies on the socket, in the one place
-    it is needed over HTTP. Compared on bytes in constant time for the reason
-    given at `_same_secret`: the token arrives from outside the process, and a
-    wrong one has to be a wrong one rather than a crash or a stopwatch.
+    This was `_require_host` and compared the physics token, because the screen
+    that opened a room was the thing simulating it. The grounds simulate now,
+    so the two claims came apart, and this is the one a browser is ever handed:
+    "this lobby is mine", not "I am running this match".
+
+    Compared on bytes in constant time for the reason given at `_same_secret`:
+    the token arrives from outside the process, and a wrong one has to be a
+    wrong one rather than a crash or a stopwatch.
     """
-    held = room["host_client_id"]
+    held = room["screen_client_id"]
     if not offered or not held or not _same_secret(_text_bytes(offered), _text_bytes(held)):
         raise HTTPException(403, "only the screen that opened this room can change it")
 

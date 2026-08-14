@@ -99,13 +99,13 @@ async function start() {
     // closed can never be run by anybody, ever. Left unsaid, the arena had no
     // way to tell that room from a screen waiting patiently in front of a
     // queue, and went on offering it to every phone in the building.
-    const stillHere = () => hostToken() && held && held.send({ type: "host.here" });
+    const stillHere = () => screenToken() && held && held.send({ type: "host.here" });
 
     held = openRoom(code, {
       // The token goes on this socket so the screen can vouch for its own room
       // before there is a pitch to do it. A tab that is only watching has no
       // token and sends nothing, which is what it is.
-      clientId: hostToken(),
+      clientId: screenToken(),
       onMessage(message) {
         if (message.type === "room") return mine(message);
         if (showing === code) courtside(message);
@@ -133,7 +133,7 @@ async function open() {
   // The token is the room's physics, and it exists in exactly two places: the
   // arena's database and this tab. sessionStorage rather than localStorage so
   // closing the tab gives it up, and reloading does not.
-  sessionStorage.setItem(tokenKey(opened.code), opened.host_token);
+  sessionStorage.setItem(tokenKey(opened.code), opened.screen_token);
   // The mode stays in the URL beside the code. Replaced by the code alone, a
   // head-to-head screen forgot what it was the moment it opened its first
   // room, and every reload of it after that was a solo screen.
@@ -170,10 +170,10 @@ function startFresh(mode) {
   location.assign(`/arena?mode=${mode || MODE}`);
 }
 
-const tokenKey = (roomCode) => `arena.host.${roomCode}`;
-const hostToken = () => sessionStorage.getItem(tokenKey(code)) || "";
+const tokenKey = (roomCode) => `arena.screen.${roomCode}`;
+const screenToken = () => sessionStorage.getItem(tokenKey(code)) || "";
 /** Whether this tab is the one advancing its own room's physics right now. */
-const hostingLive = () => Boolean(ours && ours.status === "live" && hostToken());
+const hostingLive = () => Boolean(ours && ours.status === "live" && screenToken());
 
 /* ── This screen's own room ─────────────────────────────────────────── */
 
@@ -191,7 +191,7 @@ function dress(snapshot) {
     el(holder).replaceChildren(qr);
   }
 
-  const hosting = Boolean(hostToken());
+  const hosting = Boolean(screenToken());
   el("role").className = `role-chip${hosting ? "" : " viewer"}`;
   el("role").replaceChildren(document.createElement("i"),
                              document.createTextNode(hosting ? "Hosting" : "Watching"));
@@ -211,7 +211,7 @@ function describe(snapshot) {
   // Offered only while this tab is holding a room that has not kicked off. A
   // screen that is only watching has no business reshaping somebody's lobby,
   // and after the whistle the mode is what the match was scored against.
-  el("mode-switch").hidden = !(hostToken() && snapshot.status === "lobby");
+  el("mode-switch").hidden = !(screenToken() && snapshot.status === "lobby");
   for (const mode of ["solo", "versus"]) {
     el(`mode-${mode}`).setAttribute("aria-pressed", String(snapshot.mode === mode));
   }
@@ -226,7 +226,7 @@ function mine(snapshot) {
   el("again").hidden = snapshot.status !== "finished";
   describe(snapshot);
   drawSeats(snapshot);
-  if (snapshot.status === "finished" && hostToken()) handOver();
+  if (snapshot.status === "finished" && screenToken()) handOver();
   direct();
 }
 
@@ -589,7 +589,7 @@ function watch(wanted) {
   const at = new URL(venue.pitch_url || location.origin, location.origin);
   at.searchParams.set("room", wanted);
   at.searchParams.set("team", "blue");
-  const token = wanted === code ? hostToken() : "";
+  const token = wanted === code ? screenToken() : "";
   at.searchParams.set("as", token ? "host" : "viewer");
   if (token) at.searchParams.set("client_id", token);
   const address = at.toString();
@@ -691,7 +691,7 @@ async function chooseMode(mode) {
     // The arena announces this to our own socket as well, but this is the tab
     // that asked: it should not have to watch its own click go to the arena
     // and come back before the pill moves.
-    mine(await post(`/api/rooms/${code}/mode`, { mode, host_token: hostToken() }));
+    mine(await post(`/api/rooms/${code}/mode`, { mode, screen_token: screenToken() }));
     problem.hidden = true;
     // The address is what "New room" and the full-time handover fall back on
     // when there is no room left to read a mode from, so it follows the choice.

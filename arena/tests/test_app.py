@@ -175,30 +175,20 @@ def test_starting_a_room_that_does_not_exist_is_a_404(client, phones):
     assert client.post("/api/rooms/ZZZZ/start").status_code == 404
 
 
-def test_opening_a_room_hands_its_creator_the_physics(client):
-    body = client.post("/api/rooms", json={"mode": "solo"}).json()
-    assert len(body["host_token"]) > 10
-
-
-def test_every_room_gets_its_own_host_token(client):
-    first = client.post("/api/rooms", json={"mode": "solo"}).json()["host_token"]
-    second = client.post("/api/rooms", json={"mode": "solo"}).json()["host_token"]
-    assert first != second
-
-
 def test_kicking_off_does_not_hand_physics_to_whoever_asked(client, phones):
-    # The screen that opened the room is rendering the pitch. A manager tapping
-    # kick-off on their phone must not be able to take it from them.
+    # The grounds are simulating this match. A manager tapping kick-off on
+    # their phone must not come away holding the credential for that.
     phones.join("Alex Rivera", "alex@example.com")
     opened = client.post("/api/rooms", json={"mode": "solo"}).json()
     code = opened["code"]
     client.post(f"/api/rooms/{code}/seats/blue", json={"philosophy": "high press"})
     client.post(f"/api/rooms/{code}/seats/blue/ready", json={"ready": True})
 
-    body = client.post(f"/api/rooms/{code}/start").json()
-    assert "host_token" not in body
     connection = client.app.state.conn
-    assert rooms.by_code(connection, code)["host_client_id"] == opened["host_token"]
+    physics = rooms.by_code(connection, code)["host_client_id"]
+    body = client.post(f"/api/rooms/{code}/start").json()
+    assert physics not in str(body)
+    assert rooms.by_code(connection, code)["host_client_id"] == physics
 
 
 def test_client_id_is_redacted_from_access_logs():
@@ -221,29 +211,31 @@ def test_client_id_is_redacted_from_access_logs():
     assert '/ws/rooms/AB23' in record.args[0]
 
 
-def test_the_host_token_does_not_leak_into_the_snapshot_or_broadcast(client, phones):
+def test_the_physics_token_does_not_leak_into_the_snapshot_or_broadcast(client, conn,
+                                                                        phones):
     phones.join("Alex Rivera", "alex@example.com")
     opened = client.post("/api/rooms", json={"mode": "solo"}).json()
-    code, host_token = opened["code"], opened["host_token"]
+    code = opened["code"]
+    physics = rooms.by_code(conn, code)["host_client_id"]
     client.post(f"/api/rooms/{code}/seats/blue", json={"philosophy": "high press"})
     client.post(f"/api/rooms/{code}/seats/blue/ready", json={"ready": True})
 
     # Hold a room socket open so we can see the broadcast when /start is called.
     with client.websocket_connect(f"/ws/rooms/{code}") as socket:
         opening = socket.receive_json()
-        assert host_token not in str(opening)
+        assert physics not in str(opening)
         assert "host_client_id" not in str(opening)
 
         start_response = client.post(f"/api/rooms/{code}/start")
-        assert host_token not in str(start_response.json())
+        assert physics not in str(start_response.json())
         assert "host_client_id" not in start_response.json()
 
         # The broadcast frame must not leak the token.
         broadcast = socket.receive_json()
-        assert host_token not in str(broadcast)
+        assert physics not in str(broadcast)
         assert "host_client_id" not in str(broadcast)
 
     # Reading the room must not leak it.
     read_response = client.get(f"/api/rooms/{code}")
-    assert host_token not in str(read_response.json())
+    assert physics not in str(read_response.json())
     assert "host_client_id" not in read_response.json()

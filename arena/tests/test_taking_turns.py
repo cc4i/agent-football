@@ -31,7 +31,7 @@ def test_the_screen_opens_the_next_lobby_without_being_asked(client):
     # click. One match a day, unless an organiser happened to be standing at
     # the screen when the whistle went.
     js = client.get("/static/arena.js").text
-    assert 'status === "finished" && hostToken()' in js, \
+    assert 'status === "finished" && screenToken()' in js, \
         "full time on this screen's own room is what starts the handover"
     assert "location.assign(`/arena?mode=" in handover(js)
 
@@ -43,7 +43,7 @@ def test_a_screen_that_is_only_watching_does_not_take_itself_elsewhere(client):
     # walk off its own accord and open a room nobody asked for.
     js = client.get("/static/arena.js").text
     started = js.split('status === "finished"')[1].split("\n", 1)[0]
-    assert "hostToken()" in started
+    assert "screenToken()" in started
 
 
 def test_the_result_stands_long_enough_to_be_read(client):

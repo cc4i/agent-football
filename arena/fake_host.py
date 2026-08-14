@@ -5,9 +5,11 @@ a browser running physics:
 
     uv run python fake_host.py --room K7F2 --client-id <token> --log fixtures/match-3-1.jsonl
 
-The room must already be live, and `--client-id` must be the `host_token`
-returned by `POST /api/rooms`, which is the only place it ever appears. To make
-a room live, join, take a seat, mark ready, and call /start with that session.
+The room must already be live, and `--client-id` must be its physics token -
+the `host_client_id` column. No HTTP response carries it: the arena hands it to
+the grounds over the control socket and nowhere else, so a hand replay reads it
+out of the database. To make a room live, join, take a seat, mark ready, and
+call /start with that session.
 
 The log is JSON Lines, one frame per line, `#` for a comment:
 
@@ -88,7 +90,7 @@ def main(argv=None):
     parser.add_argument("--room", required=True, help="room code, for example K7F2")
     parser.add_argument("--log", required=True, help="path to a JSONL match log")
     parser.add_argument("--client-id", required=True,
-                        help="the host_token returned by POST /api/rooms")
+                        help="the room's physics token, its host_client_id")
     parser.add_argument("--arena", default="ws://127.0.0.1:8003")
     parser.add_argument("--speed", type=float, default=1.0,
                         help="1.0 plays in real time; 10 is useful for a smoke test")

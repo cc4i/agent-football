@@ -8,15 +8,16 @@ with those numbers in front of the manager.
 import pytest
 
 import codes
+import rooms
 
 
-def whistle(client, code, host_token, events, speeds=()):
+def whistle(client, code, physics, events, speeds=()):
     """Play out a match over the host socket and hang up. Returns nothing.
 
     `events` is (kind, match_ms, payload) triples in the order the host sends
     them, which is the only order anything downstream ever sees them in.
     """
-    with client.websocket_connect(f"/ws/rooms/{code}?client_id={host_token}") as host:
+    with client.websocket_connect(f"/ws/rooms/{code}?client_id={physics}") as host:
         host.receive_json()
         for speed in speeds:
             host.send_json({"type": "host.state", "payload": {"clock": 90, "speed": speed}})
@@ -35,8 +36,8 @@ def a_win(scorer="blue"):
 @pytest.fixture
 def finished(client, live_room):
     """A solo room played to a 1-0 win and scored. Returns the code."""
-    code, host_token = live_room()
-    whistle(client, code, host_token, a_win())
+    code, physics = live_room()
+    whistle(client, code, physics, a_win())
     return code
 
 
@@ -99,7 +100,7 @@ def test_a_finished_run_is_on_the_solo_board(client, finished):
     assert board["managers"] == 1
 
 
-def test_the_board_ranks_the_better_run_first(client, live_room, phones):
+def test_the_board_ranks_the_better_run_first(client, conn, live_room, phones):
     first, first_host = live_room()
     whistle(client, first, first_host, a_win())
 
@@ -109,7 +110,7 @@ def test_the_board_ranks_the_better_run_first(client, live_room, phones):
     client.post(f"/api/rooms/{second}/seats/blue", json={"philosophy": "counter"})
     client.post(f"/api/rooms/{second}/seats/blue/ready", json={"ready": True})
     client.post(f"/api/rooms/{second}/start")
-    whistle(client, second, opened["host_token"],
+    whistle(client, second, rooms.by_code(conn, second)["host_client_id"],
             [("kickoff", 0, {}),
              ("goal", 20_000, {"team": "blue"}),
              ("goal", 40_000, {"team": "blue"}),
@@ -130,8 +131,8 @@ def test_the_workshop_is_not_on_the_board(client, phones):
 # ── What comes off the board ──────────────────────────────────────────────
 
 def test_a_match_the_host_ran_fast_earns_a_breakdown_but_no_place(client, live_room):
-    code, host_token = live_room()
-    whistle(client, code, host_token, a_win(), speeds=[3.0])
+    code, physics = live_room()
+    whistle(client, code, physics, a_win(), speeds=[3.0])
 
     answer = client.get(f"/api/rooms/{code}/result").json()
     assert answer["ranked"] is False
@@ -141,28 +142,28 @@ def test_a_match_the_host_ran_fast_earns_a_breakdown_but_no_place(client, live_r
 
 
 def test_putting_the_slider_back_does_not_put_the_match_back_on_the_board(client, live_room):
-    code, host_token = live_room()
-    whistle(client, code, host_token, a_win(), speeds=[3.0, 1.0, 1.0])
+    code, physics = live_room()
+    whistle(client, code, physics, a_win(), speeds=[3.0, 1.0, 1.0])
     assert client.get(f"/api/rooms/{code}").json()["ranked"] is False
 
 
 def test_a_match_played_at_one_speed_stays_ranked(client, live_room):
-    code, host_token = live_room()
-    whistle(client, code, host_token, a_win(), speeds=[1.0, 1, 1.0])
+    code, physics = live_room()
+    whistle(client, code, physics, a_win(), speeds=[1.0, 1, 1.0])
     assert client.get(f"/api/rooms/{code}").json()["ranked"] is True
 
 
 def test_a_host_that_reports_no_speed_at_all_is_taken_at_one(client, live_room):
     # Nothing about the pitch is required to report a speed, and a host that
     # says nothing has said nothing suspicious.
-    code, host_token = live_room()
-    whistle(client, code, host_token, a_win(), speeds=[])
+    code, physics = live_room()
+    whistle(client, code, physics, a_win(), speeds=[])
     assert client.get(f"/api/rooms/{code}").json()["ranked"] is True
 
 
 def test_nonsense_where_the_speed_goes_does_not_unrank_a_match(client, live_room):
-    code, host_token = live_room()
-    with client.websocket_connect(f"/ws/rooms/{code}?client_id={host_token}") as host:
+    code, physics = live_room()
+    with client.websocket_connect(f"/ws/rooms/{code}?client_id={physics}") as host:
         host.receive_json()
         for nonsense in ("3.0", True, None, [3], {"x": 1}):
             host.send_json({"type": "host.state", "payload": {"speed": nonsense}})
@@ -173,8 +174,8 @@ def test_nonsense_where_the_speed_goes_does_not_unrank_a_match(client, live_room
 
 
 def test_an_abandoned_match_closes_the_room_and_scores_nothing(client, live_room):
-    code, host_token = live_room()
-    whistle(client, code, host_token,
+    code, physics = live_room()
+    whistle(client, code, physics,
             [("kickoff", 0, {}),
              ("goal", 27_400, {"team": "blue"}),
              ("abandoned", 45_000, {"why": "the host went away"})])
@@ -186,17 +187,17 @@ def test_an_abandoned_match_closes_the_room_and_scores_nothing(client, live_room
 
 
 def test_an_abandoned_room_leaves_the_wall(client, live_room):
-    code, host_token = live_room()
+    code, physics = live_room()
     with client.websocket_connect("/ws/wall") as wall:
         assert [entry["code"] for entry in wall.receive_json()["rooms"]] == [code]
-        whistle(client, code, host_token, [("abandoned", 45_000, {})])
+        whistle(client, code, physics, [("abandoned", 45_000, {})])
         assert wall.receive_json() == {"type": "wall", "rooms": []}
 
 
 def test_nothing_more_is_logged_after_a_match_is_abandoned(client, live_room):
-    code, host_token = live_room()
-    whistle(client, code, host_token, [("abandoned", 45_000, {})])
-    with client.websocket_connect(f"/ws/rooms/{code}?client_id={host_token}") as host:
+    code, physics = live_room()
+    whistle(client, code, physics, [("abandoned", 45_000, {})])
+    with client.websocket_connect(f"/ws/rooms/{code}?client_id={physics}") as host:
         host.receive_json()
         host.send_json({"type": "host.event", "kind": "goal", "match_ms": 50_000,
                         "payload": {"team": "blue"}})
@@ -207,10 +208,10 @@ def test_nothing_more_is_logged_after_a_match_is_abandoned(client, live_room):
 def test_the_whistle_tells_the_room_it_can_go_and_read_the_result(client, live_room):
     # The phone learns the match is over from the socket and then asks for the
     # result, so the snapshot has to land after the result exists.
-    code, host_token = live_room()
+    code, physics = live_room()
     with client.websocket_connect(f"/ws/rooms/{code}") as phone:
         phone.receive_json()
-        whistle(client, code, host_token, a_win())
+        whistle(client, code, physics, a_win())
         seen = [phone.receive_json() for _ in range(4)]
     closed = [message for message in seen if message["type"] == "room"][-1]
     assert closed["status"] == "finished"

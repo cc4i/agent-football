@@ -397,7 +397,7 @@ async def _a_phone(caller, refusals, name, email):
     return {"Cookie": f"{COOKIE}={answer.cookies[COOKIE]}"}
 
 
-async def _a_full_room(caller, refusals, index):
+async def _a_full_room(caller, refusals, index, conn):
     """Two managers, a room, both dugouts ready, kick-off. Returns code and token."""
     stance = rooms.PHILOSOPHIES[index % len(rooms.PHILOSOPHIES)]
     seats = {}
@@ -414,7 +414,7 @@ async def _a_full_room(caller, refusals, index):
                      headers=phone, json={"ready": True})
     await _asked(caller, refusals, "POST", f"/api/rooms/{code}/start",
                  headers=seats["blue"])
-    return code, opened["host_token"]
+    return code, rooms.by_code(conn, code)["host_client_id"]
 
 
 async def _drain(wire):
@@ -526,7 +526,7 @@ async def test_fifty_rooms_at_ten_hertz(venue):
     started = time.monotonic()
     async with httpx.AsyncClient(base_url=venue.base, timeout=30.0) as caller:
         for room in await asyncio.gather(
-                *(_a_full_room(caller, refusals, index) for index in range(ROOMS)),
+                *(_a_full_room(caller, refusals, index, conn) for index in range(ROOMS)),
                 return_exceptions=True):
             if isinstance(room, tuple):
                 opened.append(room)

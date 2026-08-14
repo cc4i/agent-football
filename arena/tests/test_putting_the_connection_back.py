@@ -127,8 +127,8 @@ def test_a_socket_message_leaves_no_transaction_open(client, live_room):
     # commit, so it would come back idle whether the socket put the connection
     # back or not. A host running at 1x writes nothing, and the room it was
     # read against is the transaction left behind.
-    code, host_token = live_room()
-    with client.websocket_connect(f"/ws/rooms/{code}?client_id={host_token}") as host:
+    code, physics = live_room()
+    with client.websocket_connect(f"/ws/rooms/{code}?client_id={physics}") as host:
         host.receive_json()
         host.send_json({"type": "host.state", "payload": {"clock": 5, "speed": 1.0}})
         # The frame comes back down once the message has been handled, so by

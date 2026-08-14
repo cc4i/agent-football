@@ -163,9 +163,22 @@ def phones(client):
     return Phones()
 
 
+def physics_token(conn, code):
+    """The token the grounds would be handed for this room.
+
+    A test that drives a host socket is standing in for the grounds, and the
+    grounds are told this over the control socket at kick-off. No HTTP response
+    carries it any more, so a test reads it out of the table -- which a test
+    has and a browser does not, which is the whole point of the split.
+    """
+    import rooms
+
+    return rooms.by_code(conn, code)["host_client_id"]
+
+
 @pytest.fixture
-def live_room(client, phones):
-    """Open a room, seat Alex, and kick off. Returns (code, host_token)."""
+def live_room(client, conn, phones):
+    """Open a room, seat Alex, and kick off. Returns (code, physics token)."""
 
     def _live_room(mode="solo"):
         phones.join("Alex Rivera", "alex@example.com")
@@ -174,6 +187,6 @@ def live_room(client, phones):
         client.post(f"/api/rooms/{code}/seats/blue", json={"philosophy": "high press"})
         client.post(f"/api/rooms/{code}/seats/blue/ready", json={"ready": True})
         client.post(f"/api/rooms/{code}/start")
-        return code, opened["host_token"]
+        return code, physics_token(conn, code)
 
     return _live_room

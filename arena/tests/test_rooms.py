@@ -280,7 +280,7 @@ def test_starting_a_match_leaves_physics_where_it_was(conn, alex):
     assert started["host_client_id"] == room["host_client_id"]
 
 
-def test_two_rooms_never_share_a_host_token(conn):
+def test_two_rooms_never_share_a_physics_token(conn):
     # A shared token would let either room's host drive the other one.
     first = rooms.create_room(conn, "solo")
     second = rooms.create_room(conn, "solo")

@@ -52,7 +52,8 @@ CREATE TABLE IF NOT EXISTS room (
     code           TEXT    NOT NULL UNIQUE,
     mode           TEXT    NOT NULL,
     status         TEXT    NOT NULL,
-    host_client_id TEXT,
+    host_client_id   TEXT,
+    screen_client_id TEXT,
     ranked         INTEGER NOT NULL,
     created_at     DOUBLE PRECISION NOT NULL,
     started_at     DOUBLE PRECISION,
@@ -145,6 +146,7 @@ MIGRATIONS = """
 ALTER TABLE player ALTER COLUMN email_hash DROP NOT NULL;
 ALTER TABLE player ALTER COLUMN email_masked DROP NOT NULL;
 ALTER TABLE room ADD COLUMN IF NOT EXISTS started_at DOUBLE PRECISION;
+ALTER TABLE room ADD COLUMN IF NOT EXISTS screen_client_id TEXT;
 """
 
 # What makes a name a manager's own. Compared case-insensitively, over names

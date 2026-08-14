@@ -149,15 +149,23 @@ def create_room(conn, mode, code=None):
     elif by_code(conn, code) is not None:
         raise RoomError(f"room {code} already exists")
 
-    # Physics belongs to whoever opened the room: the big screen at a venue, the
-    # phone when somebody plays alone. The token is minted here rather than at
-    # kick-off because that is what makes the rule true -- the creator is the
-    # only client it is ever handed to, and no player can take it from them.
+    # Two secrets, because there are two claims to make and they stopped being
+    # one claim when physics left the browser.
+    #
+    # `host_client_id` is physics. It is handed to the grounds at kick-off and
+    # to nothing else, ever -- no HTTP response carries it and no browser sees
+    # it. `screen_client_id` goes back to whoever opened the room and proves
+    # only that: this lobby is mine to reshape, and my socket being open is why
+    # it is still on every phone's list.
+    #
+    # Both minted here rather than at kick-off, because that is what makes the
+    # rule true: neither is ever handed to a second client, so nobody can take
+    # either of them from the one who has it.
     conn.execute(
-        "INSERT INTO room (code, mode, status, ranked, host_client_id, created_at) "
-        "VALUES (%s, %s, 'lobby', %s, %s, %s)",
+        "INSERT INTO room (code, mode, status, ranked, host_client_id, "
+        "screen_client_id, created_at) VALUES (%s, %s, 'lobby', %s, %s, %s, %s)",
         (code, mode, 0 if code == codes.WORKSHOP else 1,
-         secrets.token_urlsafe(16), time.time()),
+         secrets.token_urlsafe(16), secrets.token_urlsafe(16), time.time()),
     )
     conn.commit()
     room = by_code(conn, code)
