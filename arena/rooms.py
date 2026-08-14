@@ -259,6 +259,17 @@ def live(conn):
     ]
 
 
+def live_count(conn):
+    """How many matches are live, for the cap to compare against.
+
+    Separate from `live` because the cap wants a number and `live` builds a row
+    per room over two joins and a group-by to get one. The wall needs those
+    names; the endpoint a flood hits hardest does not.
+    """
+    return conn.execute("SELECT count(*) AS live FROM room WHERE status = 'live'"
+                        ).fetchone()["live"]
+
+
 def heard_from(conn, room_id, when=None):
     """Record that this room's host just reported.
 

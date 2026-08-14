@@ -44,6 +44,7 @@ shell wins where both say something, which is what lets one exported
 | `ARENA_COACH_IDLE_SECONDS` | `90` | How long one hop of the chain may go quiet. The slowest specialist sets it. |
 | `ARENA_CHAIN_LIMIT` | `4` | How many shouts may be talking to Gemini at once, across every room. The quota belongs to the venue, not to a room. |
 | `ARENA_CHAIN_SECONDS` | `150` | The whole chain, slot to huddle. A match is three minutes long. |
+| `ARENA_MAX_LIVE_ROOMS` | `120` | How many matches may be live at once. When reached, opening another room is a 503 saying the venue is full - wait for a match to finish. |
 
 ## Pages
 

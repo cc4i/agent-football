@@ -62,54 +62,37 @@ def test_malformed_user_segment_is_400_not_500(client, monkeypatch):
     assert "malformed" in reply.json()["detail"]
 
 
-def test_user_segment_with_encoded_dotdot_reaches_coach_intact(client, monkeypatch):
-    """Percent-encoded dot-dot does not collapse the upstream path."""
-    received = []
-
-    async def fake_transport(request):
-        # The raw path httpx sends, with percent-encoding intact.
-        received.append(str(request.url.raw_path.decode('utf-8')))
-        return httpx.Response(
-            status_code=200,
-            content=b'{"id": "session-123"}',
-            headers={"content-type": "application/json"},
-        )
-
-    def fake_client(base_url, timeout):
-        return httpx.AsyncClient(transport=httpx.MockTransport(fake_transport), base_url=base_url)
-
-    monkeypatch.setattr("proxy._make_client", fake_client)
-
+def test_an_encoded_dotdot_user_segment_is_refused_with_a_400(client):
+    """Starlette decodes the segment, so the fence sees `..` and says no."""
     reply = client.post("/api-apps/agents/users/%2e%2e/sessions", json={"state": {}})
-    assert reply.status_code == 200
-    assert len(received) == 1
-    # The segment is preserved, not collapsed to /apps/agents/sessions.
-    assert received[0] == "/apps/agents/users/%2E%2E/sessions"
+    assert reply.status_code == 400
+    assert "invalid" in reply.json()["detail"]
 
 
-def test_user_segment_with_encoded_question_mark_reaches_coach_intact(client, monkeypatch):
-    """Percent-encoded question mark does not truncate the path."""
-    received = []
-
-    async def fake_transport(request):
-        # The raw path httpx sends, with percent-encoding intact.
-        received.append(str(request.url.raw_path.decode('utf-8')))
-        return httpx.Response(
-            status_code=200,
-            content=b'{"id": "session-123"}',
-            headers={"content-type": "application/json"},
-        )
-
-    def fake_client(base_url, timeout):
-        return httpx.AsyncClient(transport=httpx.MockTransport(fake_transport), base_url=base_url)
-
-    monkeypatch.setattr("proxy._make_client", fake_client)
-
+def test_an_encoded_question_mark_user_segment_is_refused_with_a_400(client):
+    """Same fence, same decoding: the handler is handed `foo?bar` and says no."""
     reply = client.post("/api-apps/agents/users/foo%3Fbar/sessions", json={"state": {}})
-    assert reply.status_code == 200
-    assert len(received) == 1
-    # The path is not truncated at the encoded question mark.
-    assert received[0] == "/apps/agents/users/foo%3Fbar/sessions"
+    assert reply.status_code == 400
+    assert "invalid" in reply.json()["detail"]
+
+
+@pytest.mark.parametrize("user, path", [
+    ("..", "/apps/agents/users/%2E%2E/sessions"),
+    ("foo?bar", "/apps/agents/users/foo%3Fbar/sessions"),
+    ("arena", "/apps/agents/users/arena/sessions"),
+])
+def test_the_session_path_encodes_the_user_segment(user, path):
+    """The belt behind the two 400s above, asserted where the fence cannot mask it.
+
+    Task 8 encoded this segment so httpx's dot-segment removal could not
+    collapse the upstream path to /apps/agents/sessions, and a query string
+    could not be smuggled into it. The validator refuses both of those inputs
+    at the door now, which is exactly why the encoding needs a test of its own:
+    routed through a handler, dropping `quote` would change nothing anybody
+    could see. The `arena` row is here so that encoding cannot be quietly
+    dropped for the values that actually occur either.
+    """
+    assert coach.session_path(user) == path
 
 
 # Happy path: both routes carry requests and return responses

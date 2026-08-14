@@ -16,6 +16,7 @@ box, the periodic status check, and the profile reset.
 """
 
 import logging
+import re
 
 import httpx
 from fastapi import APIRouter, HTTPException, Request
@@ -36,6 +37,22 @@ PATIENT = httpx.Timeout(coach.IDLE_SECONDS, connect=coach.CONNECT_SECONDS)
 # A shout from a phone keyboard is short and a session body is smaller. Anything
 # larger is not one of the two calls this proxy exists for.
 MAX_BODY_BYTES = 64 * 1024
+
+# The fence. Starlette has already percent-decoded the path parameter by the
+# time a handler runs, so an encoded `..` or `?` arrives here spelled out and
+# is refused by a class that has neither; nothing legitimate carries a percent
+# sign, and the only values the pitch ever sends are `arena` and `user`. The
+# belt is on the way back out, where `coach.session_path` encodes whatever gets
+# through this.
+_USER_PATTERN = re.compile(r'^[A-Za-z0-9_-]+$')
+
+# What the coach's budget is keyed on: nothing. Deliberately constant, because
+# there is nothing caller-shaped to key on. Both of these routes are called by
+# the pitch behind a venue's one address, so a per-caller key falls back to that
+# one address for every real caller; and where a key does exist it is mintable,
+# since `POST /api/players` hands out sessions to anybody who asks. The instance
+# is the honest unit, and this is how a bucket says so.
+_COACH_KEY = "instance"
 
 
 def _make_client(base_url, timeout):
@@ -71,6 +88,10 @@ async def open_session(user: str, request: Request):
     The path segment is the browser's spelling (agents), and COACH_APP is the
     server's. They are allowed to differ.
     """
+    if not _USER_PATTERN.match(user):
+        raise HTTPException(400, "invalid user segment")
+    if not request.app.state.coach.take(_COACH_KEY):
+        raise HTTPException(429, "slow down a moment and try that again")
     raw = await _body(request)
     async with _make_client(coach.COACH_URL, QUICK) as http:
         try:
@@ -94,6 +115,8 @@ async def run(request: Request):
     them until the last one arrived would turn the whole spectacle into a
     spinner.
     """
+    if not request.app.state.coach.take(_COACH_KEY):
+        raise HTTPException(429, "slow down a moment and try that again")
     raw = await _body(request)
     http = _make_client(coach.COACH_URL, PATIENT)
     try:

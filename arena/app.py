@@ -39,6 +39,7 @@ import chain
 import codes
 import db
 import identity
+import limits
 import philosophies
 import presets
 import profiles
@@ -56,6 +57,28 @@ MAX_PAYLOAD_BYTES = 102400
 # Host validation pattern: letters, digits, dot, hyphen, colon (for port). An
 # allowlist is a list of characters we did not have to reason about.
 _HOST_PATTERN = re.compile(r'^[a-zA-Z0-9.\-:]+$')
+
+# How many matches may be live at once. Sized well above a busy venue and well
+# below what one instance can be talked into holding, so that the answer to a
+# flood is a sentence rather than an instance quietly getting slower.
+MAX_LIVE_ROOMS = int(os.environ.get("ARENA_MAX_LIVE_ROOMS", "120"))
+
+# Two unauthenticated endpoints create rows. The burst is sized to a venue
+# behind one NAT (50 people is the spec), and the rate is what stops a script.
+# The room burst matches the cap above rather than sitting under it: whichever
+# of the two is smaller is the one that answers a flood, and the 503 has a
+# sentence in it where a 429 has a number.
+PLAYER_RATE, PLAYER_BURST = 1.0, 120
+ROOM_RATE, ROOM_BURST = 0.5, 120
+
+# The coach spends money on every call, and its callers are not phones: both of
+# these routes are called by the pitch, the big screen running the match, from
+# a venue's one address. So this bucket is taken from under one constant key on
+# purpose - see proxy._COACH_KEY - because the instance is the only honest unit
+# to limit. Sized off the spec: a saturated venue runs near 0.13 chains a
+# second and a shout costs two requests, so five a second is some twenty times
+# a full house and still refuses a loop.
+COACH_RATE, COACH_BURST = 5.0, 60
 
 
 class _RedactClientId(logging.Filter):
@@ -200,6 +223,12 @@ async def lifespan(fastapi_app: FastAPI):
     fastapi_app.state.conn = connection
     fastapi_app.state.bus = Bus()
     fastapi_app.state.chain = chain.Chain(fastapi_app.state.bus)
+    # Per app rather than per module, so that a test's client gets its own and
+    # the suite cannot fail in whichever test happens to run last. There is one
+    # instance, so per app is per process anyway.
+    fastapi_app.state.players = limits.Bucket(PLAYER_RATE, PLAYER_BURST)
+    fastapi_app.state.rooms_opened = limits.Bucket(ROOM_RATE, ROOM_BURST)
+    fastapi_app.state.coach = limits.Bucket(COACH_RATE, COACH_BURST)
     # Install filter to redact client_id from access logs.
     access_logger = logging.getLogger("uvicorn.access")
     access_logger.addFilter(_RedactClientId())
@@ -391,6 +420,8 @@ async def read_venue(request: Request):
 @app.post("/api/players")
 async def join(body: JoinRequest, request: Request, response: Response):
     """Name plus email in, session cookie out. This is the whole of identity."""
+    if not request.app.state.players.take(limits.client_ip(request)):
+        raise HTTPException(429, "slow down a moment and try that again")
     connection = request.app.state.conn
     player_id = rooms.create_player(connection, body.display_name, body.email, EMAIL_SALT)
     response.set_cookie(
@@ -408,7 +439,11 @@ async def join(body: JoinRequest, request: Request, response: Response):
 @app.post("/api/rooms")
 async def open_room(body: RoomRequest, request: Request):
     """Open a room. This response is the only place its host token appears."""
+    if not request.app.state.rooms_opened.take(limits.client_ip(request)):
+        raise HTTPException(429, "slow down a moment and try that again")
     connection = request.app.state.conn
+    if rooms.live_count(connection) >= MAX_LIVE_ROOMS:
+        raise HTTPException(503, "the venue is full - wait for a match to finish")
     try:
         with _rules():
             room = rooms.create_room(connection, body.mode)
