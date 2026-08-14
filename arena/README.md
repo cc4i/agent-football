@@ -63,13 +63,16 @@ and not two:
 | Where | Calls | Why |
 |---|---|---|
 | `ManagerAgent` (`agent.py`) | 1 | Reads the shout and transfers to the captain. It is told not to answer one itself. |
-| The four specialists (`specialist_agents/*.py`) | 4 to 12 | Each is one call to choose the `update_profile` arguments and a second to say its 3-5 words once the tool has answered. A specialist the shout does not touch skips the tool and costs one; one that also fires `report_injury` or `request_substitution` costs three. |
+| The four specialists (`specialist_agents/*.py`) | 4 to 12 | Each is one call to choose the `update_profile` arguments and a second to say its 3-5 words once the tool has answered. A specialist the shout does not touch skips the tool and costs one; one that also fires `report_injury` or `request_substitution` costs three, or four if it takes them in separate turns. |
 | `SynthesisCaptain` (`captain.py`) | 1 | Merges the four replies into the huddle JSON. |
 
 Six at the floor, **ten in the ordinary case** where every specialist patches
-its profile, fourteen if all four also report a condition. `RemoteA2aAgent` and
-`ParallelAgent` add none of their own: one is a proxy over HTTP and the other
-is a fan-out.
+its profile, and about fourteen if all four also report a condition. About,
+because neither end is hard: a specialist that fires `update_profile`,
+`report_injury` and `request_substitution` in three separate turns costs four
+rather than three, and a model that emits two function calls in one response
+costs two. `RemoteA2aAgent` and `ParallelAgent` add none of their own: one is a
+proxy over HTTP and the other is a fan-out.
 
 **The formula.**
 
@@ -77,25 +80,39 @@ is a fan-out.
 ARENA_CHAIN_LIMIT = Q / (C x R)
 
 Q  requests a minute the project's quota allows for the model
-C  Gemini calls in one chain: 10 typical, 6 floor, 14 worst
-R  chains one slot turns over in a minute, 60 / chain seconds - about 2,
-   a chain being roughly 30 seconds against the 150 ARENA_CHAIN_SECONDS
-   allows it
+C  Gemini calls in one chain: 10 typical, 6 floor, about 14 busy
+R  chains one slot turns over in a minute, 60 / chain seconds - about 2
 ```
+
+`scoring.py`'s `EFFECTIVE_WINDOW_SECONDS` is where the chain's duration is
+written down: 30 to 60 seconds to answer, which is the only measured figure
+anyone has. R takes the fast end, 60 / 30, because a chain that answers quickly
+turns its slot over more often and so spends more quota a minute - the fast end
+is the safe end for this arithmetic. `ARENA_CHAIN_SECONDS` is a timeout and is
+no evidence of a duration.
 
 `C x R` is what one slot costs a minute: about 20 requests. The limit is per
 instance, which is per venue only because `maxScale` is 1; two instances would
 be twice this and the yaml is what keeps that from happening.
 
-**Reading Q.**
+**Reading Q.** `PROJECT` is the one `deploy/README.md` exports; the line below
+takes it from the configured project for a reader who arrives here first, since
+an unset one asks about a consumer called `projects/` and is answered:
 
 ```bash
+PROJECT=$(gcloud config get-value project)
 gcloud alpha services quota list \
     --service=aiplatform.googleapis.com \
     --consumer="projects/$PROJECT" \
-    --filter="metric:generate_content_requests_per_minute_per_project_per_base_model" \
+    --filter="metric~generate_content_requests_per_minute_per_project_per_base_model" \
     --format=yaml
 ```
+
+`~` rather than `:`. The filter runs client-side over metric names that are
+slash-and-underscore paths, and a word-match against a token like that can come
+back with nothing, which reads as a project with no quota rather than as a
+filter that missed. A regex match cannot fail that way. If the answer is empty
+anyway, drop the `--filter` and look at the whole list before believing it.
 
 Take `effectiveLimit` from the bucket whose `dimensions.base_model` is the
 model in `game/agents/constants.py`, and whose region is the one the chain
@@ -112,8 +129,9 @@ so read it rather than assume the generous case.
 
 Ten slots would spend the whole 200 with nothing left over, and a hop that
 fails and retries then spends quota the arithmetic has already promised to
-somebody else. Take eight. The shipped 4 asks for at most `4 x 10 x 2 = 80` a
-minute, which is why it is safe to leave alone until somebody has run the
+somebody else. Take eight. The shipped 4 asks for `4 x 10 x 2 = 80` a minute in
+the ordinary case and `4 x 14 x 2 = 112` with every specialist reporting a
+condition, which is why it is safe to leave alone until somebody has run the
 command: it costs a manager a place in the queue and it costs the venue
 nothing. Once you have the number, set `ARENA_CHAIN_LIMIT` in `service.yaml`
 and write the Q it came from in a comment beside it, because the next person

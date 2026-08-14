@@ -12,14 +12,23 @@ points it at a deployed arena instead of at one of its own; see
 
 What it measures, and why each is the number it is:
 
-* **Mean cores is the headline**, not peak. An instance is sized by what it
-  sustains, and a one-second spike while fifty rooms kick off at once is not
-  that. Peak is printed beside it as context.
+* **Mean cores is the headline**, not the busiest second. An instance is sized
+  by what it sustains, and a one-second spike while fifty rooms kick off at
+  once is not that. The busiest second is printed beside it as context, from
+  the difference of two `ps` TIME readings rather than from `ps %cpu`, which is
+  a decaying average and cannot see a spike at all.
+* **Loaded against idle** is what makes the lag figure mean anything. The idle
+  window is six sweep periods long, so the sweep's own stamping is inside the
+  percentile rather than being it. The result to look for is the two p50s and
+  the two p99s: if the load has not moved them, the synchronous psycopg driver
+  is not what limits this venue.
 * **Latency is measured on a room socket**, where every frame goes. Not on the
   wall, where `WALL_HZ` thins them on purpose and a frame that never arrives is
   the design working rather than a queue overflowing. It is timed from this end
   and so it contains this process's own scheduling, which is why the driver
-  watches its own loop too and prints that beside it.
+  watches its own loop too and prints that beside it. The stamp goes on before
+  the frame is serialised, so the send path is inside the number as well, and
+  that only stays negligible while the payload does.
 * **Event-loop lag** is the one the plan parked: the arena's async handlers
   call psycopg synchronously, so every query blocks the loop for as long as it
   takes. At one room nobody notices. Fifty at 10 Hz is where it either shows up
@@ -58,6 +67,7 @@ import pytest
 import websockets
 from psycopg import sql
 
+import app
 import db
 import fake_host
 import rooms
@@ -75,6 +85,18 @@ VIEWERS_PER_ROOM = 2
 COOKIE = "arena_session"
 FIXTURE = Path(fake_host.__file__).resolve().parent / "fixtures" / "match-3-1.jsonl"
 
+# The frame `arena/README.md` documents and `game.js` builds: a scoreline, a
+# clock and eleven points, at the three decimals the pitch rounds to. Kept here
+# to be measured rather than described, because the fixture's state frames
+# carry the score and the clock and nothing else, and the difference is the
+# main thing this rehearsal understates.
+DOCUMENTED_FRAME = {"type": "host.state", "payload": {
+    "score": [2, 1], "clock": 102, "ball": [0.551, 0.382],
+    "blue": [[0.134, 0.492], [0.271, 0.318], [0.263, 0.664],
+             [0.418, 0.205], [0.402, 0.771]],
+    "red": [[0.871, 0.489], [0.702, 0.334], [0.719, 0.651],
+            [0.583, 0.229], [0.598, 0.744]]}}
+
 # How long the whole run may take before something is wrong rather than slow.
 # The match is three minutes; this is that with room for a driver that cannot
 # quite keep up, which is a finding rather than a failure.
@@ -83,10 +105,17 @@ PATIENCE_SECONDS = 420
 # What the lag monitor sleeps for between readings, in the arena's own loop.
 TICK = 0.05
 
-# How long to sit still with every socket open before kicking off. A sleep of
-# TICK overshoots by a little on a machine with nothing to do, and without a
-# floor to read it against, the lag under load is a number with no meaning.
-QUIET_SECONDS = 5
+# How long to sit still before kicking off. A sleep of TICK overshoots by a
+# little on a machine with nothing to do, and without that floor to read it
+# against, the lag under load is a number with no meaning.
+#
+# Six sweep periods rather than a round number of seconds. `_watch_for_the_
+# missing` is the only thing that happens in an idle arena, and it stamps every
+# live room's `heard_from` synchronously as it goes, so a window one sweep long
+# measures the sweep and calls it the floor. Six of them make the idle p99 a
+# percentile rather than a single observation, and cost twenty-five seconds on
+# a run that already takes three minutes.
+QUIET_SECONDS = 6 * app.SWEEP_SECONDS
 
 
 # Run inside the arena's process, because the two things this rehearsal most
@@ -256,20 +285,54 @@ def _child_cpu():
     return spent.ru_utime + spent.ru_stime
 
 
+def _cpu_seconds(said):
+    """Seconds out of a `ps` TIME field, which is `[[DD-]HH:]MM:SS[.ff]`.
+
+    macOS prints hundredths and leaves the hours off until it needs them;
+    procps prints whole seconds and a `DD-` in front once a process has been
+    up a day. Read whatever arrives rather than one platform's shape.
+    """
+    days, _, rest = said.rpartition("-")
+    seconds = 0.0
+    for part in rest.split(":"):
+        seconds = seconds * 60 + float(part)
+    return seconds + float(days or 0) * 86400
+
+
 def _read_cpu(pid):
-    """This process's CPU percentage right now, as `ps` reports it."""
-    answer = subprocess.run(["ps", "-o", "%cpu=", "-p", str(pid)],
+    """The CPU seconds this process has used since it started, or None if gone."""
+    answer = subprocess.run(["ps", "-o", "time=", "-p", str(pid)],
                             capture_output=True, text=True, check=False)
     said = answer.stdout.strip()
-    return float(said) if said else None
+    return _cpu_seconds(said) if said else None
 
 
-def _sample_cpu(pid, stop, peaks):
-    """Read `ps` once a second until told to stop. Runs in a thread of its own."""
-    while not stop.wait(1.0):
-        reading = _read_cpu(pid)
-        if reading is not None:
-            peaks.append(reading)
+def _sample_cpu(pid, stop, windows, seconds=1.0):
+    """Utilisation over each window, from the difference of two TIME readings.
+
+    Not `ps -o %cpu`, which is the obvious one call instead of two and is the
+    wrong instrument. macOS documents it as "a decaying average over up to a
+    minute of previous (real) time", so consecutive one-second readings are the
+    same smoothed number and their maximum cannot see a one-second stall, which
+    is the only reason a peak is printed at all. Linux computes the same field
+    over the whole lifetime, which converges on the mean this report already
+    takes from `getrusage` and prints better.
+
+    A window of a second: `ps` gives hundredths on this platform, so the
+    reading steps by 0.01 of a core, which is finer than the two decimals it is
+    printed to. On a platform whose `ps` prints whole seconds the step is a
+    whole core and the figure is worth nothing - check before trusting it
+    somewhere new.
+    """
+    before, since = _read_cpu(pid), time.monotonic()
+    while not stop.wait(seconds):
+        after, now = _read_cpu(pid), time.monotonic()
+        window = now - since
+        # A terminated process reports 0:00.00 rather than nothing, which would
+        # otherwise land as a large negative window at the end of the run.
+        if before is not None and after is not None and after >= before and window > 0:
+            windows.append((after - before) / window)
+        before, since = after, now
 
 
 def _at(values, fraction):
@@ -298,8 +361,14 @@ def _a_match_at(hz, seconds):
     of them state: 0.05 Hz, which fifty rooms replaying it would make 2.5 state
     frames a second across the whole venue against the 500 this is meant to
     measure. So the rate is generated and the payloads are not - they cycle out
-    of the fixture, because payload size is most of the per-frame cost and a
-    stub would understate it. The six recorded events keep their real `t`.
+    of the fixture, real frames from a real match rather than a stub. The six
+    recorded events keep their real `t`.
+
+    That is a floor on per-frame cost and not a model of one. The fixture's
+    state frames are a score and a clock; the frame the pitch actually sends
+    carries a ball and ten players as well, several times the bytes, and
+    serialising to a room's subscribers is where the arena's per-frame work
+    goes. The report prints both sizes so the difference is not left implicit.
     """
     recorded = fake_host.parse_log(FIXTURE)
     payloads = [frame["payload"] for frame in recorded if frame["type"] == "state"]
@@ -367,16 +436,22 @@ async def _a_host(url, frames, tally):
         reader = asyncio.create_task(_drain(wire))
 
         async def send(message):
-            if message["type"] == "host.state":
+            state = message["type"] == "host.state"
+            if state:
                 # A copy rather than a mutation: `fake_host.to_message` hands
                 # back the frame's own payload object, and fifty rooms share
                 # one list of frames.
                 now = time.monotonic()
                 message = {**message, "payload": {**message["payload"], "sent": now}}
+            text = json.dumps(message)
+            if state:
                 tally["sent"] += 1
+                # What is actually on the wire, so the report can say what this
+                # rehearsal is carrying rather than leave it to be assumed.
+                tally["bytes"] = max(tally["bytes"], len(text))
                 tally["first"] = min(tally["first"], now)
                 tally["last"] = now
-            await wire.send(json.dumps(message))
+            await wire.send(text)
 
         try:
             await fake_host.replay(frames, send)
@@ -460,7 +535,8 @@ async def test_fifty_rooms_at_ten_hertz(venue):
     seated = time.monotonic() - started
 
     latencies, wall_latencies, watching = [], [], []
-    tally = {"sent": 0, "room": 0, "wall": 0, "first": float("inf"), "last": 0.0}
+    tally = {"sent": 0, "room": 0, "wall": 0, "bytes": 0,
+             "first": float("inf"), "last": 0.0}
     watchers = [asyncio.create_task(
         _the_wall(f"{venue.wire}/ws/wall", wall_latencies, tally, watching))]
     hosts = []
@@ -471,19 +547,21 @@ async def test_fifty_rooms_at_ten_hertz(venue):
         hosts.append(_a_host(f"{venue.wire}/ws/rooms/{code}?client_id={token}", frames, tally))
     await _everybody_watching(watching, len(watchers))
 
-    # Every socket is open and nothing is being sent down them. What the loop
-    # monitor reads here is the floor: the overshoot of a sleep on an idle
-    # machine, which is the only thing the figure under load can be read
-    # against. Taken after the handshakes rather than at boot, where the schema
-    # check and the workshop room would be measured instead of the arena.
+    # The hundred and one listening sockets are open and nothing is being sent
+    # down them; the fifty host sockets connect at kick-off, a frame period
+    # apart, which is the stagger below. What the loop monitor reads here is
+    # the floor: the overshoot of a sleep on an idle machine, which is the only
+    # thing the figure under load can be read against. Taken after the
+    # handshakes rather than at boot, where the schema check and the workshop
+    # room would be measured instead of the arena.
     settled = time.monotonic()
     await asyncio.sleep(QUIET_SECONDS)
 
-    peaks, stop = [], threading.Event()
+    windows, stop = [], threading.Event()
     sampler = None
     if venue.process:
         sampler = threading.Thread(target=_sample_cpu,
-                                   args=(venue.process.pid, stop, peaks), daemon=True)
+                                   args=(venue.process.pid, stop, windows), daemon=True)
         sampler.start()
     ours = []
     watching_ourselves = asyncio.create_task(_watch_our_own_loop(ours))
@@ -542,7 +620,7 @@ async def test_fifty_rooms_at_ten_hertz(venue):
 
     _report(venue, opened, refusals, seated,
             (settled, kicked_off, played, elapsed), state_frames,
-            latencies, wall_latencies, ours, tally, cpu, peaks, instruments,
+            latencies, wall_latencies, ours, tally, cpu, windows, instruments,
             statuses, before, after)
 
     # The rehearsal asserts that it rehearsed, and nothing about how fast. A
@@ -554,7 +632,7 @@ async def test_fifty_rooms_at_ten_hertz(venue):
 
 
 def _report(venue, opened, refusals, seated, match, state_frames,
-            latencies, wall_latencies, ours, tally, cpu, peaks, instruments,
+            latencies, wall_latencies, ours, tally, cpu, windows, instruments,
             statuses, before, after):
     """Print the numbers. This is the whole output of the rehearsal."""
     settled, kicked_off, played, elapsed = match
@@ -592,6 +670,11 @@ def _report(venue, opened, refusals, seated, match, state_frames,
     say(f"viewer deliveries   {tally['room']} of {expected} "
         f"({100 * tally['room'] / expected:.2f}%)")
     say(f"wall deliveries     {tally['wall']} (thinned to ARENA_WALL_HZ a room, by design)")
+    say(f"frame payload       {tally['bytes']} bytes on the wire, against "
+        f"{len(json.dumps(DOCUMENTED_FRAME))} for the frame the pitch")
+    say("                    sends: the fixture's states are a score and a clock, with no "
+        "ball and")
+    say("                    no positions, so every number below is a floor on per-frame cost")
     say("")
     say("--- the event loop, which is where the parked risk was ---")
     if lags:
@@ -601,8 +684,11 @@ def _report(venue, opened, refusals, seated, match, state_frames,
         if quiet:
             say(f"idle floor          p50 {_at(quiet, 0.50) * 1000:.1f}ms, "
                 f"p99 {_at(quiet, 0.99) * 1000:.1f}ms, max {max(quiet) * 1000:.1f}ms "
-                f"({len(quiet)} readings over {QUIET_SECONDS}s with every socket "
-                f"open and nothing sent)")
+                f"({len(quiet)} readings over {QUIET_SECONDS}s)")
+            say(f"                    {(VIEWERS_PER_ROOM * len(opened)) + 1} listening sockets "
+                f"open and nothing sent; the {len(opened)} host sockets connect at kick-off")
+            say(f"                    the window is {QUIET_SECONDS // app.SWEEP_SECONDS} sweep "
+                f"periods, so the sweep is in the percentile rather than being it")
     else:
         say("lag                 not measured: nothing instruments a deployed arena")
     say("")
@@ -615,6 +701,13 @@ def _report(venue, opened, refusals, seated, match, state_frames,
         say(f"this driver's loop  p50 {_at(ours, 0.50) * 1000:.1f}ms, "
             f"p99 {_at(ours, 0.99) * 1000:.1f}ms, max {max(ours) * 1000:.1f}ms "
             f"- the latency above is timed here and contains it")
+        say(f"                    it covers the receive side; the stamp goes on before "
+            f"json.dumps and the")
+        say(f"                    socket write, so the send path is in there too - "
+            f"microseconds at {tally['bytes']}")
+        say("                    bytes a frame, which leans on the payload caveat above "
+            "rather than")
+        say("                    being independent of it")
     if wall_latencies:
         say(f"wall p99 / max      {_at(wall_latencies, 0.99) * 1000:.1f}ms / "
             f"{max(wall_latencies) * 1000:.1f}ms  (context: the wall drops frames on purpose)")
@@ -623,11 +716,18 @@ def _report(venue, opened, refusals, seated, match, state_frames,
     if cpu:
         say(f"mean cores          {cpu['total'] / cpu['lifetime']:.3f} of one core "
             f"({cpu['total']:.1f}s of cpu over the arena's {cpu['lifetime']:.1f}s life)")
-        say(f"                    the life is the match plus the setup in front of it; "
-            f"the match itself is {played:.0f}s of it")
-        if peaks:
-            say(f"peak (ps %cpu)      {max(peaks):.0f}% of one core, "
-                f"median {_at(peaks, 0.50):.0f}%, {len(peaks)} samples")
+        say(f"                    the life is the match plus the setup and the idle window "
+            f"in front of it;")
+        say(f"                    the match itself is {played:.0f}s of it")
+        if windows:
+            say(f"under load only     {sum(windows) / len(windows):.3f} of one core, "
+                f"the mean of the windows below, which span the match")
+            say(f"busiest second      {max(windows):.2f} of one core, "
+                f"median {_at(windows, 0.50):.2f}, {len(windows)} one-second windows")
+            say("                    each window is the difference of two ps TIME readings, "
+                "not ps %cpu,")
+            say("                    which is a decaying average and cannot see a "
+                "one-second spike")
     else:
         say("cpu                 not measured: the arena is not this test's child")
     say("")
