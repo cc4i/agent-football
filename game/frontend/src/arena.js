@@ -20,9 +20,11 @@
  * for them once and is told when they move. Same page, same look; it simply
  * knows which match it is rendering.
  *
- * With no `?room=` this is the workshop, which the arena opens for itself. That
- * is what keeps the five-stage lab working unchanged while a venue full of
- * phones plays their own matches beside it.
+ * `room` describes the lab page and nothing else: with no `?room=` it is the
+ * workshop, which the arena opens for itself, and that is what keeps the
+ * five-stage lab working unchanged while a venue full of phones plays their
+ * own matches beside it. `readProfiles` and `connect` are the shared half, and
+ * the grounds page uses them for fifty rooms at once with no `room` in sight.
  */
 
 // Vite proxies these to the arena on :8003, so every call here is same-origin
@@ -35,24 +37,11 @@ const params = new URLSearchParams(window.location.search);
 export const room = {
   code: (params.get('room') || WORKSHOP).toUpperCase(),
   team: params.get('team') === 'red' ? 'red' : 'blue',
-  // `host` advances physics and reports what happened. Everyone else watches.
-  as: params.get('as') === 'host' ? 'host' : 'viewer',
-  clientId: params.get('client_id') || '',
-  // The lab page is the workshop room with no role asked for; a match always
-  // says which. This is what decides whether the workshop chrome is drawn.
+  // The lab is the workshop room, and a `?room=` is somebody pointing it at a
+  // venue's squads instead. Everything the lab does to a room that it must not
+  // do to a match in progress hangs off this.
   inMatch: Boolean(params.get('room')),
 };
-
-export const isHost = () => room.as === 'host' && Boolean(room.clientId);
-
-/**
- * Whether this pitch renders somebody else's match instead of running its own.
- *
- * Being in a match without the token that holds its physics is exactly what
- * watching is. The workshop is deliberately not a match, so the lab still runs
- * its own simulation with no token anywhere in sight.
- */
-export const isViewer = () => room.inMatch && !isHost();
 
 /**
  * Whether this pitch should run the autonomous "are you tired?" check.
@@ -66,42 +55,7 @@ export const isViewer = () => room.inMatch && !isHost();
  */
 export const shouldRunStatusCheck = (r = room) => !r.inMatch;
 
-/**
- * Ask the screen to stay awake while this tab is the one running a match.
- *
- * Physics lives here, so a screen that dims and sleeps takes the match with
- * it: frames stop, and after half a minute of silence the arena marks the room
- * abandoned. That is the right thing to do to a host that has gone, and the
- * wrong thing to do to one sitting in front of an idle laptop, so the host
- * asks not to be left. Browsers drop the lock whenever the page is hidden,
- * which is why it is taken again on the way back rather than only once.
- *
- * The lock is held for as long as the page is: this pitch exists only while
- * its match does, and there is nothing left to keep awake once it is gone.
- * Settles once the first attempt has been answered, one way or the other.
- */
-export async function keepAwake(navigation = navigator, page = document) {
-  if (!navigation.wakeLock) return;
-  let held = null;
-
-  const take = async () => {
-    if (held || page.visibilityState !== 'visible') return;
-    try {
-      held = await navigation.wakeLock.request('screen');
-      // The browser can revoke it without telling this code twice.
-      held.addEventListener('release', () => { held = null; });
-    } catch {
-      // Refused: no user gesture yet, a policy against it, or a flat battery.
-      // None of those are worth interrupting a match over, and the arena's own
-      // thirty seconds of grace is the backstop either way.
-    }
-  };
-
-  page.addEventListener('visibilitychange', take);
-  await take();
-}
-
-/** The other dugout. A host drives both of them. */
+/** The other dugout. Whoever runs the physics drives both of them. */
 export const opposite = (team = room.team) => (team === 'red' ? 'blue' : 'red');
 
 /** Every role's attributes for one dugout, as the arena holds them. */

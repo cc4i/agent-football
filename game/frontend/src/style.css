@@ -1004,48 +1004,8 @@ body {
 .line-forward { color: #f87171; }                   /* Light Red */
 .line-goalkeeper { color: #c084fc; }                /* Light Purple */
 
-/* ---- Inside the arena ---------------------------------------------------
-   The big screen frames this page, so everything belonging to the lab - the
-   header, the trace, the shout bar, the debug panel, the footer - is the
-   frame's business rather than ours. What is left is the match, at the size
-   of the screen. The phone in somebody's hand is the dugout now. */
-body.in-arena {
-  height: 100vh;
-  overflow: hidden;
-}
-
-body.in-arena .game-header,
-body.in-arena .agent-terminal,
-body.in-arena .coach-shout-bar,
-body.in-arena .debug-log-panel,
-body.in-arena .game-footer,
-body.in-arena #start-screen,
-body.in-arena #rematch-btn {
-  display: none;
-}
-
-body.in-arena .game-wrapper,
-body.in-arena .game-container {
-  height: 100vh;
-  max-height: none;
-  min-height: 0;
-}
-
-body.in-arena .game-container {
-  border: none;
-}
-
-body.in-arena .canvas-container {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-/* Letterboxed, not stretched: the pitch is 1408x768 and a venue's screen is
-   not, and a stretched pitch is a visibly oval ball. */
-body.in-arena .canvas-container canvas {
-  width: auto !important;
-  height: auto !important;
-  max-width: 100%;
-  max-height: 100%;
-}
+/* There was a block here that stripped this page down to its canvas, for when
+   the big screen framed it in an iframe. The wall mounts the scene itself now
+   and letterboxes it with Phaser's own scaler, so nothing frames this page and
+   there is nothing left to strip: what loads it is somebody at the lab, who
+   wants the header, the trace, the shout bar and the debug panel. */

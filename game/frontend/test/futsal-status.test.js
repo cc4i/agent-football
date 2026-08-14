@@ -48,20 +48,24 @@ describe('createStatusHook', () => {
 
 describe('who runs the autonomous status check', () => {
   it('runs it in the workshop', async () => {
-    const { shouldRunStatusCheck, isViewer } = await arenaIn('');
+    const { shouldRunStatusCheck } = await arenaIn('');
     expect(shouldRunStatusCheck()).toBe(true);
-    expect(isViewer()).toBe(false);
   });
 
-  it('does not run it in a real match', async () => {
-    const { shouldRunStatusCheck, isViewer } = await arenaIn('?room=ABCD&as=host&client_id=host-1');
+  it('does not run it in a venue room', async () => {
+    // Each check wakes a coach, a captain and four specialists. The venue's
+    // own matches are played by the grounds, which has no such timer, so this
+    // is about the lab: pointed at a live room it must watch and not prod.
+    const { shouldRunStatusCheck } = await arenaIn('?room=ABCD');
     expect(shouldRunStatusCheck()).toBe(false);
-    expect(isViewer()).toBe(false);
   });
 
-  it('does not run it for a viewer, whose match somebody else is running', async () => {
-    const { shouldRunStatusCheck, isViewer } = await arenaIn('?room=ABCD');
-    expect(shouldRunStatusCheck()).toBe(false);
-    expect(isViewer()).toBe(true);
+  it('ignores the roles a tab used to be able to ask for', async () => {
+    // A pitch was a host, a viewer or the workshop. The grounds took the first
+    // and the wall's direct mount took the second, so these are two query
+    // parameters nothing reads -- and a stale bookmark bearing them opens the
+    // lab, rather than a page that thinks it is running somebody's match.
+    const { room } = await arenaIn('?as=host&client_id=host-1');
+    expect(room).toEqual({ code: 'WRKS', team: 'blue', inMatch: false });
   });
 });

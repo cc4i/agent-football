@@ -18,15 +18,15 @@ import { SoccerGameScene, GAME_DURATION_SEC, STATUS_CHECK_MS } from './game';
 import { Sound } from './audio';
 import { createStatusHook } from './status.js';
 import { showCondition } from './substitutions.js';
-import { room, isHost, isViewer, shouldRunStatusCheck, opposite, readProfiles, connect, keepAwake } from './arena.js';
+import { room, shouldRunStatusCheck, opposite, readProfiles, connect } from './arena.js';
 
 let gameInstance = null;
 let currentProfiles = {};
 
-// The other dugout, which only a host has any business holding. Kept apart from
-// `currentProfiles` because that one is this page's own squad: it is what the
-// attribute panel shows, what the debug log diffs, and what the workshop
-// stages work on. The opposition is simulation input and nothing else.
+// The other dugout. Kept apart from `currentProfiles` because that one is this
+// page's own squad: it is what the attribute panel shows, what the debug log
+// diffs, and what the workshop stages work on. The opposition is simulation
+// input and nothing else.
 let otherProfiles = {};
 
 // Toggle to show/hide the "Debug logs" panel entirely. Set to false to remove
@@ -168,10 +168,6 @@ document.querySelector('#app').innerHTML = `
   </div>
 `;
 
-// A match hides the lab: inside the big screen's frame this page is the pitch
-// and nothing else. The workshop keeps every control it had.
-if (room.inMatch) document.body.classList.add('in-arena');
-
 // ---- Debug logs: track and render per-attribute config changes ----------
 
 // Format a value for display in the debug log (round floats, mark missing).
@@ -254,7 +250,7 @@ function applyProfilesToScene() {
   const scene = gameInstance.scene.getScene('SoccerGameScene');
   if (!scene) return;
   scene.updateProfiles(room.team, currentProfiles);
-  if (isHost()) scene.updateProfiles(opposite(), otherProfiles);
+  scene.updateProfiles(opposite(), otherProfiles);
 }
 
 // This dugout's squad as the arena holds it. Read once at load and again on a
@@ -267,11 +263,9 @@ async function loadProfiles() {
       // Log the initial values so the panel shows the starting config.
       appendDebugLog(role, diffProfile({}, profile), 'initial load');
     });
-    // A host runs the whole pitch, so it reads the other dugout too. In a solo
-    // room that is the house side the arena seeded from the baselines, and in
-    // a head-to-head room it is a second manager's squad, moving on their
-    // shouts. Only the arena knows which, and it does not have to say.
-    if (isHost()) otherProfiles = await readProfiles(room.code, opposite());
+    // This page runs the whole pitch, so it reads the other dugout too. In the
+    // workshop that is the house side the arena seeded from the baselines.
+    otherProfiles = await readProfiles(room.code, opposite());
     applyProfilesToScene();
   } catch (err) {
     console.error("Failed to load player profiles:", err);
@@ -283,9 +277,6 @@ async function loadProfiles() {
 // happens, rather than up to two seconds later.
 function applyPatch(payload) {
   const mine = payload.team === room.team;
-  // A viewer computes nothing: its players are wherever the host's last frame
-  // put them, so the other dugout's moves are the host's business alone.
-  if (!mine && !isHost()) return;
   const squad = mine ? currentProfiles : otherProfiles;
   const before = squad[payload.role] || {};
   const after = { ...before, ...(payload.changed || {}) };
@@ -704,11 +695,6 @@ function startPhaserGame() {
     width: 1408,
     height: 768,
     parent: 'phaser-container',
-    // A match is framed inside the big screen, and this page takes no keyboard
-    // in one: both dugouts are driven from phones. Grabbing focus on boot would
-    // swallow the operator's Esc and tile numbers inside the iframe. The lab is
-    // the opposite -- somebody there is playing with the arrow keys.
-    autoFocus: !room.inMatch,
     physics: {
       default: 'arcade',
       arcade: {
@@ -716,10 +702,12 @@ function startPhaserGame() {
         debug: false
       }
     },
-    // An instance rather than the class, because which of the two things this
-    // pitch is -- the match, or a picture of somebody else's -- has to be
-    // settled before create() runs a whistle and a clock.
-    scene: [new SoccerGameScene({ role: isViewer() ? 'viewer' : 'host' })]
+    // An instance rather than the class, because the role has to be settled
+    // before create() runs a whistle and a clock. The lab always runs its own,
+    // and there is no longer any other kind of pitch this page can be: the
+    // grounds host a venue's matches on host.html and the wall draws them
+    // through viewer.js.
+    scene: [new SoccerGameScene({ role: 'host' })]
   };
 
   gameInstance = new Phaser.Game(config);
@@ -732,13 +720,6 @@ function startPhaserGame() {
       nameTheManagers();
       const speedVal = parseFloat(document.getElementById('sim-speed-input').value);
       scene.setSimulationSpeed(speedVal);
-      if (isHost()) {
-        // This tab holds the room's physics, so what happens here is what
-        // happened. Everyone else in the room is drawing these frames.
-        scene.frameSink = feed.state;
-        scene.reporter = feed.event;
-        keepAwake();
-      }
     }
   });
 }
@@ -811,12 +792,11 @@ function nameTheManagers() {
   if (scene && seated) scene.nameManagers(seated);
 }
 
-// The room's feed. Profile moves arrive on it, and when this pitch holds the
-// host token, frames and events leave on it. Open before anything is loaded so
-// nothing said between the read and the connect is missed.
-const feed = connect(room.code, {
-  clientId: room.clientId,
-  hosting: isHost(),
+// The room's feed, listened to and never spoken on: no token is asked for, so
+// the arena would refuse a frame from here anyway. Profile moves, shouts and
+// knocks arrive on it. Open before anything is loaded so nothing said between
+// the read and the connect is missed.
+connect(room.code, {
   // Who is in the two dugouts, which is what the nameplates on the pitch say.
   onRoom: (message) => {
     seated = message;
@@ -831,19 +811,13 @@ const feed = connect(room.code, {
     const watching = gameInstance && gameInstance.scene.getScene('SoccerGameScene');
     if (watching) watching.cheer(message.kind);
   },
-  // A viewer's whole match arrives here. Parked rather than drawn: the scene
-  // reads it on its next frame, so a burst off a reconnecting socket costs one
-  // draw rather than one draw each.
-  onState: (message) => {
-    const scene = gameInstance && gameInstance.scene.getScene('SoccerGameScene');
-    if (scene) scene.wire = message;
-  },
 });
 
 if (room.inMatch) {
-  // A match starts where the arena says it starts, and nobody is waiting at a
-  // start screen: the big screen already showed the lobby and somebody on a
-  // phone already kicked off.
+  // Pointed at a venue's room rather than the workshop, which is a person
+  // reading a match's squads and not the match itself: the grounds are playing
+  // that one and the wall is drawing it. So the squads are read and left
+  // exactly as the venue has them, and the pitch below is this page's own.
   loadProfiles().then(() => {
     document.getElementById('start-screen').classList.remove('active');
     startPhaserGame();
@@ -851,7 +825,9 @@ if (room.inMatch) {
 } else {
   // The lab starts every session from the shipped squad, which is what makes
   // its stages repeatable. The workshop room is long-lived, so this has to be
-  // asked for rather than assumed.
+  // asked for rather than assumed -- and it is why the branch above exists at
+  // all: RESTORE_BASELINE into a room two managers are playing in would wipe
+  // every shout they have made.
   console.log("--> [SYSTEM] Workshop: resetting to the shipped baseline...");
   sendInstructionToAgent("RESTORE_BASELINE", { showHuddle: false }).then(loadProfiles);
 }
