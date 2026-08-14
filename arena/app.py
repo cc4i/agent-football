@@ -1292,24 +1292,34 @@ class _HeldRooms:
     place, because a deploy runs two instances and only one of them has the
     sockets. The other has to be able to read that somebody is holding this
     room, and the column is the only thing both of them can see.
+
+    Counted by kind, because the two kinds of client prove different things. A
+    screen's socket proves its lobby is real: that screen is the only thing that
+    can ever run it. It proves nothing about a live match, which the grounds
+    run - and a wall left open on a match whose grounds died would otherwise
+    vouch for it for the rest of the evening, with the sweep unable to reach a
+    match nobody is simulating.
     """
 
+    KINDS = ("screen", "grounds")
+
     def __init__(self):
-        self._held = collections.Counter()
+        self._held = {kind: collections.Counter() for kind in self.KINDS}
 
-    def took(self, code):
-        self._held[code] += 1
+    def took(self, code, kind):
+        self._held[kind][code] += 1
 
-    def gave_up(self, code):
-        if self._held[code] > 1:
-            self._held[code] -= 1
+    def gave_up(self, code, kind):
+        counter = self._held[kind]
+        if counter[code] > 1:
+            counter[code] -= 1
         else:
             # Popped rather than decremented to zero, so the counter is the size
             # of the venue rather than of the evening.
-            self._held.pop(code, None)
+            counter.pop(code, None)
 
-    def codes(self):
-        return list(self._held)
+    def codes(self, kind):
+        return list(self._held[kind])
 
 
 class _HostReporting:
@@ -1381,15 +1391,22 @@ async def room_socket(socket: WebSocket, code: str, client_id: str = ""):
         # read and the send would hold it forever.
         db.finish(connection)
 
-    # Whether this socket is the room's screen, settled once at the handshake:
-    # the token is minted when the room is opened and never changes, so a
-    # client that holds it now holds it for the life of the room. From here on
-    # this connection existing is what says a screen is still there, which is
-    # the one thing a backgrounded tab can still do.
-    holding = bool(client_id) and bool(room["host_client_id"]) and _same_secret(
-        _text_bytes(client_id), _text_bytes(room["host_client_id"]))
+    # Which kind of client this socket is, settled once at the handshake: both
+    # tokens are minted when the room is opened and neither ever changes, so a
+    # client that holds one now holds it for the life of the room. From here on
+    # this connection existing is what says that client is still there, which
+    # is the one thing a backgrounded tab can still do.
+    holding = None
+    if client_id:
+        offered = _text_bytes(client_id)
+        if room["host_client_id"] and _same_secret(
+                offered, _text_bytes(room["host_client_id"])):
+            holding = "grounds"
+        elif room["screen_client_id"] and _same_secret(
+                offered, _text_bytes(room["screen_client_id"])):
+            holding = "screen"
     if holding:
-        socket.app.state.held.took(code)
+        socket.app.state.held.took(code, holding)
 
     subscription = match_bus.subscribe(room_topic(code))
     pump = asyncio.create_task(_pump(socket, subscription))
@@ -1415,7 +1432,7 @@ async def room_socket(socket: WebSocket, code: str, client_id: str = ""):
         # out, a socket that is gone must stop vouching for its room, or one
         # bad hang-up leaves a match live for the rest of the evening.
         if holding:
-            socket.app.state.held.gave_up(code)
+            socket.app.state.held.gave_up(code, holding)
         pump.cancel()
         if pump.done() and not pump.cancelled():
             exc = pump.exception()
@@ -1571,13 +1588,15 @@ def _give_up_on_the_missing(connection, match_bus, now, held=None):
     A room nobody has reported on yet is stamped on the first sweep that sees
     it rather than abandoned, which is the same rule one sweep late.
 
-    `held` is the sockets this instance has open for a room's own screen, and
-    every one of them is heard from before anything is judged. See `_HeldRooms`
-    for why the connection is better proof than anything a backgrounded tab can
-    be relied on to say.
+    `held` is the sockets this instance has open for a room's own screen and
+    for its grounds, and every one of them is heard from before anything is
+    judged. See `_HeldRooms` for why the connection is better proof than
+    anything a backgrounded tab can be relied on to say, and for why a screen
+    is only allowed to vouch for a room that has not kicked off.
     """
     if held is not None:
-        rooms.heard_from_all(connection, held.codes(), now)
+        rooms.heard_from_all(connection, held.codes("screen"), now, statuses=("lobby",))
+        rooms.heard_from_all(connection, held.codes("grounds"), now)
     gone = []
     for room in rooms.hosted_with_liveness(connection):
         if room["last_heard_at"] is None:

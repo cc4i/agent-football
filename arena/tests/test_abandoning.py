@@ -55,6 +55,11 @@ def open_lobby(client, conn, phones, mode="solo"):
     return opened["code"], rooms.by_code(conn, opened["code"])["host_client_id"]
 
 
+def screen_of(conn, code):
+    """The token the wall bears on this room's socket, as against the grounds'."""
+    return rooms.by_code(conn, code)["screen_client_id"]
+
+
 def once_heard(client, code, within=2.0):
     """Wait for a `host.here` to land, and answer with what it wrote.
 
@@ -184,6 +189,54 @@ def test_the_screen_that_hangs_up_loses_its_room_as_it_always_did(client, live_r
 
     assert sweep(client, heard + arena.HOST_GONE_SECONDS + 1, client.app) == [code]
     assert rooms.by_code(client.app.state.conn, code)["status"] == "abandoned"
+
+
+# Two kinds of client hold a socket now, and they prove different things.
+#
+# A screen's socket proves its lobby is real: that screen is the only thing that
+# can ever run that lobby, so while it is connected the lobby has a future. It
+# proves nothing at all about a live match, because the screen is not the thing
+# playing it - the grounds are. A wall left open on a match whose grounds died
+# would otherwise stamp that match alive every sweep for the rest of the
+# evening, and the one mechanism that exists to notice a match nobody is
+# simulating could never fire on the case it was built for.
+
+
+def test_a_screen_socket_does_not_keep_a_live_match_alive(client, conn, live_room):
+    code, _ = live_room()
+    heard_now(client, code)
+
+    with client.websocket_connect(
+            f"/ws/rooms/{code}?client_id={screen_of(conn, code)}") as wall:
+        wall.receive_json()
+        # Watching the last frame it received go still is not evidence.
+        assert sweep(client, LATE, client.app) == [code]
+
+    assert rooms.by_code(client.app.state.conn, code)["status"] == "abandoned"
+
+
+def test_a_screen_socket_does_keep_its_lobby_alive(client, conn, phones):
+    # The half that still holds. Nobody has kicked off, so there are no grounds
+    # to speak for this room and the screen is all it has.
+    code, _ = open_lobby(client, conn, phones)
+    heard_now(client, code)
+
+    with client.websocket_connect(
+            f"/ws/rooms/{code}?client_id={screen_of(conn, code)}") as wall:
+        wall.receive_json()
+        assert sweep(client, LATE, client.app) == []
+        assert rooms.by_code(client.app.state.conn, code)["status"] == "lobby"
+
+
+def test_the_grounds_socket_keeps_the_match_it_is_running(client, live_room):
+    # And the kind that is entitled to vouch for a match does.
+    code, physics = live_room()
+    heard_now(client, code)
+
+    with client.websocket_connect(f"/ws/rooms/{code}?client_id={physics}") as grounds:
+        grounds.receive_json()
+        assert sweep(client, LATE, client.app) == []
+        assert rooms.by_code(client.app.state.conn, code)["status"] == "live"
 
 
 def test_a_watcher_sitting_on_the_socket_holds_nothing(client, conn, phones):
