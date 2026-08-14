@@ -27,6 +27,13 @@
   --faint:#616b7d;
 
   --r-sm:6px; --r-md:10px; --r-lg:16px;
+
+  /* Both scrollbar properties inherit, so the colour is settled once here
+     and every scroller in the product picks it up. Stated at the root
+     because `scrollbar-width:thin` alone takes the platform's colours with
+     it: on a light OS that is a white track down the side of a near-black
+     panel, and the standings on the arena screen wore one across a hall. */
+  scrollbar-color:rgba(255,255,255,.16) transparent;
 }
 
 *{box-sizing:border-box;margin:0;padding:0}
@@ -225,7 +232,7 @@ a.btn{display:block;text-align:center;text-decoration:none;line-height:1.2}
 .relay-hd .elapsed{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:.7rem;color:var(--faint)}
 .relay-scroll{
   overflow-y:auto;min-height:0;flex:1;-webkit-overflow-scrolling:touch;
-  scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.16) transparent;
+  scrollbar-width:thin;
 }
 /* An empty panel this tall reads as something broken rather than as a match
    nobody has said anything in yet. */

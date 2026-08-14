@@ -1,5 +1,7 @@
 """The pages the arena serves: the phone's two, and the two on a screen."""
 
+import re
+
 import codes
 
 
@@ -16,6 +18,22 @@ def test_scanning_a_rooms_code_opens_the_join_form(client, phones):
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/html")
     assert "<form" in response.text
+
+
+def test_a_returning_phone_is_never_shown_the_name_box_first(client, phones):
+    # Which of the two identity states to show is not known until the arena
+    # answers, so the page asserts neither until it has. Sequenced after the
+    # room, that answer arrived a measured 596ms late in production against a
+    # fast link, and for all of it a manager the venue already knows was
+    # reading "Name on the board" - long enough to start typing a name that
+    # was about to be replaced by their own.
+    phones.join("Alex Rivera", "alex@example.com")
+    code = client.post("/api/rooms", json={"mode": "solo"}).json()["code"]
+    assert '<div id="boxes" hidden>' in client.get(f"/join/{code}").text
+    # Fired with the room rather than behind it. Source order stands in for
+    # concurrency: what mattered was that it stopped being awaited last.
+    js = client.get("/static/join.js").text
+    assert 'get("/api/players/me")' in js.split("Promise.all")[0]
 
 
 def test_a_stale_code_says_so_rather_than_showing_a_form(client):
@@ -54,6 +72,31 @@ def test_the_pages_share_one_stylesheet(client):
     response = client.get("/static/app.css")
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/css")
+
+
+def test_every_scrolling_surface_inherits_a_scrollbar_the_dark_theme_can_hold(
+        client):
+    # `scrollbar-width:thin` on its own asks the platform for a narrow
+    # scrollbar and takes the platform's colours with it, which on a light OS
+    # is a white track laid down the side of a near-black panel. It showed up
+    # as a bright bar beside the standings on the arena screen, which is the
+    # one surface in this product nobody can scroll away and everybody is
+    # looking at from across a hall.
+    #
+    # Both scrollbar properties inherit, so the colour is stated once at the
+    # root and every scroller picks it up. Asserted at the root rather than
+    # per rule for that reason: the next surface to want a scrollbar cannot
+    # forget it, because there is nothing left to remember.
+    # Comments out first: they discuss these very declarations, and a scan
+    # over the prose would find the thing it is looking for in the sentence
+    # explaining it.
+    css = re.sub(r"/\*.*?\*/", "", client.get("/static/app.css").text,
+                 flags=re.S)
+    root = css.split(":root{", 1)[1].split("}", 1)[0]
+    assert "scrollbar-color:" in root
+    for rule in css.split("scrollbar-width:thin")[1:]:
+        assert "scrollbar-color" not in rule.split("}", 1)[0], (
+            "the root already states it; a second copy is one that can drift")
 
 
 def test_a_screen_left_running_picks_up_a_fixed_stylesheet(client):
