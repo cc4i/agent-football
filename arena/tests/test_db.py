@@ -40,6 +40,37 @@ def test_connect_creates_a_database_that_is_not_there_yet():
                 sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(sql.Identifier(name)))
 
 
+def test_a_missing_role_is_not_mistaken_for_a_missing_database(dsn, monkeypatch):
+    """A role that is not there comes back out, and nothing is created for it.
+
+    libpq words the two the same way, `role "x" does not exist` reading just
+    like `database "x" does not exist`, and only one of them is answered by
+    creating something.
+
+    The wording is not what tells the two paths apart, which is the trap here:
+    swallow the role error and the connect goes on to the maintenance database
+    and fails there with the same sentence, so the message a caller sees is
+    almost identical. What tells them apart is that there is no second attempt,
+    and no attempt at all against a database nobody asked for.
+    """
+    attempts = []
+    dialled = psycopg.connect
+
+    def watched(target, **kwargs):
+        attempts.append(conninfo.conninfo_to_dict(target).get("dbname"))
+        return dialled(target, **kwargs)
+
+    monkeypatch.setattr(psycopg, "connect", watched)
+
+    # Built off the suite's own DSN, so this reaches whichever server the suite
+    # is pointed at, socket or TCP, with only the role changed.
+    nobody = conninfo.make_conninfo(dsn, user="arena_no_such_role")
+    with pytest.raises(psycopg.OperationalError) as refused:
+        db.connect(nobody)
+    assert 'role "arena_no_such_role" does not exist' in str(refused.value)
+    assert attempts == [conninfo.conninfo_to_dict(dsn)["dbname"]]
+
+
 def test_the_schema_creates_every_table(conn):
     names = {row["name"] for row in conn.execute(
         "SELECT tablename AS name FROM pg_catalog.pg_tables WHERE schemaname = 'public'")}

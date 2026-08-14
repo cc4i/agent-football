@@ -12,6 +12,7 @@ survives whoever eventually adds a pool, but the day that happens is the day
 """
 
 import os
+import re
 
 import psycopg
 from psycopg import conninfo, sql
@@ -137,6 +138,12 @@ TABLES = ("result", "event", "profile", "seat", "room", "player")
 # to keep it clear of whatever else might one day take a lock here.
 SCHEMA_LOCK = 0x4152454E41534348
 
+# The one failure `_ensure_database` is allowed to answer by creating something.
+# The quoted name and the word `database` are both load-bearing: libpq words a
+# missing role identically - `role "arena" does not exist` - and a bare `does
+# not exist` therefore matches the one error nothing here can fix.
+MISSING_DATABASE = re.compile(r'database "[^"]*" does not exist')
+
 
 def connect(dsn=None):
     """Open the arena database, creating it if the server has no such database.
@@ -159,15 +166,18 @@ def _ensure_database(dsn):
     is made once by the deploy and this never fires.
 
     libpq reports a missing database as a bare OperationalError with no
-    sqlstate on it, so the message is the only thing there is to match on.
-    Anything else - server down, bad password, wrong socket - is re-raised as
-    it came, because those are not ours to paper over.
+    sqlstate on it, so the message is the only thing there is to match on, and
+    it has to be matched narrowly: `MISSING_DATABASE` is the sentence naming a
+    database and nothing else. Anything else - server down, bad password, wrong
+    socket, a role that is not there - comes back out of here as it came, and
+    the caller sees the server's own words rather than a second failure against
+    the maintenance database one layer further from the cause.
     """
     try:
         psycopg.connect(dsn).close()
         return
     except psycopg.OperationalError as absent:
-        if "does not exist" not in str(absent):
+        if not MISSING_DATABASE.search(str(absent)):
             raise
 
     name = conninfo.conninfo_to_dict(dsn).get("dbname")
