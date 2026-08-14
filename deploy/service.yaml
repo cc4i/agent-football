@@ -42,10 +42,22 @@ spec:
       # the default cuts the room socket mid-match and it reads as a network
       # fault. 3600 is the maximum.
       timeoutSeconds: 3600
-      # Left at the default 80. With one instance this only governs how many
-      # requests are handed over at once, and 50 phones are almost entirely
-      # long-lived sockets rather than requests.
-      containerConcurrency: 80
+      # A hard cap on connections held at once, and a WebSocket holds its slot
+      # for its whole life. With maxScale at one there is no second instance to
+      # take the overflow: Cloud Run queues the next connection and then answers
+      # 429. So this has to clear a full venue rather than a busy moment.
+      #
+      # Count them. Sixty wall sockets, which is MAX_WALL_SOCKETS, plus per room
+      # the screen's own room socket, the pitch iframe's, and one phone per
+      # seat. Over MAX_LIVE_ROOMS that is 60 + 120 x 4, so 540 with nothing
+      # spare. 1000 is Cloud Run's ceiling for one instance, and the arena's own
+      # two limits are what keep the real number underneath it.
+      #
+      # At the default 80 the venue fills to somewhere around the twentieth room
+      # and then the next phone to scan a QR never upgrades /ws/rooms/{code}. It
+      # reads as a network fault on the phone and there is nothing whatsoever in
+      # the arena's log, because the request never reached the arena.
+      containerConcurrency: 1000
       serviceAccountName: arena@__PROJECT__.iam.gserviceaccount.com
       volumes:
         - name: player-state

@@ -71,7 +71,12 @@ def game_services() -> dict:
         answer = httpx.get(f"{arena.base_url()}/health",
                            timeout=ARENA_TIMEOUT_SECONDS)
         up = {"arena": answer.status_code == 200}
-    except httpx.HTTPError:
+    # `InvalidURL` is not an `HTTPError`: it comes straight off `Exception`, so
+    # an ARENA_URL with a bad port or a stray newline in it would escape, this
+    # route would 500, and the header's four-second poll has no `try` around it.
+    # One typo in a .env and the whole header stops updating, agent state and
+    # scoreline included, rather than one dot going dark.
+    except (httpx.HTTPError, httpx.InvalidURL):
         up = {"arena": False}
     for name, port in GAME_SERVICES.items():
         try:

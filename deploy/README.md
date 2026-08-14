@@ -249,9 +249,13 @@ three. That refusal is the image working.
 
 ```bash
 gcloud run services describe arena --region="$REGION"
-gcloud run services logs tail arena --region="$REGION"
+gcloud run services logs read arena --region="$REGION"
+gcloud beta run services logs tail arena --region="$REGION"
 gcloud run revisions list --service=arena --region="$REGION"
 ```
+
+`tail` is `beta` and only `beta`: the GA group has `read` alone, and
+`gcloud run services logs tail` answers `Invalid choice: 'tail'`.
 
 Logs from all three containers arrive interleaved and each line carries the
 container name, which is the quickest way to tell an arena that refused a patch

@@ -45,19 +45,38 @@ uv sync --all-groups
 # it needs psycopg.
 if ! refusal=$(uv run python -c "
 import os
+import re
 import sys
 
 import psycopg
+from psycopg import conninfo
 
 from db import DEFAULT_DSN
 
 dsn = os.environ.get('ARENA_DB', DEFAULT_DSN)
+
+
+def named(text):
+    # Whatever this prints outlives the shell, in a scrollback and in whatever
+    # collects it. The host, the port, the user and the database are the useful
+    # part of a DSN; the password is the part nobody meant to publish. libpq
+    # does the parsing, so no spelling of it is missed.
+    fields = conninfo.conninfo_to_dict(text)
+    if not fields.pop('password', None):
+        return text
+    return conninfo.make_conninfo(**fields)
+
+
 try:
     psycopg.connect(dsn).close()
 except psycopg.OperationalError as problem:
     # A database that does not exist yet is not a problem: the arena makes it.
-    if 'does not exist' not in str(problem):
-        print(f'no Postgres at {dsn}\n  {problem}'.rstrip())
+    # That one sentence only, though. libpq words a missing role the same way -
+    # 'role \"arena\" does not exist' - and waving that through puts uvicorn
+    # back on the traceback this block was added to replace. A connection-time
+    # error carries no sqlstate, so the wording is all there is to go on.
+    if not re.search(r'database \"[^\"]*\" does not exist', str(problem)):
+        print(f'no Postgres at {named(dsn)}\n  {problem}'.rstrip())
         sys.exit(1)
 "); then
     echo "ERROR: ${refusal:-the database preflight did not run}"

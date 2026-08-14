@@ -15,8 +15,14 @@ services:
       POSTGRES_DB: arena
     ports:
       - "5433:5432"
+    # Not /var/lib/postgresql/data, which is where postgres:17 and earlier kept
+    # it. This image sets PGDATA=/var/lib/postgresql/18/docker and declares
+    # VOLUME /var/lib/postgresql, so mounting the old path binds a directory
+    # nothing writes to while the cluster lands in an anonymous volume. That
+    # survives a restart and dies on the first `down`, with `volume ls` still
+    # showing arena-pg sitting there, present and empty.
     volumes:
-      - arena-pg:/var/lib/postgresql/data
+      - arena-pg:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U arena"]
       interval: 5s
