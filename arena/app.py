@@ -374,6 +374,23 @@ class RoomRequest(BaseModel):
         return value
 
 
+class ModeRequest(BaseModel):
+    """A screen reshaping the room it opened. The token is how it says so.
+
+    In the body rather than the query, so it never reaches an access log.
+    """
+
+    mode: str
+    host_token: str
+
+    @field_validator("mode")
+    @classmethod
+    def known_mode(cls, value):
+        if value not in rooms.MODES:
+            raise ValueError(f"mode must be one of {', '.join(rooms.MODES)}")
+        return value
+
+
 class SeatRequest(BaseModel):
     philosophy: str
 
@@ -629,6 +646,23 @@ async def open_room(body: RoomRequest, request: Request):
 async def read_room(code: str, request: Request):
     connection, room = _profile_room(request, code)
     return _snapshot(connection, room["id"], request)
+
+
+@app.post("/api/rooms/{code}/mode")
+async def change_mode(code: str, body: ModeRequest, request: Request):
+    """Turn a waiting room between score attack and head to head.
+
+    The screen's move, not a manager's: whoever opened the room has held its
+    token since, and a phone that could reshape somebody else's lobby could
+    close the dugout its neighbour was reading about. Announced like any other
+    change to a room's shape, so the join form on a phone that has already
+    scanned the code follows it without being asked.
+    """
+    connection, room = _profile_room(request, code)
+    _require_host(room, body.host_token)
+    with _rules():
+        rooms.set_mode(connection, room["id"], body.mode)
+    return _announce(request.app, room, request)
 
 
 @app.get("/api/rooms/{code}/me")
@@ -1096,6 +1130,19 @@ def _player_or_none(request, connection):
 def _require_seated(connection, room_id, player_id):
     if not rooms.is_seated(connection, room_id, player_id):
         raise HTTPException(403, "only somebody in this match can start it")
+
+
+def _require_host(room, offered):
+    """Refuse anybody but the client this room's physics was handed to.
+
+    The same test `_handle_from_host` applies on the socket, in the one place
+    it is needed over HTTP. Compared on bytes in constant time for the reason
+    given at `_same_secret`: the token arrives from outside the process, and a
+    wrong one has to be a wrong one rather than a crash or a stopwatch.
+    """
+    held = room["host_client_id"]
+    if not offered or not held or not _same_secret(_text_bytes(offered), _text_bytes(held)):
+        raise HTTPException(403, "only the screen that opened this room can change it")
 
 
 def join_url(code, request=None):

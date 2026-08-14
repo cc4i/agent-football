@@ -68,6 +68,7 @@ let stripped = "";          // the page the strip is drawing, so it is redrawn o
 let courtRoom = null;       // somebody else's room, open only while they are on
 let leaving = false;        // this page is on its way out to a room that works
 let handover = 0;           // the countdown from a result to the next lobby
+let switching = false;      // a mode change is with the arena, awaiting its word
 const live = new Map();     // code -> what the wall knows about that room
 const tiles = new Map();    // code -> the strip's elements for it
 
@@ -181,8 +182,6 @@ function dress(snapshot) {
   el("code-2").textContent = snapshot.code;
   el("code-3").textContent = snapshot.code;
   el("join-url").textContent = snapshot.join_url;
-  el("where").textContent = snapshot.mode === "solo"
-    ? "Solo · against the house side" : "Head to head";
   el("board").src = "/board";
 
   for (const holder of ["qr", "qr-mini"]) {
@@ -196,6 +195,26 @@ function dress(snapshot) {
   el("role").className = `role-chip${hosting ? "" : " viewer"}`;
   el("role").replaceChildren(document.createElement("i"),
                              document.createTextNode(hosting ? "Hosting" : "Watching"));
+  describe(snapshot);
+}
+
+/**
+ * What this room plays, and whether that is still ours to change.
+ *
+ * Separate from `dress` because the mode is no longer settled when the room is
+ * opened: it is redrawn on every room message, where re-running `dress` would
+ * re-fetch the QR and reload the standings under the lobby on each one.
+ */
+function describe(snapshot) {
+  el("where").textContent = snapshot.mode === "solo"
+    ? "Solo · against the house side" : "Head to head";
+  // Offered only while this tab is holding a room that has not kicked off. A
+  // screen that is only watching has no business reshaping somebody's lobby,
+  // and after the whistle the mode is what the match was scored against.
+  el("mode-switch").hidden = !(hostToken() && snapshot.status === "lobby");
+  for (const mode of ["solo", "versus"]) {
+    el(`mode-${mode}`).setAttribute("aria-pressed", String(snapshot.mode === mode));
+  }
 }
 
 function mine(snapshot) {
@@ -205,6 +224,7 @@ function mine(snapshot) {
   // the arena has already given up on.
   if (snapshot.status === "abandoned") return startFresh(snapshot.mode);
   el("again").hidden = snapshot.status !== "finished";
+  describe(snapshot);
   drawSeats(snapshot);
   if (snapshot.status === "finished" && hostToken()) handOver();
   direct();
@@ -649,6 +669,48 @@ document.addEventListener("keydown", (event) => {
 // pressed this at full time got a solo room and one seat for two managers.
 el("again").addEventListener("click",
                              () => location.assign(`/arena?mode=${(ours && ours.mode) || MODE}`));
+
+/**
+ * Turn the waiting room between score attack and head to head.
+ *
+ * The mode used to live only in the address: a screen opened solo unless
+ * somebody had thought to put `?mode=versus` on the URL, and changing their
+ * mind meant typing one in. On a screen on a wall with a queue in front of it
+ * that is not a way at all, so a venue ran whichever mode the laptop happened
+ * to be opened in all evening.
+ *
+ * The room is turned rather than replaced, so the code stays the one on the
+ * wall, the QR beside it goes on pointing at the same match, and the manager
+ * already filling in the join form is not dropped on their way in.
+ */
+async function chooseMode(mode) {
+  if (switching || !ours || ours.mode === mode) return;
+  switching = true;
+  el("mode-switch").setAttribute("aria-busy", "true");
+  try {
+    // The arena announces this to our own socket as well, but this is the tab
+    // that asked: it should not have to watch its own click go to the arena
+    // and come back before the pill moves.
+    mine(await post(`/api/rooms/${code}/mode`, { mode, host_token: hostToken() }));
+    problem.hidden = true;
+    // The address is what "New room" and the full-time handover fall back on
+    // when there is no room left to read a mode from, so it follows the choice.
+    history.replaceState(null, "", `/arena?room=${code}&mode=${mode}`);
+  } catch (failure) {
+    if (!(failure instanceof Refused)) throw failure;
+    say(failure.message);
+    // The arena refused, and it is still the authority on what this room is:
+    // put the pill back on the mode the room actually has.
+    describe(ours);
+  } finally {
+    switching = false;
+    el("mode-switch").removeAttribute("aria-busy");
+  }
+}
+
+for (const mode of ["solo", "versus"]) {
+  el(`mode-${mode}`).addEventListener("click", () => chooseMode(mode));
+}
 
 // A seventh match is a real venue, and the six on the strip must not be the
 // same six all evening.

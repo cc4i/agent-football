@@ -176,6 +176,71 @@ def test_an_unknown_philosophy_is_refused(conn, alex):
         rooms.take_seat(conn, room["id"], "blue", alex, "park the bus")
 
 
+def test_a_waiting_room_can_be_turned_head_to_head_and_back(conn):
+    room = rooms.create_room(conn, "solo")
+    rooms.set_mode(conn, room["id"], "versus")
+    assert rooms.by_code(conn, room["code"])["mode"] == "versus"
+    rooms.set_mode(conn, room["id"], "solo")
+    assert rooms.by_code(conn, room["code"])["mode"] == "solo"
+
+
+def test_changing_the_mode_keeps_the_code_and_the_token(conn):
+    room = rooms.create_room(conn, "solo")
+    rooms.set_mode(conn, room["id"], "versus")
+    after = rooms.by_code(conn, room["code"])
+    assert after["code"] == room["code"]
+    assert after["host_client_id"] == room["host_client_id"]
+
+
+def test_the_manager_already_in_the_blue_dugout_keeps_their_seat(conn, alex):
+    room = rooms.create_room(conn, "solo")
+    rooms.take_seat(conn, room["id"], "blue", alex, "high press")
+    rooms.set_ready(conn, room["id"], "blue", True)
+    rooms.set_mode(conn, room["id"], "versus")
+    assert rooms.team_of(conn, room["id"], alex) == "blue"
+    # And the room now waits for the dugout it did not have a moment ago.
+    assert not rooms.can_kick_off(conn, room["id"])
+
+
+def test_a_room_opened_solo_can_seat_a_red_manager_once_it_is_versus(conn, alex, sam):
+    room = rooms.create_room(conn, "solo")
+    rooms.take_seat(conn, room["id"], "blue", alex, "high press")
+    with pytest.raises(rooms.RoomError, match="only a blue dugout"):
+        rooms.take_seat(conn, room["id"], "red", sam, "counter")
+    rooms.set_mode(conn, room["id"], "versus")
+    rooms.take_seat(conn, room["id"], "red", sam, "counter")
+    assert rooms.team_of(conn, room["id"], sam) == "red"
+
+
+def test_going_solo_will_not_evict_the_red_dugout(conn, alex, sam):
+    room = rooms.create_room(conn, "versus")
+    rooms.take_seat(conn, room["id"], "red", sam, "counter")
+    with pytest.raises(rooms.RoomError, match="somebody is in the red dugout"):
+        rooms.set_mode(conn, room["id"], "solo")
+    assert rooms.by_code(conn, room["code"])["mode"] == "versus"
+    assert rooms.team_of(conn, room["id"], sam) == "red"
+
+
+def test_a_match_already_kicked_off_keeps_the_mode_it_was_scored_against(conn, alex):
+    room = live_solo(conn, alex)
+    with pytest.raises(rooms.RoomError, match="already started"):
+        rooms.set_mode(conn, room["id"], "versus")
+
+
+def test_a_mode_that_is_not_a_mode_is_refused(conn):
+    room = rooms.create_room(conn, "solo")
+    with pytest.raises(rooms.RoomError, match="mode must be"):
+        rooms.set_mode(conn, room["id"], "penalties")
+
+
+def test_setting_the_mode_a_room_already_has_is_nothing_at_all(conn, alex):
+    room = rooms.create_room(conn, "solo")
+    rooms.take_seat(conn, room["id"], "blue", alex, "high press")
+    rooms.set_mode(conn, room["id"], "solo")
+    assert rooms.by_code(conn, room["code"])["mode"] == "solo"
+    assert rooms.team_of(conn, room["id"], alex) == "blue"
+
+
 def test_a_solo_room_kicks_off_once_its_one_manager_is_ready(conn, alex):
     room = rooms.create_room(conn, "solo")
     rooms.take_seat(conn, room["id"], "blue", alex, "tiki-taka")

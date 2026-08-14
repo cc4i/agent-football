@@ -221,6 +221,37 @@ def set_ready(conn, room_id, team, ready):
     conn.commit()
 
 
+def set_mode(conn, room_id, mode):
+    """Change which dugouts a room still in its lobby is going to need.
+
+    A screen opens a room before it knows who is going to walk up to it, so the
+    mode it chose then is a guess about the next person through the door.
+    Changing it here rather than opening a replacement room is what keeps the
+    guess cheap: the code stays the one printed on the wall, the QR beside it
+    goes on pointing at the same match, and nobody halfway through the join
+    form is dropped. Both dugouts have had profiles since `create_room`,
+    precisely so a room can gain a red manager it did not open expecting.
+
+    Only in the lobby. After the whistle the mode is what the match was scored
+    against, and the boards are keyed on it.
+    """
+    if mode not in MODES:
+        raise RoomError(f"mode must be one of {', '.join(MODES)}")
+    room = _room(conn, room_id)
+    if room["status"] != "lobby":
+        raise RoomError("that match has already started")
+    if room["mode"] == mode:
+        return
+    # A solo room has no red dugout, so becoming one would have to evict
+    # whoever is sitting in this one's. The manager who walked up second is not
+    # the screen's to remove; whoever wants score attack can ask them to stand.
+    if mode == "solo" and conn.execute(
+            "SELECT 1 FROM seat WHERE room_id = %s AND team = 'red'", (room_id,)).fetchone():
+        raise RoomError("somebody is in the red dugout, and a solo room has only a blue one")
+    conn.execute("UPDATE room SET mode = %s WHERE id = %s", (mode, room_id))
+    conn.commit()
+
+
 def can_kick_off(conn, room_id):
     """True when every dugout this mode needs is filled and ready."""
     room = _room(conn, room_id)

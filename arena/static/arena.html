@@ -19,6 +19,14 @@
       <span class="where" id="where">Arena</span>
     </div>
     <div class="bar-right">
+      <!-- The screen guessed a mode when it opened this room, before anybody
+           had walked up to it. This is how it changes its mind. -->
+      <div class="mode-switch" id="mode-switch" role="group"
+           aria-label="What this room plays" hidden>
+        <button class="mode-pick" type="button" id="mode-solo" aria-pressed="true">Solo</button>
+        <button class="mode-pick" type="button" id="mode-versus"
+                aria-pressed="false">Head to head</button>
+      </div>
       <button class="btn ghost slim" id="again" type="button" hidden>New room</button>
       <span class="dir-chip" id="director" hidden><i></i><span id="directing">Auto</span></span>
       <span class="role-chip" id="role"><i></i>Hosting</span>
