@@ -1,0 +1,35 @@
+[project]
+name = "futsal-worldcup-grounds"
+version = "0.1.0"
+description = "One Chromium holding every match in the venue."
+requires-python = ">=3.14"
+dependencies = [
+    # Only for the health check Cloud Run insists on. Nothing else is served.
+    "fastapi==0.136.3",
+    "uvicorn==0.48.0",
+    # The control socket to the arena.
+    "websockets==17.0.1",
+    # The browser the matches are actually played in.
+    "playwright==1.56.0",
+    # Reading `.env`, the way the arena, the game and the dugout already do.
+    "python-dotenv==1.2.2",
+]
+
+# `main.py` imports `supervisor` as a top-level module from this directory, so
+# there is nothing to build or install.
+[tool.uv]
+package = false
+
+[dependency-groups]
+dev = [
+    "pytest==8.4.2",
+    "pytest-asyncio==1.2.0",
+    "pytest-timeout==2.4.0",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+# Nothing in here should ever take this long. A test that does is wedged on
+# something it is waiting for, and a hang is worse than a failure.
+timeout = 30
