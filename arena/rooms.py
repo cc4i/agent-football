@@ -175,7 +175,15 @@ def append_event(conn, room_id, kind, payload, match_ms=None):
 
     Scoring is recomputed from this log and never from a submitted total, so
     it is append-only and numbered per room rather than globally.
+
+    The room row is locked first because the number comes from MAX(seq) + 1 and
+    the four specialists of one shout write at the same moment. Two of them
+    reading the same maximum is not a lost update, it is a UNIQUE violation and
+    a 500 back to an agent that did nothing wrong. Today's single connection
+    already serialises this; the lock is what makes that a property of the
+    statement rather than of how the arena happens to be deployed.
     """
+    conn.execute("SELECT id FROM room WHERE id = %s FOR UPDATE", (room_id,)).fetchone()
     row = conn.execute(
         "INSERT INTO event (room_id, seq, kind, payload_json, match_ms, wall_ts) "
         "SELECT %s, COALESCE(MAX(seq), 0) + 1, %s, %s, %s, %s FROM event WHERE room_id = %s "
