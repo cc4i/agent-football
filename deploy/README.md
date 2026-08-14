@@ -58,11 +58,16 @@ gcloud services enable \
     secretmanager.googleapis.com \
     artifactregistry.googleapis.com \
     aiplatform.googleapis.com \
-    cloudbuild.googleapis.com
+    cloudbuild.googleapis.com \
+    compute.googleapis.com \
+    servicenetworking.googleapis.com
 ```
 
 `cloudbuild` is in the list because the images are built there rather than on
-the laptop. See "Building somewhere else" below for why.
+the laptop. See "Building somewhere else" below for why. `compute` and
+`servicenetworking` are there because the database has no public IP: the first
+allocates the range it lives in and the second peers that range to your
+network.
 
 ### The image repository
 
@@ -73,13 +78,56 @@ gcloud artifacts repositories create futsal \
 
 `futsal` is the name `service.yaml` and `cloudbuild.yaml` both spell out.
 
+### The private connection
+
+The VPC and its subnet are assumed to exist. What does not exist yet is the
+block the managed instance lives in:
+
+```bash
+export NETWORK=default    # the VPC the database and the service share
+export SUBNET=default     # in $REGION, where the service gets its interface
+
+gcloud compute addresses create "google-managed-services-${NETWORK}" \
+    --global --purpose=VPC_PEERING --prefix-length=16 \
+    --network="projects/${PROJECT}/global/networks/${NETWORK}"
+
+gcloud services vpc-peerings connect \
+    --service=servicenetworking.googleapis.com \
+    --ranges="google-managed-services-${NETWORK}" \
+    --network="$NETWORK" --project="$PROJECT"
+```
+
+A Cloud SQL instance with a private address does not sit in your network. It
+sits in Google's, and its address comes out of a range you allocate in yours
+and then hand to service networking, which peers the two. That is what private
+services access is, and it is the reason the range is created before the
+instance rather than after.
+
+There is one such connection per network and every managed service shares it,
+so check before adding a second range:
+
+```bash
+gcloud services vpc-peerings list --network="$NETWORK" --project="$PROJECT"
+```
+
+If that already answers, both commands above are already done. Deleting the
+connection later cuts private connectivity to everything using it, not only to
+this instance.
+
+The subnet has to be in `$REGION` and no smaller than a `/26`: Direct VPC
+egress puts the service's own interface in it, and Cloud Run will not admit a
+revision naming a subnet in another region.
+
 ### The database
 
 ```bash
 gcloud sql instances create arena-pg \
     --database-version=POSTGRES_18 \
     --region="$REGION" \
-    --tier=db-g1-small
+    --tier=db-g1-small \
+    --edition=enterprise \
+    --network="projects/${PROJECT}/global/networks/${NETWORK}" \
+    --no-assign-ip
 
 gcloud sql databases create arena --instance=arena-pg
 
@@ -91,9 +139,38 @@ gcloud sql users create arena --instance=arena-pg --password="$DB_PASSWORD"
 phones is still one connection from one instance, so the tier is about how long
 you want to keep the history rather than about the load.
 
-The arena reaches it over the Unix socket the `cloudsql-instances` annotation
-mounts, which is why `ARENA_DB` in `service.yaml` names
-`/cloudsql/PROJECT:REGION:arena-pg` as its host and no port at all.
+`--edition=enterprise` is load-bearing rather than decoration. Anything from
+Postgres 16 up defaults to the Enterprise Plus edition, which only sells
+dedicated-core machines, and the create fails with `Invalid Tier (db-g1-small)
+for (ENTERPRISE_PLUS) Edition`. Shared cores live in the Enterprise edition
+only; Postgres 18 runs happily there.
+
+`--no-assign-ip` is the whole point of the section above it, and `--network` is
+what makes it survivable: drop the second and the instance has no address at
+all.
+
+There is no `--ssl-mode` here and no `sslmode` in `ARENA_DB`, which is a
+decision rather than an oversight: a private address is not an encrypted one,
+and this connection is not encrypted. What is on the wire is the query traffic
+- display names, masked emails, results - between two ends of one VPC. The
+password is not among it, because Postgres 18 authenticates with SCRAM rather
+than by sending it. Encrypting it is `--ssl-mode=ENCRYPTED_ONLY` on the
+instance and `?sslmode=require` in `ARENA_DB`, together and not separately;
+pinning the instance's CA and asking for `verify-ca` is the further step, for
+the day the wire has to be trusted rather than merely private.
+
+The arena reaches the instance by TCP on that private address, which is why
+`service.yaml` carries `network-interfaces` and no `cloudsql-instances`. The
+socket that annotation mounts is the Cloud SQL Auth Proxy and the proxy dials
+the public address this instance does not have. `deploy.sh` reads the private
+one off the instance on every deploy and renders it into `ARENA_DB`, so it is
+written down nowhere and an instance rebuilt between workshops needs no edit.
+
+What you give up is reaching the database from the laptop. A private address is
+routable from inside the VPC and nowhere else, so `gcloud sql connect` and a
+local `psql` both have nothing to dial. Run SQL from Cloud SQL Studio in the
+console instead - it goes through the Admin API rather than the network, works
+against a private-only instance, and needs `roles/cloudsql.studioUser`.
 
 ### The four secrets
 
@@ -120,33 +197,59 @@ player into a stranger. Set it once.
 ### The service account
 
 ```bash
-gcloud iam service-accounts create arena --display-name="The futsal arena"
+gcloud iam service-accounts create futsal-arena --display-name="The futsal arena"
 
-SA="arena@${PROJECT}.iam.gserviceaccount.com"
-for role in roles/cloudsql.client \
-            roles/secretmanager.secretAccessor \
+SA="futsal-arena@${PROJECT}.iam.gserviceaccount.com"
+for role in roles/secretmanager.secretAccessor \
             roles/aiplatform.user \
             roles/logging.logWriter; do
     gcloud projects add-iam-policy-binding "$PROJECT" \
-        --member="serviceAccount:${SA}" --role="$role"
+        --member="serviceAccount:${SA}" --role="$role" --condition=None
 done
 ```
 
-Four roles, one per thing the instance touches: the database socket, the
-secrets it starts with, Vertex for the chain, and its own logs.
+`futsal-arena` and not `arena`, which is the name everything else here uses: an
+account ID has to be at least six characters and `arena` is five, so the create
+answers `The account ID "arena" does not have a length between 6 and 30`.
+`service.yaml`'s `serviceAccountName` spells the longer name.
+
+`--condition=None` is the difference between a loop that runs and a loop that
+stops three times to ask a question. A project whose policy already holds one
+conditional binding - Cloud Build's connection setup leaves one behind - makes
+the flag mandatory: without it gcloud will not guess that you meant an
+unconditional binding, and it prompts for the condition instead. Under
+`deploy.sh` or any other script that is a hang rather than a prompt.
+
+Three roles, one per thing the instance touches: the secrets it starts with,
+Vertex for the chain, and its own logs. The database is not one of them.
+`roles/cloudsql.client` is the Auth Proxy's permission - it authorises the
+connector to open the tunnel - and a TCP connection to a private address with a
+password in `PGPASSWORD` never asks the Cloud SQL API anything. Add it back the
+day the socket comes back, and not before.
+
+The interface into the VPC is the Cloud Run service agent's business rather
+than this account's, and in a single project it already holds the role for it.
+In a Shared VPC it needs `roles/compute.networkUser` in the host project.
 
 ## Deploying
 
 ```bash
 export PROJECT=your-project-id
 export REGION=europe-west1
+export NETWORK=default        # both default to `default` if unset
+export SUBNET=default
 deploy/deploy.sh
 ```
 
 It warns if the tree is dirty, asks before dropping the live matches, builds
-the three images in Cloud Build, renders `service.yaml` with your project,
-region and the short commit as the tag, replaces the service, and prints the
-URL.
+the three images in Cloud Build, reads the database's private address, renders
+`service.yaml` with your project, region, network, subnet, that address and the
+short commit as the tag, replaces the service, and prints the URL.
+
+It stops before the deploy if the address it read is a public one, because a
+public address is the one thing that renders cleanly here and then cannot be
+reached: `private-ranges-only` egress does not carry it, and the arena spends
+its startup timing out against a route nothing in the log names.
 
 ### Letting the phones in
 
@@ -240,9 +343,10 @@ DELETE FROM result WHERE player_id IN (
     SELECT id FROM player WHERE email_masked LIKE '%@rehearsal.example.com');
 ```
 
-That leaves the fifty rooms and their event logs behind, which nothing renders
-and nothing reaps. They are a few thousand rows and the tier will not notice,
-but they are there.
+From Cloud SQL Studio in the console, not from here: the instance has no public
+address, so the laptop has no route to it. That leaves the fifty rooms and their
+event logs behind, which nothing renders and nothing reaps. They are a few
+thousand rows and the tier will not notice, but they are there.
 
 ## If the first revision never goes ready
 
@@ -258,6 +362,15 @@ loopback bind is not reachable. Widen that one image's bind to `0.0.0.0`
 (`game/Dockerfile.coach`'s `--host`, or `CAPTAIN_HOST` in
 `game/Dockerfile.captain`), redeploy, and keep the deploy log as the evidence
 for which way it went.
+
+If the one that fails is `arena`, the database is the first thing to rule out.
+Its `/health` opens a connection, so an unreachable database reads as a startup
+probe that never passes, and the log has psycopg waiting on a private address
+rather than anything about networking. Three things make that address
+unreachable and all three are in this file: the peering
+(`gcloud services vpc-peerings list --network="$NETWORK"`), the subnet being in
+`$REGION` and in the same network as the peering, and the instance still having
+no public address for `deploy.sh` to have picked up instead.
 
 Widen only the one that failed, and do not pre-empt it. The arena's `0.0.0.0`
 is a different case and stays: Cloud Run's container contract requires the

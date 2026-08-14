@@ -2,11 +2,16 @@
 # somebody's shell history. Multi-container services cannot be expressed on the
 # `gcloud run deploy` command line at all.
 #
-# The three placeholders are rendered by deploy/deploy.sh. They are spelt with
-# a pair of underscores on each side because a bare PROJECT is a substring of
+# The placeholders are rendered by deploy/deploy.sh. They are spelt with a pair
+# of underscores on each side because a bare PROJECT is a substring of
 # GOOGLE_CLOUD_PROJECT below, and a global substitution would rewrite the
 # variable's name along with its value. Vertex would then have no project, and
 # nothing would say so until the first shout failed at the model call.
+#
+# __DB_HOST__ is not a name you set: deploy.sh reads the database's private
+# address off the instance and renders it here, because the address is assigned
+# when the instance is made and is the one thing in this file that is not known
+# until then.
 #
 #   deploy/deploy.sh          # renders this and replaces the service
 apiVersion: serving.knative.dev/v1
@@ -32,7 +37,19 @@ spec:
         # Throttled, a quiet room is abandoned late and a shout in flight stalls.
         run.googleapis.com/cpu-throttling: "false"
         run.googleapis.com/startup-cpu-boost: "true"
-        run.googleapis.com/cloudsql-instances: __PROJECT__:__REGION__:arena-pg
+        # The database has no public IP, so the arena reaches it over the VPC
+        # and not over the socket `cloudsql-instances` mounts. That socket is
+        # the Cloud SQL Auth Proxy and the proxy's route is the public one; a
+        # private-only instance is reached by TCP on its private address, which
+        # is what Direct VPC egress is here to make routable.
+        run.googleapis.com/network-interfaces: '[{"network":"__NETWORK__","subnetwork":"__SUBNET__"}]'
+        # private-ranges-only, not all-traffic: the database is the only thing
+        # in the VPC worth reaching, and Vertex, Secret Manager and Artifact
+        # Registry keep their default route out. all-traffic would send those
+        # through the subnet too, where they need Private Google Access or a
+        # Cloud NAT that nothing here creates, and the symptom is a shout that
+        # hangs at the model call rather than anything that mentions egress.
+        run.googleapis.com/vpc-access-egress: private-ranges-only
         # The arena takes the traffic. The captain has to be up before the coach
         # can hand a shout to it, and the coach before the arena proxies to it.
         run.googleapis.com/container-dependencies: '{"arena":["coach"],"coach":["captain"]}'
@@ -58,7 +75,9 @@ spec:
       # reads as a network fault on the phone and there is nothing whatsoever in
       # the arena's log, because the request never reached the arena.
       containerConcurrency: 1000
-      serviceAccountName: arena@__PROJECT__.iam.gserviceaccount.com
+      # futsal-arena, not arena: six characters is the minimum for an account
+      # ID and arena is five.
+      serviceAccountName: futsal-arena@__PROJECT__.iam.gserviceaccount.com
       volumes:
         - name: player-state
           emptyDir:
@@ -85,8 +104,13 @@ spec:
           env:
             - name: ARENA_ENV
               value: production
+            # A private address and a port, rather than the socket path this
+            # used to name. No `sslmode`, so the connection is unencrypted and
+            # both ends stay inside the VPC. `?sslmode=require` here and
+            # --ssl-mode=ENCRYPTED_ONLY on the instance is the pair that
+            # changes that, and neither works alone.
             - name: ARENA_DB
-              value: postgresql://arena@/arena?host=/cloudsql/__PROJECT__:__REGION__:arena-pg
+              value: postgresql://arena@__DB_HOST__:5432/arena
             - name: ARENA_COACH_URL
               value: http://127.0.0.1:8000
             - name: PGPASSWORD
