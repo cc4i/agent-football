@@ -197,10 +197,10 @@ MAX_REPLAY_EVENTS = 500
 # into a several-megabyte download.
 MAX_BOARD_ROWS = 100
 
-# How long a live room may go without a word from the screen running it before
-# the arena gives up on it. Backgrounding a tab stops its frames, so this is
-# also the grace a host gets to come back: long enough to answer the door,
-# short enough that the wall is not full of matches nobody is playing.
+# How long a room may go without a word from the screen holding it before the
+# arena gives up on it. Backgrounding a tab stops its frames, so this is also
+# the grace a host gets to come back: long enough to answer the door, short
+# enough that the wall is not full of matches nobody is playing.
 HOST_GONE_SECONDS = 30
 # How often to look. A dead room should leave the wall while somebody is still
 # standing in front of it, and the sweep costs one query.
@@ -208,6 +208,9 @@ SWEEP_SECONDS = 5
 # What the phones are told. It goes in the log with the event, so a manager who
 # reloads afterwards is still told why their match stopped.
 HOST_GONE_REASON = "The screen running this match stopped reporting, so it was abandoned."
+# The same thing before a whistle, which needs different words: nothing had
+# kicked off, so nothing was abandoned in the sense the sentence above means.
+LOBBY_GONE_REASON = "The screen that opened this room has gone. Scan a code for another."
 
 # What a QR code should encode. Unset, it is worked out from the request, which
 # is what lets a first deploy be a first deploy: Cloud Run does not tell a
@@ -1306,7 +1309,7 @@ def _handle_from_host(message, connection, match_bus, room, client_id, reporting
     if not isinstance(message, dict):
         return
     kind = message.get("type")
-    if kind not in ("host.state", "host.event"):
+    if kind not in ("host.here", "host.state", "host.event"):
         return
     # Re-read the room: sockets are usually open well before the whistle, and
     # both the host token and the status are checked against it as it is now.
@@ -1315,15 +1318,20 @@ def _handle_from_host(message, connection, match_bus, room, client_id, reporting
     if not client_id or not host_client_id or not _same_secret(_text_bytes(client_id),
                                                                _text_bytes(host_client_id)):
         return
+    # The screen is here. Recorded before the message is picked over, because a
+    # frame the arena goes on to refuse is still proof that somebody is on the
+    # other end of the socket, and recorded whatever the room's status, because
+    # a room spends every second before the whistle in its lobby and a lobby
+    # with nobody behind it is the one place a phone must never be sent.
+    reporting.stamp(connection, current["id"])
+    # A screen with nothing to report yet. Saying so was the whole message.
+    if kind == "host.here":
+        return
     # Holding the token is no longer proof the match has started, since the
     # creator has held it since they opened the room. Nothing reaches the log
     # or the wall until a manager has actually kicked off.
     if current["status"] != "live":
         return
-    # The host is here. That is worth recording before the message is picked
-    # over, because a frame the arena goes on to refuse is still proof that
-    # somebody is on the other end of the socket running this match.
-    reporting.stamp(connection, current["id"])
 
     payload = message.get("payload")
     if payload is not None and not isinstance(payload, dict):
@@ -1404,12 +1412,21 @@ def _end_match(connection, match_bus, room, event_kind, socket=None):
 
 
 def _give_up_on_the_missing(connection, match_bus, now):
-    """Abandon live rooms whose host has stopped reporting. Returns their codes.
+    """Close rooms whose screen has stopped reporting. Returns their codes.
 
     A room only leaves "live" when somebody blows a whistle on it, and a laptop
     closed mid-match never does. Without this, one shut lid leaves a frozen
     tile on every wall in the venue for the rest of the evening, and the two
     managers watch a clock that has stopped and are never told why.
+
+    Waiting rooms are swept on the same rule, and for a sharper reason. A lobby
+    is advertised to every phone with no room of its own, and its screen is the
+    only thing that can ever run it: close that tab and the room becomes a code
+    that will never do anything, still sitting at the top of everybody's list
+    saying "nobody in it yet". A manager took one of those in production, read
+    "Score attack", took the dugout, kicked off, and watched a clock that never
+    started for thirty seconds before the arena gave up on the match they were
+    still looking at.
 
     Liveness is a column rather than a dict in memory because a deploy runs two
     instances at once for a few seconds. An arena that only trusted what it had
@@ -1420,7 +1437,7 @@ def _give_up_on_the_missing(connection, match_bus, now):
     it rather than abandoned, which is the same rule one sweep late.
     """
     gone = []
-    for room in rooms.live_with_liveness(connection):
+    for room in rooms.hosted_with_liveness(connection):
         if room["last_heard_at"] is None:
             # From this sweep's own clock rather than a `time.time()` of its
             # own: the grace is measured against `now`, so `now` is what it
@@ -1431,28 +1448,120 @@ def _give_up_on_the_missing(connection, match_bus, now):
         if now - room["last_heard_at"] <= HOST_GONE_SECONDS:
             continue
         full = rooms.by_code(connection, room["code"])
-        said = {"reason": HOST_GONE_REASON}
+        waiting = room["status"] == "lobby"
+        said = {"reason": LOBBY_GONE_REASON if waiting else HOST_GONE_REASON}
         seq = rooms.append_event(connection, full["id"], "abandoned", said)
         match_bus.publish(room_topic(room["code"]),
                           {"type": "event", "seq": seq, "kind": "abandoned",
                            "match_ms": None, "payload": said})
-        # No socket to pass: this is announcing a room that has just been
-        # abandoned, and a wrong but inert URL on a dead room beats an
-        # attacker-settable one anywhere.
-        _end_match(connection, match_bus, full, "abandoned")
-        logger.info("room %s abandoned: nothing from its host in %ss",
-                    room["code"], HOST_GONE_SECONDS)
+        # No socket to pass here or below: this is announcing a room that has
+        # just been given up on, and a wrong but inert URL on a dead room beats
+        # an attacker-settable one anywhere.
+        if waiting:
+            rooms.close_lobby(connection, full["id"])
+            match_bus.publish(room_topic(room["code"]),
+                              {"type": "room", **_snapshot(connection, full["id"])})
+        else:
+            _end_match(connection, match_bus, full, "abandoned")
+        logger.info("room %s abandoned: nothing from its screen in %ss (%s)",
+                    room["code"], HOST_GONE_SECONDS,
+                    "waiting" if waiting else "live")
         gone.append(room["code"])
     return gone
 
 
+def _tell_our_own_rooms_it_is_over(connection, match_bus, announced):
+    """Tell this instance's sockets about endings decided elsewhere.
+
+    The bus is in-process, and the arena runs one instance so that it can be.
+    Cloud Run treats that as a target rather than a promise: replacing a
+    revision, or merely thinking about it, leaves two containers up, and both
+    of them run the sweep. The quiet one serves no requests, so it holds no
+    sockets -- but it wins the race roughly half the time. It writes the
+    abandonment, logs it, and publishes it to a bus with nobody on it. The
+    phones, all of them on the other container, watch a clock that has stopped
+    and are told nothing at all. Observed in production, twice in one evening.
+
+    So each instance answers for its own sockets rather than for the decision:
+    whatever the database says a room's status is, the clients watching that
+    room *here* have been told it. `announced` is what this instance has
+    already said, and it is pruned to the rooms still being watched, so it
+    stays the size of the venue rather than of the evening.
+
+    Only the ending. Everything else -- the whistle, the shouts, the frames --
+    is published by the request that caused it, and requests are served by the
+    instance the client is already on. An ending is the one thing decided with
+    no request behind it, and the one thing with no later message to correct
+    it: a match that is over stays over, silently, forever.
+
+    Not the reason, either. The dugout reads that out of the event log as soon
+    as a snapshot tells it the match is finished, which picks up anything else
+    that went missing on the way rather than only the last thing.
+
+    A match ended normally, here, is therefore announced twice: once by the
+    whistle and once by the next sweep, five seconds behind it. Knowing the
+    difference would mean carrying "who published this" through every path that
+    can end a room, to save a repaint of a screen that is already showing the
+    right thing. Clients redraw from snapshots on every reconnect as it is.
+    """
+    watched = {topic.split(":", 1)[1] for topic in match_bus.topics()
+               if topic.startswith("room:")}
+    # A room nobody here is watching any more cannot be behind on anything.
+    announced.intersection_update(watched)
+    told = []
+    for code in sorted(watched - announced):
+        room = rooms.by_code(connection, code)
+        if room is None or room["status"] in ("lobby", "live"):
+            continue
+        announced.add(code)
+        match_bus.publish(room_topic(code),
+                          {"type": "room", **_snapshot(connection, room["id"])})
+        logger.info("room %s is %s and its watchers here had not been told",
+                    code, room["status"])
+        told.append(code)
+    return told
+
+
+def _tell_our_own_wall_who_is_playing(connection, match_bus, last):
+    """Re-send the wall its list when the database no longer agrees with it.
+
+    The same problem as the rooms above, one screen further out. A match that
+    ended on the other instance comes off that instance's walls and stays on
+    this one's, and the wall is pushed to rather than polling: it reads the
+    list once, when it connects, and then stands in a venue for the evening.
+
+    Returns the list this instance now stands behind, which the sweep holds on
+    to until the next one. Nothing is sent while nobody is watching, so an
+    arena with no wall up does not carry a list around all evening.
+    """
+    if match_bus.subscriber_count(WALL) == 0:
+        return last
+    playing = rooms.live(connection)
+    if playing == last:
+        return last
+    match_bus.publish(WALL, {"type": "wall", "rooms": playing})
+    return playing
+
+
 async def _watch_for_the_missing(fastapi_app):
-    """Run the sweep above for as long as the arena is up."""
+    """Run the three sweeps above for as long as the arena is up."""
+    # Endings this instance has already put on its own wire. Seeded by the
+    # sweep rather than left empty, so a room given up on here is not then
+    # announced a second time by the reconciliation immediately below it.
+    announced = set()
+    # And what its walls were last told. Unknown at first, so the first sweep
+    # after a wall connects re-sends a list that wall already has; every sweep
+    # after that is silent until something actually changes.
+    wall = None
     while True:
         await asyncio.sleep(SWEEP_SECONDS)
         try:
-            _give_up_on_the_missing(fastapi_app.state.conn, fastapi_app.state.bus,
-                                    time.time())
+            announced.update(_give_up_on_the_missing(
+                fastapi_app.state.conn, fastapi_app.state.bus, time.time()))
+            _tell_our_own_rooms_it_is_over(fastapi_app.state.conn,
+                                           fastapi_app.state.bus, announced)
+            wall = _tell_our_own_wall_who_is_playing(
+                fastapi_app.state.conn, fastapi_app.state.bus, wall)
         except Exception:
             # One bad sweep must not take the watchdog down for the life of the
             # process: every room after it would then hang live forever.

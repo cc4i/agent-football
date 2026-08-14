@@ -237,7 +237,8 @@ def start_match(conn, room_id):
         raise RoomError("a match needs a host")
     if not can_kick_off(conn, room_id):
         raise RoomError("not every dugout is ready")
-    conn.execute("UPDATE room SET status = 'live' WHERE id = %s", (room_id,))
+    conn.execute("UPDATE room SET status = 'live', started_at = %s WHERE id = %s",
+                 (time.time(), room_id))
     conn.commit()
 
 
@@ -248,6 +249,21 @@ def finish_match(conn, room_id, status="finished"):
         raise RoomError("only a live match can end")
     conn.execute("UPDATE room SET status = %s, finished_at = %s WHERE id = %s",
                  (status, time.time(), room_id))
+    conn.commit()
+
+
+def close_lobby(conn, room_id):
+    """Shut a room whose screen went away before anybody blew a whistle.
+
+    Not `finish_match`, because there was no match: this room never went live
+    and there is nothing to score. The status is the same word all the same,
+    because "abandoned" is the honest one and the alternative is inventing a
+    fourth ending that every reader of this table would then have to learn.
+    """
+    if _room(conn, room_id)["status"] != "lobby":
+        raise RoomError("only a room still in its lobby can be closed")
+    conn.execute("UPDATE room SET status = 'abandoned', finished_at = %s WHERE id = %s",
+                 (time.time(), room_id))
     conn.commit()
 
 
@@ -308,6 +324,14 @@ def snapshot(conn, room_id):
         "code": room["code"],
         "mode": room["mode"],
         "status": room["status"],
+        # Whether anything was ever played in here, which the status cannot say
+        # on its own: a room whose screen went away is "abandoned" whether it
+        # was mid-match or had been sitting empty since it opened, and a dugout
+        # showing 0-0 and an empty pitch for the second one is describing a
+        # match that never happened. Live and finished rooms are counted in
+        # regardless of the column, which is NULL on every room that predates
+        # it and would otherwise re-describe an evening's history.
+        "started": room["started_at"] is not None or room["status"] in ("live", "finished"),
         "ranked": bool(room["ranked"]),
         "seats": {
             row["team"]: {
@@ -411,12 +435,26 @@ def heard_from(conn, room_id, when=None):
     conn.commit()
 
 
-def live_with_liveness(conn):
-    """Every live room's id, code and last report, for the watchdog."""
+def hosted_with_liveness(conn):
+    """Every room a screen should be holding, with its last report.
+
+    Waiting rooms as well as running ones. A room is only as real as the tab
+    that opened it: that tab holds the physics, and the token proving it may
+    lives in the tab's sessionStorage and dies with it, so a lobby whose screen
+    has closed cannot be rescued by anybody. It is a code that will never do
+    anything. Left in the table it goes on being offered to every phone in the
+    building, and the manager who takes the seat kicks off into nothing.
+
+    Not the workshop, which sits in its lobby for the life of the deployment
+    with no screen behind it by design.
+    """
     return [
-        {"id": row["id"], "code": row["code"], "last_heard_at": row["last_heard_at"]}
+        {"id": row["id"], "code": row["code"], "status": row["status"],
+         "last_heard_at": row["last_heard_at"]}
         for row in conn.execute(
-            "SELECT id, code, last_heard_at FROM room WHERE status = 'live' ORDER BY code")
+            "SELECT id, code, status, last_heard_at FROM room "
+            "WHERE status IN ('lobby', 'live') AND code <> %s ORDER BY code",
+            (codes.WORKSHOP,))
     ]
 
 

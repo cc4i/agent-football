@@ -87,3 +87,12 @@ class Bus:
 
     def subscriber_count(self, topic):
         return len(self._topics.get(topic, ()))
+
+    def topics(self):
+        """Every topic somebody on this instance is listening to right now.
+
+        Publishing reaches this process and no other, so an arena that wants to
+        answer for its own sockets has to know which rooms they are watching.
+        The arena's sweep uses this; see `_tell_our_own_rooms_it_is_over`.
+        """
+        return tuple(self._topics)

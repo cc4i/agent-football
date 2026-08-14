@@ -45,6 +45,11 @@ const STALE_MS = 15000;
 // second, so silence from a room the arena has just named as live means its
 // screen is gone rather than that it is between frames.
 const SILENT_MS = 4000;
+// How often this screen tells the arena it is still holding its room. The
+// pitch reports for itself once a match is running, but it is not even loaded
+// until somebody takes a seat, so for the whole of the lobby this is the only
+// thing between an open room and a room that only looks open.
+const STILL_HERE_MS = 10000;
 
 let code = (params.get("room") || "").toUpperCase();
 let venue = { pitch_url: "" };
@@ -77,14 +82,32 @@ async function start() {
     // lobby learns a seat filled and how the whistle gets here. While our own
     // match is the one on centre court it carries the relay too, so the usual
     // case is one room socket rather than two.
-    openRoom(code, {
+    let held = null;
+    // A room is only as real as the tab holding it: the physics token lives in
+    // this tab's sessionStorage and dies with it, so a lobby whose screen has
+    // closed can never be run by anybody, ever. Left unsaid, the arena had no
+    // way to tell that room from a screen waiting patiently in front of a
+    // queue, and went on offering it to every phone in the building.
+    const stillHere = () => hostToken() && held && held.send({ type: "host.here" });
+
+    held = openRoom(code, {
+      // The token goes on this socket so the screen can vouch for its own room
+      // before there is a pitch to do it. A tab that is only watching has no
+      // token and sends nothing, which is what it is.
+      clientId: hostToken(),
       onMessage(message) {
         if (message.type === "room") return mine(message);
         if (showing === code) courtside(message);
       },
-      onOpen: () => showing === code && replay(code),
+      onOpen() {
+        if (showing === code) replay(code);
+        // On every connect, not only the first: a reconnect is the one moment
+        // the arena is most likely to have been counting silence.
+        stillHere();
+      },
       onDrop: (reason, permanent) => permanent && say(reason),
     });
+    setInterval(stillHere, STILL_HERE_MS);
     openWall({ onMessage: wall });
     setInterval(direct, TICK_MS);
     direct();

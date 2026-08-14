@@ -124,8 +124,14 @@ function settle(room) {
   document.getElementById("mode").textContent =
     seat ? `${mode} · seat open` : `${mode} · full`;
 
-  if (room.status !== "lobby") {
+  if (room.status === "live") {
     return refuse("That match has already kicked off. Scan the code for the next one.");
+  }
+  if (room.status !== "lobby") {
+    // Finished, or given up on because its screen went away. Either way it is
+    // over, and "already kicked off" would send somebody looking for a match
+    // to watch that nobody is playing.
+    return refuse("That room is closed. Scan the code for the next one.");
   }
   if (!seat) {
     return refuse("Both dugouts are taken. Scan the code for the next room.");

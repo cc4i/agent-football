@@ -34,8 +34,10 @@ if [ -n "$(git status --porcelain)" ]; then
     echo "WARNING: the tree is dirty, so ${TAG} will not describe what is deployed."
 fi
 
-# Every deploy replaces the one instance, and the one instance is holding every
-# live match. There is no rolling handover to be had at max-instances: 1.
+# Every deploy replaces what is running, and what is running is holding every
+# live match. There is no rolling handover to be had at max-instances: 1 -- and
+# on the evenings Cloud Run leaves a second container up anyway, this takes
+# that one with it. See deploy/README.md on what maxScale actually promises.
 echo "This drops every match currently being played. Deploy between matches."
 read -r -p "Continue? [y/N] " answer
 [ "$answer" = "y" ] || exit 1

@@ -43,6 +43,10 @@ CREATE TABLE IF NOT EXISTS player (
 -- rollout runs the old instance and the new one at the same time for a few
 -- seconds, and an in-memory map on the new one would abandon every match whose
 -- host is still talking to the old one.
+-- `started_at` is what separates a room that was played from one that was only
+-- ever open. Both end up "abandoned" when their screen goes, and the status
+-- alone cannot tell a dugout whether to show a scoreline or say the room shut
+-- before anything happened in it.
 CREATE TABLE IF NOT EXISTS room (
     id             INTEGER PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
     code           TEXT    NOT NULL UNIQUE,
@@ -51,6 +55,7 @@ CREATE TABLE IF NOT EXISTS room (
     host_client_id TEXT,
     ranked         INTEGER NOT NULL,
     created_at     DOUBLE PRECISION NOT NULL,
+    started_at     DOUBLE PRECISION,
     finished_at    DOUBLE PRECISION,
     last_heard_at  DOUBLE PRECISION
 );
@@ -139,6 +144,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS one_dugout_per_player ON seat (room_id, player
 MIGRATIONS = """
 ALTER TABLE player ALTER COLUMN email_hash DROP NOT NULL;
 ALTER TABLE player ALTER COLUMN email_masked DROP NOT NULL;
+ALTER TABLE room ADD COLUMN IF NOT EXISTS started_at DOUBLE PRECISION;
 """
 
 # What makes a name a manager's own. Compared case-insensitively, over names

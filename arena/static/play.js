@@ -37,6 +37,7 @@ let crowded = false;  // the banner is holding a refusal about the queue
 let earned = null;    // the arena's word on what this match was worth
 let asking = false;   // that word is on its way
 let painted = false;  // a frame from the host has been on this screen
+let read = false;     // the log has been read since the match ended
 const dots = [];
 // Both dugouts in the one feed: a manager wants to see what they are up
 // against, and on a handset there is no room for a second column of it. Opened
@@ -105,8 +106,13 @@ async function catchUp() {
 function draw(snapshot) {
   room = snapshot;
   const seat = snapshot.seats[mine];
-  const started = snapshot.status !== "lobby";
-  const over = started && snapshot.status !== "live";
+  // Three states, not two. A room can end without ever having been played -
+  // its screen closes while it is still waiting for a manager - and the live
+  // view over a 0-0 scoreline and an empty pitch would be describing a match
+  // that nobody had. That one keeps the lobby view, which then says it closed.
+  const started = snapshot.started;
+  const ended = snapshot.status !== "lobby" && snapshot.status !== "live";
+  const over = started && ended;
   const abandoned = snapshot.status === "abandoned";
   // "Ready" only means something while there is still something to be ready
   // for; once the whistle has gone the chip says what is happening instead.
@@ -134,15 +140,19 @@ function draw(snapshot) {
   if (abandoned && !painted) el("clock").textContent = "--:--";
   if (!started) drawLobby(snapshot);
   if (over) settle();
+  // The snapshot says a room is over; the log says why. Those can arrive by
+  // different routes, because the arena that gave up on a room is not
+  // necessarily the one holding this socket, and only the one holding this
+  // socket can publish to it. So the ending is taken as the cue to read the
+  // log rather than as one more thing waiting to be delivered.
+  if (ended && !read) {
+    read = true;
+    catchUp().catch(() => {});
+  }
 }
 
 function drawLobby(snapshot) {
-  // Nothing kicks off on its own -- somebody presses the button -- so the line
-  // under the heading must not promise a whistle that never comes.
-  const waiting = snapshot.mode === "solo"
-    ? "The house side is already out there."
-    : "Once both dugouts are ready, either of you can kick off.";
-  el("lobby-sub").textContent = waiting;
+  const shut = snapshot.status !== "lobby";
 
   seats.replaceChildren(...["blue", "red"]
     .filter((team) => snapshot.mode === "versus" || team === "blue")
@@ -156,10 +166,32 @@ function drawLobby(snapshot) {
         seat ? `${seat.name}${team === mine ? " (you)" : ""}` : "Open",
       );
       const state = document.createElement("b");
-      state.textContent = seat ? (seat.ready ? "Ready" : "Not ready") : "Waiting";
+      // Nothing is pending in a room that has shut, so neither is anybody's
+      // readiness: "Not ready" there reads as something still to be done.
+      state.textContent = shut ? "" : seat ? (seat.ready ? "Ready" : "Not ready") : "Waiting";
       row.append(who, state);
       return row;
     }));
+
+  // A room that closed before anything was played in it. The banner above has
+  // said why; this is the rest of the page agreeing with it rather than going
+  // on offering a whistle to blow, a screen to watch and a score to wait for.
+  // The seats stay, because they are the last true thing on it and a manager
+  // wants to see they were in there.
+  if (shut) {
+    el("lobby-title").textContent = "This room closed";
+    el("lobby-sub").textContent = "Nothing was ever played in it.";
+    el("how").hidden = true;
+    go.hidden = true;
+    go.dataset.does = "";
+    return;
+  }
+
+  // Nothing kicks off on its own -- somebody presses the button -- so the line
+  // under the heading must not promise a whistle that never comes.
+  el("lobby-sub").textContent = snapshot.mode === "solo"
+    ? "The house side is already out there."
+    : "Once both dugouts are ready, either of you can kick off.";
 
   const seat = snapshot.seats[mine];
   const everyone = snapshot.open_seats.length === 0

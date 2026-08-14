@@ -92,8 +92,9 @@ is the safe end for this arithmetic. `ARENA_CHAIN_SECONDS` is a timeout and is
 no evidence of a duration.
 
 `C x R` is what one slot costs a minute: about 20 requests. The limit is per
-instance, which is per venue only because `maxScale` is 1; two instances would
-be twice this and the yaml is what keeps that from happening.
+instance, which is per venue only for as long as there is one instance - and
+`maxScale: "1"` asks for that rather than enforcing it, so leave the headroom
+that a second container briefly doubling this needs. See `deploy/README.md`.
 
 **Reading Q.** `PROJECT` is the one `deploy/README.md` exports; the line below
 takes it from the configured project for a reader who arrives here first, since

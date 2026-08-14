@@ -36,6 +36,17 @@ def test_a_returning_phone_is_never_shown_the_name_box_first(client, phones):
     assert 'get("/api/players/me")' in js.split("Promise.all")[0]
 
 
+def test_a_room_that_closed_is_not_described_as_one_that_kicked_off(client):
+    # Rooms end without ever starting now that the arena gives up on a lobby
+    # whose screen has gone, and a phone can be standing on the join form when
+    # it happens. "That match has already kicked off" would send somebody
+    # hunting the venue for a match nobody is playing.
+    js = client.get("/static/join.js").text
+    live = js.split('room.status === "live"')[1]
+    assert "already kicked off" in live.split("}", 1)[0]
+    assert "That room is closed." in js
+
+
 def test_a_stale_code_says_so_rather_than_showing_a_form(client):
     # A QR photographed at last week's event should not open a form that
     # fails on submit. There is no room, so there is no page.

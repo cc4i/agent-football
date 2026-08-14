@@ -21,6 +21,15 @@ The database survives both. Players, rooms, the event log and the leaderboard
 are all in Cloud SQL, so a manager who reloads gets their history back. What
 they do not get back is the match they were playing. Deploy between matches.
 
+**`maxScale: "1"` is a target, not a promise.** A second container was found up
+under this exact yaml, hours after the deploy that started it, taking no
+traffic but its own health probe. Filter Cloud Logging by `labels.instanceId`
+to see it. It runs the watchdog like any other arena, so it decides about half
+the abandonments in the venue and publishes them to a bus with nobody on it.
+The arena is built to survive that overlap now - liveness is a column, and the
+sweep re-tells its own sockets what the database says - but anything you add
+that assumes one process is assuming something Cloud Run has not agreed to.
+
 ## What it costs to leave up
 
 `minScale: "1"` with `cpu-throttling: false` bills for the whole lifetime of
