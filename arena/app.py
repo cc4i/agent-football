@@ -134,6 +134,13 @@ PUBLIC_URL = os.environ.get("ARENA_PUBLIC_URL", "http://localhost:8003").rstrip(
 # Vite serves the pitch on :5173 and this mount does not exist.
 PITCH_DIR = os.environ.get("ARENA_PITCH_DIR", "")
 
+# Where the game's MCP server writes injuries and substitution requests. In one
+# Cloud Run instance this is an in-memory volume mounted into both this
+# container and the coach's, which is the whole of the mechanism: the
+# specialist writes a file and the browser polls it. Unset locally, where Vite
+# serves the same directory out of the pitch's public/ folder.
+PLAYER_STATE_DIR = os.environ.get("ARENA_PLAYER_STATE_DIR", "")
+
 # Where the pitch is served from. The big screen frames it rather than drawing
 # it: physics is 2000 lines of Phaser that already exist and already work, and
 # reimplementing them in the arena to avoid an iframe would be the wrong trade.
@@ -1223,6 +1230,16 @@ if PITCH_DIR:
 
     app.mount("/pitch/bundle", Immutable(directory=Path(PITCH_DIR) / "bundle"), name="bundle")
     app.mount("/pitch", Revalidated(directory=PITCH_DIR), name="pitch")
+
+if PLAYER_STATE_DIR:
+    # The arena only reads this directory; the MCP server writes to it. Create
+    # it at startup so an empty volume does not 500 every poll until the first
+    # injury, and so how the volume is mounted cannot break this mount.
+    Path(PLAYER_STATE_DIR).mkdir(parents=True, exist_ok=True)
+    # Revalidated, not Immutable: this file changes when somebody gets hurt and
+    # a cached copy would show a stale toast or hide a live one.
+    app.mount("/player_state", Revalidated(directory=PLAYER_STATE_DIR),
+              name="player_state")
 
 # Mounted last so no page or API path can ever be shadowed by a file on disk.
 app.mount("/static", Revalidated(directory=STATIC), name="static")

@@ -1,5 +1,6 @@
 """Substitutions belong to a room and a dugout, not to the whole venue."""
 
+import importlib
 import json
 
 import pytest
@@ -45,3 +46,17 @@ def test_nothing_is_written_outside_the_rooms_own_file(tmp_path, monkeypatch):
     server.report_injury("defender", "knock", room="7K2M", team="red")
     written = [path.relative_to(tmp_path) for path in tmp_path.rglob("*.json")]
     assert [str(path) for path in written] == ["substitutions/7K2M__red.json"]
+
+
+def test_the_state_directory_can_be_moved(monkeypatch, tmp_path):
+    # Deployed, the coach writes to a volume it shares with the arena rather
+    # than into a pitch that is not in its container.
+    monkeypatch.setenv("PLAYER_STATE_DIR", str(tmp_path))
+    importlib.reload(server)
+    try:
+        path = server.substitutions_path("ABCD", "red")
+        assert path.startswith(str(tmp_path))
+        assert path.endswith("ABCD__red.json")
+    finally:
+        monkeypatch.delenv("PLAYER_STATE_DIR")
+        importlib.reload(server)

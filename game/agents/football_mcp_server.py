@@ -23,12 +23,11 @@ Exposed tools:
   - report_injury(role, severity)     -> log an injury for a role
   - request_substitution(role, reason)-> log a substitution request for a role
 
-Both tools append an entry to one file per room and dugout:
-  frontend/public/player_state/substitutions/{ROOM}__{team}.json
-
-The frontend already serves and polls that directory, so the browser picks the
-entry up on its next poll and shows a top-right notification toast. There is no
-roster/gameplay change for now -- this is notification-only.
+Both tools append an entry to one file per room and dugout. Locally that file
+lives under frontend/public/player_state/, which Vite serves. Deployed, the path
+is an in-memory volume shared with the arena, set via PLAYER_STATE_DIR. The
+browser polls the arena for it and shows a top-right notification toast. There
+is no roster/gameplay change for now -- this is notification-only.
 """
 
 import json
@@ -39,7 +38,14 @@ from mcp.server.fastmcp import FastMCP
 
 # Resolve paths relative to this file (matches the convention in agent.py).
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-PLAYER_STATE_DIR = os.path.join(BASE_DIR, "../frontend/public/player_state")
+
+# Where injuries and substitution requests are written. Locally this defaults
+# to the pitch's public directory, which Vite serves. Deployed, the coach and
+# the arena are two containers in one instance with a shared in-memory volume,
+# and this points at the mount: the specialist writes here and the arena serves
+# what it finds.
+PLAYER_STATE_DIR = os.environ.get(
+    "PLAYER_STATE_DIR", os.path.join(BASE_DIR, "../frontend/public/player_state"))
 
 VALID_ROLES = {"defender", "midfielder", "forward", "goalkeeper"}
 VALID_TEAMS = ("blue", "red")

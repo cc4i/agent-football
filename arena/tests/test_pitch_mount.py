@@ -1,7 +1,6 @@
 """The pitch mount, when ARENA_PITCH_DIR is set."""
 
 import importlib
-import sys
 
 import pytest
 from starlette.testclient import TestClient
@@ -23,6 +22,9 @@ def pitch_mount(tmp_path, monkeypatch, dsn):
     assets = dist / "assets" / "sprites"
     assets.mkdir(parents=True)
     (assets / "player_blue_team.png").write_bytes(b"\x89PNG")
+
+    # Put a file outside the served root to prove the traversal guard works.
+    (tmp_path / "app.py").write_text("escape")
 
     # Reload the app module with ARENA_PITCH_DIR set.
     monkeypatch.setenv("ARENA_PITCH_DIR", str(dist))
@@ -61,4 +63,7 @@ def test_the_assets_are_revalidated(pitch_mount):
 
 
 def test_the_mount_cannot_be_walked_out_of(pitch_mount):
-    assert pitch_mount.get("/pitch/../app.py").status_code in (404, 403)
+    # Percent-encoded because httpx removes dot segments from the path before
+    # sending. The plain spellings (../../../) never reach the mount.
+    for encoded in ("%2e%2e/app.py", "..%2fapp.py", "%2e%2e%2fapp.py"):
+        assert pitch_mount.get(f"/pitch/{encoded}").status_code == 404
