@@ -62,6 +62,7 @@ let framedAt = 0;
 let turned = 0;             // the first tile of the strip's current page
 let stripped = "";          // the page the strip is drawing, so it is redrawn once
 let courtRoom = null;       // somebody else's room, open only while they are on
+let leaving = false;        // this page is on its way out to a room that works
 const live = new Map();     // code -> what the wall knows about that room
 const tiles = new Map();    // code -> the strip's elements for it
 
@@ -76,6 +77,10 @@ async function start() {
   try {
     venue = await get("/api/venue");
     ours = code ? await get(`/api/rooms/${code}`) : await open();
+    // A tab that has come back to a room that died while it was away. Answered
+    // before the room is drawn rather than after the socket says the same
+    // thing, so nobody watches a dead room's QR code go up and come down.
+    if (ours.status === "abandoned") return startFresh(ours.mode);
     code = ours.code;
     dress(ours);
     // Our own room's socket stays open whatever is on the screen: it is how the
@@ -123,8 +128,40 @@ async function open() {
   // arena's database and this tab. sessionStorage rather than localStorage so
   // closing the tab gives it up, and reloading does not.
   sessionStorage.setItem(tokenKey(opened.code), opened.host_token);
-  history.replaceState(null, "", `/arena?room=${opened.code}`);
+  // The mode stays in the URL beside the code. Replaced by the code alone, a
+  // head-to-head screen forgot what it was the moment it opened its first
+  // room, and every reload of it after that was a solo screen.
+  history.replaceState(null, "", `/arena?room=${opened.code}&mode=${opened.mode}`);
   return opened;
+}
+
+/**
+ * Leave a room this screen can do nothing with, and open another.
+ *
+ * A room is abandoned when nothing has held it for the half minute the arena
+ * allows, which since it started sweeping lobbies means a tab that was closed,
+ * a lid that shut, or a venue's wifi gone for thirty seconds. However it
+ * happened, the physics token went with the tab, so this screen can never host
+ * that room again -- and a screen is the only thing in the building that can
+ * open a room at all. Left drawing it, it stood there showing "Ready when they
+ * are" over a QR code for a room that no longer existed, with the way out
+ * hidden because the way out is shown for a match that finished and this one
+ * never started. Meanwhile every phone in the venue read "no screen is waiting
+ * for a manager this second" and had nothing at all to tap.
+ *
+ * Hosting is the only reason this page is open, so it goes and hosts. A full
+ * load rather than opening a room in place: `start` already does all of it in
+ * the right order, and the alternative is unpicking a socket, a token and a
+ * strip by hand to arrive in the same state.
+ */
+function startFresh(mode) {
+  // The arena publishes an ending to its own watchers as well as deciding it,
+  // so one dead room can arrive here more than once.
+  if (leaving) return;
+  leaving = true;
+  el("badge").textContent = "That room closed. Opening a new one…";
+  el("again").hidden = true;
+  location.assign(`/arena?mode=${mode || MODE}`);
 }
 
 const tokenKey = (roomCode) => `arena.host.${roomCode}`;
@@ -158,6 +195,10 @@ function dress(snapshot) {
 
 function mine(snapshot) {
   ours = snapshot;
+  // The other way a room dies under a screen that is still looking at it: the
+  // link drops for longer than the sweep waits, and it comes back to a room
+  // the arena has already given up on.
+  if (snapshot.status === "abandoned") return startFresh(snapshot.mode);
   el("again").hidden = snapshot.status !== "finished";
   drawSeats(snapshot);
   direct();
@@ -558,7 +599,11 @@ document.addEventListener("keydown", (event) => {
   if (wanted) pin(wanted);
 });
 
-el("again").addEventListener("click", () => location.assign(`/arena?mode=${MODE}`));
+// The mode of the match just played rather than the page's, which after a room
+// has been opened is whatever the URL still says. A head-to-head screen that
+// pressed this at full time got a solo room and one seat for two managers.
+el("again").addEventListener("click",
+                             () => location.assign(`/arena?mode=${(ours && ours.mode) || MODE}`));
 
 // A seventh match is a real venue, and the six on the strip must not be the
 // same six all evening.

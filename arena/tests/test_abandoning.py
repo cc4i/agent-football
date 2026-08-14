@@ -587,3 +587,46 @@ def test_the_dugout_reads_the_log_when_it_hears_a_room_is_over(client):
     js = client.get("/static/play.js").text
     assert "if (ended && !read)" in js
     assert "catchUp()" in js.split("if (ended && !read)")[1]
+
+
+def test_a_screen_pointed_at_a_dead_room_opens_a_new_one(client):
+    # The other half of the sweep, and the one nobody was left a way out of.
+    #
+    # Everything a phone can play is a lobby some screen opened, and the token
+    # that runs it lives in that tab's sessionStorage. Reload the tab, shut the
+    # lid, lose the venue's wifi for the thirty seconds the sweep allows, and
+    # the room is abandoned and that tab can never host it again. What it did
+    # then was carry on drawing it: "Ready when they are" over a QR code for a
+    # room that no longer exists, and the way out was hidden, because the way
+    # out is shown for a match that finished and this one never started. The
+    # screen sat there advertising a dead room for the rest of the evening
+    # while every phone in the building read "no screen is waiting for a
+    # manager this second" and had nothing to tap.
+    #
+    # So a screen holding a room that died opens another one. It is the only
+    # thing in the venue that can, and hosting is the only reason it is on.
+    js = client.get("/static/arena.js").text
+    assert 'status === "abandoned"' in js
+    both = js.split('status === "abandoned"')
+    # Both halves: the room read on the way in, for a tab that comes back to a
+    # room that died while it was away, and the snapshot off the socket, for
+    # one that is watching when it happens.
+    assert len(both) == 3, "a dead room is answered on load and on the socket"
+    for half in both[1:]:
+        assert "startFresh(" in half.split("\n", 1)[0]
+
+
+def test_the_new_room_is_the_mode_the_dead_one_was(client):
+    # `open` replaces the URL with the room's own code and nothing else, so a
+    # head-to-head screen that reloads is reading no mode at all, and the
+    # default is solo. Left to that, a venue running head to head all evening
+    # would quietly reopen as score attack the first time a room died under it
+    # -- and the two managers waiting to play each other would find one seat.
+    js = client.get("/static/arena.js").text
+    fresh = js.split("function startFresh")[1].split("\n}", 1)[0]
+    assert "mode" in fresh, "the mode of the room being replaced is carried over"
+    # And the button beside it, which had the same hole: after the first match
+    # on a head-to-head screen the URL is a room code, so "New room" read the
+    # default too, and two managers who came to play each other found one seat.
+    handler = js.split('el("again").addEventListener')[1].split(";", 1)[0]
+    assert "ours.mode" in handler
