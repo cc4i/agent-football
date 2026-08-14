@@ -57,6 +57,13 @@ document.getElementById("code").textContent = CODE;
 start();
 
 async function start() {
+  // Out with the room rather than behind it. A phone with no session is the
+  // ordinary case here rather than a problem, so this is caught to null and
+  // nothing below waits on it - but it is what decides which of the two
+  // identity states the page shows, and awaited last it decided too late:
+  // a manager the venue knows spent a measured 596ms reading "Name on the
+  // board" before their own name arrived to replace it.
+  const identity = get("/api/players/me").catch(() => null);
   try {
     const [room, stances] = await Promise.all([
       get(`/api/rooms/${CODE}`),
@@ -67,13 +74,10 @@ async function start() {
   } catch (failure) {
     complain(failure);
   }
-  // Separately, and after the room: a phone with no session is the ordinary
-  // case here rather than a problem, and nothing above should wait on it.
-  try {
-    greet(await get("/api/players/me"));
-  } catch {
-    // Nobody the venue knows. The boxes are already showing.
-  }
+  // Whichever it is, the page stops being undecided about it here.
+  const player = await identity;
+  if (player) greet(player);
+  else boxes.hidden = false;
 }
 
 function greet(player) {

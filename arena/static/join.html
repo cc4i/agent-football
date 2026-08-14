@@ -30,7 +30,11 @@
     <button type="button" class="linky" id="change">change</button>
   </p>
 
-  <div id="boxes">
+  <!-- Both start hidden, because until the arena answers there is no honest
+       answer to which of them belongs here, and the wrong one shown
+       confidently is worse than neither shown for a moment. join.js reveals
+       whichever it turns out to be. -->
+  <div id="boxes" hidden>
     <div class="field">
       <label for="name">Name on the board</label>
       <input id="name" class="input" name="name" autocomplete="name"
