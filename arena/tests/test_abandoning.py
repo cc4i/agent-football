@@ -194,6 +194,25 @@ def test_the_dugout_puts_a_scoreline_up_only_for_a_room_that_had_one(client):
     assert "This room closed" in js
 
 
+def test_a_manager_left_in_a_closed_room_is_given_somewhere_to_go(client):
+    # There is nothing else on that page to do: no whistle to blow, no score
+    # coming, and nobody left who could change either. The phone holding it
+    # already knows who its manager is and what else is open, so a dead end
+    # here is somebody standing in a venue hunting for a code on a wall to get
+    # back to a list their own hand could have shown them.
+    html = client.get("/static/play.html").text
+    js = client.get("/static/play.js").text
+    way_out = html.split('id="elsewhere"')[1].split(">")[0]
+    assert 'href="/home"' in way_out
+    # And not before then: a lobby with a match still to come already has a
+    # button, and two of them is an invitation to leave.
+    assert "hidden" in way_out
+    assert 'el("elsewhere").hidden = false;' in js.split("if (shut) {")[1].split("}", 1)[0]
+    # The banner above it says what happened and stops there, rather than
+    # sending them off to do by hand what the button does with one tap.
+    assert "Scan" not in arena.LOBBY_GONE_REASON
+
+
 def test_the_workshop_is_left_alone_forever(client):
     # It sits in its lobby for the life of the deployment with no screen behind
     # it at all, because it is where the dugout tunes profiles with nobody in a

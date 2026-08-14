@@ -210,7 +210,10 @@ SWEEP_SECONDS = 5
 HOST_GONE_REASON = "The screen running this match stopped reporting, so it was abandoned."
 # The same thing before a whistle, which needs different words: nothing had
 # kicked off, so nothing was abandoned in the sense the sentence above means.
-LOBBY_GONE_REASON = "The screen that opened this room has gone. Scan a code for another."
+# The fact and nothing else: the page that shows this puts the way out on a
+# button underneath it, and a sentence telling them to go and find a code would
+# be the arena forgetting it is talking to a phone that already knows them.
+LOBBY_GONE_REASON = "The screen that opened this room has gone."
 
 # What a QR code should encode. Unset, it is worked out from the request, which
 # is what lets a first deploy be a first deploy: Cloud Run does not tell a

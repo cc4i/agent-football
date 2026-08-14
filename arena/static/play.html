@@ -35,6 +35,12 @@
     <div class="mini-board" id="seats"></div>
 
     <button class="btn go push" id="go" type="button" disabled>Ready</button>
+
+    <!-- The way out of a room that shut before it started, in place of the
+         button above. The phone holding this page already knows who its
+         manager is and the rooms still open are one tap away, so sending them
+         off to hunt for a code on a wall would be the arena forgetting that. -->
+    <a class="btn ghost push" id="elsewhere" href="/home" hidden>Find another room</a>
   </section>
 
   <!-- After it -->

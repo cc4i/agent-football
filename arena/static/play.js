@@ -184,6 +184,7 @@ function drawLobby(snapshot) {
     el("how").hidden = true;
     go.hidden = true;
     go.dataset.does = "";
+    el("elsewhere").hidden = false;
     return;
   }
 
