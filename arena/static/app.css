@@ -62,16 +62,39 @@ body{
    The phone: /join and /play
    ══════════════════════════════════════════════════════════════════ */
 body.phone{display:flex;justify-content:center}
+/* Three heights for one box, because the oldest phone in the venue decides
+   which of them is used.
+
+   `100dvh` is the right answer and iOS Safari only learned it in 15.4. Before
+   that there is `100vh`, and on iOS `100vh` is the screen with both toolbars
+   retracted -- taller than what anybody can actually see. Every phone page
+   pins its primary action to the bottom of this box, so that difference is the
+   Ready button sitting behind the address bar: on the dugout, which is
+   `overflow:hidden` below, with no scrolling to go and get it. A manager on an
+   old handset scans the code and simply cannot start the match.
+
+   `-webkit-fill-available` is what those versions call the space actually
+   available, toolbars already subtracted. It sits in the middle because the
+   cascade takes the last declaration the browser understood: old Safari stops
+   at it, everything else goes on to `dvh` and never uses it. Nothing has to be
+   removed when the old handsets age out -- the line stops being reached. */
 .pscreen{
-  width:100%;max-width:430px;min-height:100vh;min-height:100dvh;
+  width:100%;max-width:430px;
+  min-height:100vh;min-height:-webkit-fill-available;min-height:100dvh;
   display:flex;flex-direction:column;
   padding:calc(14px + env(safe-area-inset-top)) 16px calc(16px + env(safe-area-inset-bottom));
 }
+/* Scoped to the phone by a class on <html> rather than left global: the wall
+   is a browser in kiosk mode with no toolbars to subtract, and this is a
+   non-standard property to keep away from a page that has no need of it. */
+html.phone{height:-webkit-fill-available}
 /* The dugout is a frame with one scrolling panel in it. Let the page itself
    grow instead and a long relay pushes the shout chips off the bottom of the
    screen, where nobody can reach them. The join form is the other way round:
    it has to be able to run past a short screen. */
-body.phone.fixed{height:100vh;height:100dvh;overflow:hidden}
+body.phone.fixed{
+  height:100vh;height:-webkit-fill-available;height:100dvh;overflow:hidden;
+}
 body.phone.fixed .pscreen{height:100%;min-height:0}
 
 .pbar{
