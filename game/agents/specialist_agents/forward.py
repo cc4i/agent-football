@@ -20,6 +20,7 @@ from google.adk.agents.llm_agent import LlmAgent
 from agents.constants import GeminiConstants
 from .tools import update_profile
 from .tools import make_condition_toolset, CONDITION_GUIDANCE, stamp_the_room
+from .tools import SIMULATION_MODEL
 
 
 # Prompts set aside as uncommented variables:
@@ -75,7 +76,8 @@ forward_agent = LlmAgent(
     name="ForwardSpecialist",
     model=GeminiConstants.GEMINI_FLASH_LITE,
     description="Handles tactical instructions and attribute updates for the FORWARD role.",
-    instruction=FORWARD_INSTRUCTION
+    instruction=SIMULATION_MODEL
+    + FORWARD_INSTRUCTION
     + CONDITION_GUIDANCE
     ,
     tools=[update_profile]

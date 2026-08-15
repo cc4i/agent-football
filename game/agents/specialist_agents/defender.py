@@ -21,6 +21,7 @@ from google.adk.agents.llm_agent import LlmAgent
 from agents.constants import GeminiConstants
 from .tools import update_profile
 from .tools import make_condition_toolset, CONDITION_GUIDANCE, stamp_the_room
+from .tools import SIMULATION_MODEL
 
 # Prompts set aside as uncommented variables:
 DEFENDER_INSTRUCTION = """You are a gritty, no-nonsense Defender on the football pitch.
@@ -76,7 +77,8 @@ defender_agent = LlmAgent(
     name="DefenderSpecialist",
     model=GeminiConstants.GEMINI_FLASH_LITE,
     description="Handles tactical instructions and attribute updates for the DEFENDER role.",
-    instruction=DEFENDER_INSTRUCTION
+    instruction=SIMULATION_MODEL
+    + DEFENDER_INSTRUCTION
     + CONDITION_GUIDANCE
     ,
     tools=[update_profile]

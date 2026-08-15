@@ -20,6 +20,7 @@ from google.adk.agents.llm_agent import LlmAgent
 from agents.constants import GeminiConstants
 from .tools import update_profile
 from .tools import make_condition_toolset, CONDITION_GUIDANCE, stamp_the_room
+from .tools import SIMULATION_MODEL
 
 
 # Prompts set aside as uncommented variables:
@@ -90,7 +91,8 @@ goalkeeper_agent = LlmAgent(
     name="GoalkeeperSpecialist",
     model=GeminiConstants.GEMINI_FLASH_LITE,
     description="Handles tactical instructions and attribute updates for the GOALKEEPER role.",
-    instruction=GOALKEEPER_INSTRUCTION
+    instruction=SIMULATION_MODEL
+    + GOALKEEPER_INSTRUCTION
     + CONDITION_GUIDANCE
     ,
     tools=[update_profile]

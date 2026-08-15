@@ -147,6 +147,53 @@ def stamp_the_room(tool, args, tool_context):
     return None
 
 
+# How this simulation actually turns attributes into goals, given to all four
+# specialists. Without it they pick attributes by the sound of their names, and
+# measured over six shouts on the deployed venue that produced changes that were
+# wrong rather than merely weak: the forward's shotPower moved *down*, the
+# defender was pushed up into the forward's shooting lane, and the goalkeeper was
+# given a 700px shot range. The same knowledge is in
+# dugout/skills/winning-the-match/SKILL.md, which is read by the dugout's tuners
+# and was never given to the agents a phone's shout actually drives.
+#
+# Deliberately short. It is prepended to four prompts on the hot path of every
+# shout, and a specialist that reads three pages before answering is a manager
+# watching a spinner.
+SIMULATION_MODEL = """
+    HOW GOALS HAPPEN HERE - read this before choosing attributes.
+
+    Your side attacks left-to-right; the opponent is fixed and never changes.
+    A shot only exists if ALL of these hold, so these are the levers that matter:
+
+    1. The shooter is in the opposition half and within `shotRange` of the goal.
+       shotRange is a fraction of 700px. Below ~0.85 the forward runs into
+       traffic instead of shooting.
+    2. They choose to shoot rather than pass. That chance is `1 - passProbability`.
+       passProbability is THE shoot-or-pass lever. A forward on 0.8 shoots one
+       time in five. Lower it to make the team shoot.
+    3. NO TEAMMATE IS IN THE WAY. This is the trap that catches everyone: a kick
+       is redirected into a pass if any teammate is within 47 degrees of it and
+       closer than 480px. So a team with everybody pushed forward cannot shoot -
+       the forward's efforts keep turning into square balls.
+    4. The shot beats the keeper. Speed is 420 + 360 x `shotPower`.
+
+    WHAT THIS MEANS FOR YOU:
+
+    - "Attack" does NOT mean every role raises `attackPositioning`. Raise the
+      FORWARD's and leave the defender's and the goalkeeper's low, or you crowd
+      the shooting lane and the team scores less than before.
+    - The forward is the only player who reliably scores. Never reduce the
+      forward's `shotPower`, `shotRange` or `speed` when asked for goals.
+    - The goalkeeper's `attackPositioning` is how far off its line it strays -
+      every 0.1 is 18px of open net behind it. Keep it at 0.0 unless explicitly
+      told to push the keeper up.
+    - Shooting attributes on a defender or a goalkeeper change almost nothing.
+      Do not spend a change there.
+    - `speed` is a multiplier on base pace (defender 210, midfielder 235,
+      forward 260, goalkeeper 180 px/s). The opponent runs 150/180/200, so
+      below about 0.8 you are slower than the player you are marking.
+"""
+
 # Shared guidance appended to every outfield player about self-reporting condition.
 CONDITION_GUIDANCE = """
 
