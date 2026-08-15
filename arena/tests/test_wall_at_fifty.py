@@ -152,16 +152,40 @@ async def test_the_chip_hands_the_screen_back_without_a_keyboard(wall_page,
     assert await wall_page.locator("#director").is_disabled()
 
 
+async def test_auto_puts_up_the_newest_match_and_leaves_it_there(wall_page,
+                                                                 fifty_live_rooms):
+    """On auto the big screen is the match that kicked off last, and stays on it.
+
+    The director used to rank the fifty on how interesting each looked and
+    re-run the ranking every couple of seconds, so the screen cut away from
+    whatever somebody was watching the moment a goal went in somewhere else in
+    the building. Newest instead: a rule a room can read off the screen, and
+    one that only moves when a room does.
+    """
+    newest = fifty_live_rooms[-1]
+    await wall_page.wait_for_function(
+        "(code) => document.querySelector('#court').dataset.showing === code", arg=newest)
+    assert await wall_page.locator("#directing").inner_text() == "Auto"
+
+    # Nothing has kicked off and nothing has ended, so nothing should have
+    # moved -- through a rotation of the strip below it, which has.
+    await wall_page.wait_for_timeout(PAST_A_ROTATION_MS)
+    assert await wall_page.locator("#court").get_attribute("data-showing") == newest
+    assert await wall_page.locator("#directing").inner_text() == "Auto"
+
+
 async def test_clicking_a_tile_pins_it(wall_page, fifty_live_rooms):
     tile = wall_page.locator(".tile[data-code]").first
     code = await tile.get_attribute("data-code")
+    assert code != fifty_live_rooms[-1], (
+        "the newest match is on centre court, so it is not on the strip to be clicked")
     await tile.click()
     await wall_page.wait_for_function(
         "(code) => document.querySelector('#court').dataset.showing === code", arg=code)
 
-    # And the director has stopped arguing about it. One of the fifty is in its
-    # last half-minute and is worth more than this match by every measure the
-    # wall has; the pin outranks the arithmetic until somebody lifts it.
+    # And the director has stopped arguing about it. This is one of the oldest
+    # matches in the building and auto would be showing the newest; the pin
+    # outranks the rule until somebody lifts it.
     await wall_page.wait_for_timeout(PAST_A_ROTATION_MS)
     assert await wall_page.locator("#court").get_attribute("data-showing") == code
     # Named, and named by the half of the fixture that varies. Every match here
@@ -198,9 +222,12 @@ async def test_escape_hands_it_back_to_the_director(wall_page, fifty_live_rooms)
         "(code) => document.querySelector('#court').dataset.showing === code", arg=code)
 
     await wall_page.keyboard.press("Escape")
-    # The director keeps a match for a few seconds after a cut whatever the
-    # arithmetic says, so this is not instant. It is not thirty seconds either.
+    # Waited for rather than asserted outright: lifting the pin re-runs the
+    # director on the keystroke, but the cut is a canvas being pointed at
+    # another match and the attribute is read from a second process.
     await wall_page.wait_for_function(
         "(code) => document.querySelector('#court').dataset.showing !== code",
         arg=code, timeout=30_000)
     assert await wall_page.locator("#directing").inner_text() == "Auto"
+    assert await wall_page.locator("#court").get_attribute(
+        "data-showing") == fifty_live_rooms[-1], "auto is the newest match again"

@@ -36,11 +36,6 @@ const ROTATE_MS = 12000;
 // The carousel is for when nobody is there. The moment somebody pages or pins
 // it stops, and it starts again once they have stopped touching it.
 const BROWSING_MS = 30000;
-// The least time a match holds centre court. Without it, two rooms trading
-// goals would strobe the screen between them.
-const DWELL_MS = 8000;
-const GOAL_HEAT_MS = 10000;
-const ENDGAME_SEC = 30;
 const TICK_MS = 2000;
 // A room stays "live" in the arena until somebody blows the whistle on it, and
 // a screen that was closed mid-match never does. Frames are the only proof a
@@ -70,7 +65,7 @@ let ours = null;            // this screen's own room, as the arena last told us
 // pass of the director, so that "nothing is on" is itself something to draw.
 let showing;
 let pinned = null;          // the operator's choice, which outlives the director's
-let framedAt = 0;
+let arrivals = 0;           // how many rooms this screen has watched kick off
 let page = 0;               // which page of the strip is up
 let browsing = null;        // running while somebody is working the wall by hand
 let stripped = "";          // the page the strip is drawing, so it is redrawn once
@@ -401,12 +396,8 @@ function wall(message) {
   if (message.type !== "wall.state") return;
   const room = live.get(message.code);
   if (!room) return;
-  const before = room.frame;
   room.frame = message;
   room.frameAt = Date.now();
-  // A goal is the score changing, which is the one thing the wall is told
-  // about a match without being told. It is what makes a tile worth watching.
-  if (before && line(before) !== line(message)) room.goalAt = room.frameAt;
   paintTile(room);
 }
 
@@ -417,7 +408,14 @@ function roster(rooms) {
     seen.add(row.code);
     const known = live.get(row.code);
     if (known) Object.assign(known, row);
-    else live.set(row.code, { ...row, frame: null, frameAt: 0, since: now, goalAt: 0 });
+    // A room joins this roster at the moment it kicks off and leaves it at the
+    // whistle, so *arriving here* is the only kick-off time the wall is given:
+    // nothing in the message carries a clock. A counter rather than the wall
+    // clock, because the rooms already playing when this page opened all arrive
+    // in one message and would share a timestamp -- the arena sends them oldest
+    // first, so the order they are read in is what separates them.
+    else live.set(row.code,
+                  { ...row, frame: null, frameAt: 0, since: now, arrived: ++arrivals });
   }
   for (const gone of [...live.keys()]) if (!seen.has(gone)) live.delete(gone);
   // A pin lasts until that match ends, and it has.
@@ -647,14 +645,14 @@ const clamp = (value) => Math.min(1, Math.max(0, Number(value) || 0));
  * Choose what is on the big screen, and say which of us chose it.
  *
  * Called on every roster change, every whistle in our own room and on a slow
- * tick, because two of the three reasons a match becomes worth watching --
- * the clock running down, a goal going cold -- are the passing of time and
- * nothing arriving.
+ * tick. The tick is not there to reconsider the choice -- see `choose`, which
+ * only moves when a room does -- but because a match that has stopped sending
+ * frames stops being live without anything arriving to say so.
  */
 function direct() {
   const now = Date.now();
   const wanted = choose(now);
-  if (wanted !== showing) cutTo(wanted, now);
+  if (wanted !== showing) cutTo(wanted);
   // Every pass, not only on a change: a room's managers reach the wall in
   // their own message, which routinely lands after the match they are in, and
   // a match that has stopped sending frames drops off the strip on its own.
@@ -677,6 +675,22 @@ function direct() {
 /**
  * Which match centre court should be on, or null for this screen's own lobby.
  *
+ * The newest one being played, and then left alone.
+ *
+ * This used to score every match on how interesting it looked -- a goal just
+ * scored, a level scoreline, a clock inside its last half-minute -- and hand
+ * the screen to whichever won, re-run every couple of seconds. On a venue with
+ * fifty rooms in it that is a screen that cuts away from the match somebody is
+ * watching because the arithmetic tilted somewhere else in the building, and a
+ * dwell timer only sets how often it happens. Nobody can follow a wall like
+ * that, and nobody standing in front of one can predict it either.
+ *
+ * Latest is the rule a room full of people can read off the screen without
+ * being told it: the match that just kicked off is the one up there, and it
+ * stays up until a newer one kicks off or it ends. Anybody who wants a
+ * different one clicks its tile, which is what the pin is for -- a choice
+ * somebody made, rather than one the screen made for them.
+ *
  * This screen's own room is in the running like every other. The physics is on
  * a ground now, so cutting away from it costs nothing but the view: the match
  * plays on, and the rail keeps the QR code up for the people in front of it.
@@ -693,29 +707,13 @@ function choose(now) {
   if (ours && ours.status === "lobby" && Object.keys(ours.seats).length) return null;
 
   // A room only the arena still believes in is not a match, and putting a
-  // frozen pitch on the big screen is worse than putting nothing on it.
+  // frozen pitch on the big screen is worse than putting nothing on it. It is
+  // also why the newest match is not simply the last room to arrive: a room
+  // whose host has not sent its first frame yet would win, and win with a
+  // blank pitch, for as long as it took that frame to turn up.
   const playing = [...live.values()].filter((room) => onNow(room, now) && room.frame);
   if (!playing.length) return null;
-  const best = playing
-    .map((room) => ({ room, worth: worth(room, now) }))
-    .sort((a, b) => b.worth - a.worth)[0];
-  const current = showing && live.get(showing);
-  if (!current || !onNow(current, now)) return best.room.code;
-  // A match that is still nearly as interesting keeps the screen. The cut is
-  // cheap now, but the watching is not: a screen that flicks away mid-move
-  // every time the arithmetic tilts is unwatchable however smooth each cut is.
-  if (now - framedAt < DWELL_MS) return showing;
-  return best.worth > worth(current, now) ? best.room.code : showing;
-}
-
-function worth(room, now) {
-  if (!room.frame) return 0;   // nothing to show: the host has not reported yet
-  let score = 1;
-  if (room.goalAt && now - room.goalAt < GOAL_HEAT_MS) score += 4;
-  const [blue, red] = Array.isArray(room.frame.score) ? room.frame.score : [0, 0];
-  if (blue === red) score += 2;
-  if (typeof room.frame.clock === "number" && room.frame.clock <= ENDGAME_SEC) score += 3;
-  return score;
+  return playing.reduce((latest, room) => (room.arrived > latest.arrived ? room : latest)).code;
 }
 
 /**
@@ -800,9 +798,8 @@ function wayIn() {
   el("qr-mini").replaceChildren(qr);
 }
 
-function cutTo(wanted, now) {
+function cutTo(wanted) {
   showing = wanted;
-  framedAt = now;
   lobby.hidden = Boolean(wanted);
   court.hidden = !wanted;
   // What is framed, said out loud in the DOM. Nothing on the page reads it --

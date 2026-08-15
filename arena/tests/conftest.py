@@ -241,10 +241,13 @@ def live_room(client, conn, phones, grounds_connected):
 # The number in the spec, and the number the wall was rebuilt for.
 FIFTY = 50
 # One of the fifty is played out to its last half-minute and the other
-# forty-nine are not. `worth()` on the wall gives that one three points nobody
-# else can have, so the director's choice is that room from the first frame to
-# the last. Fifty identical matches would leave it picking whichever arrived
-# first, and these tests asserting on a coin toss.
+# forty-nine are not, so a tile's clock is drawn from something that varies
+# rather than from fifty copies of the same number.
+#
+# It no longer decides anything. The wall used to score matches on how
+# interesting they looked and this room won that arithmetic outright, which is
+# what made the director's pick deterministic; the rule is the newest match
+# now, so what these tests can count on is the room the fixture opens last.
 ENDGAME_ROOM = 0
 BUILT_PITCH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__)))), "game", "frontend", "dist")
@@ -384,8 +387,8 @@ def _a_frame(index, tick):
     spot = (lambda seat, side: [round(0.5 + side * (0.1 + 0.07 * seat) * math.cos(turn + seat), 4),
                                 round(0.5 + (0.1 + 0.07 * seat) * math.sin(turn + seat), 4)])
     return {
-        # Level, so every match is worth watching and only the clock separates
-        # them. See ENDGAME_ROOM.
+        # Level, so nothing about a frame distinguishes one match from another
+        # bar the clock. See ENDGAME_ROOM.
         "score": [1, 1],
         "clock": 20 if index == ENDGAME_ROOM else 120,
         "blue": [spot(seat, -1) for seat in range(5)],
