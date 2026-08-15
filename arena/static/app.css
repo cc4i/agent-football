@@ -823,7 +823,8 @@ body.big{padding:24px}
   display:inline-flex;align-items:center;gap:7px;
   border:1px solid var(--line);border-radius:999px;padding:5px 12px;
   font:inherit;font-size:.68rem;font-weight:700;letter-spacing:.1em;color:var(--mute);
-  background:none;max-width:270px;overflow:hidden;cursor:default;
+  /* 270 plus the twenty the mark takes, so adding it cost the name no letters. */
+  background:none;max-width:290px;overflow:hidden;cursor:default;
   transition:background .15s,border-color .15s;
 }
 .dir-chip i{width:7px;height:7px;border-radius:50%;flex:none;background:var(--violet);box-shadow:0 0 9px var(--violet)}
