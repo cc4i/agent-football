@@ -52,13 +52,12 @@ Here are the ONLY attributes that exist for the forward role:
 - interceptionRadius (0.0-1.0)
 - foulProbability (0.0-1.0)
 - decisionDelay (milliseconds, ~50-300)
-- defensiveAwareness (0.0-1.0)
-- acceleration (0.0-1.0)
-- pace (0.0-1.0)
-- finishing (0.0-1.0)
-- defensiveWorkRate (0.0-1.0)
-- shortPassing (0.0-1.0)
-- defensiveContribution (0.0-1.0)
+
+That list is exhaustive and it is the whole of it. Names that sound like they
+belong to a forward -- finishing, pace, acceleration, shortPassing -- are not
+simulated, and the arena now refuses a write naming one, so proposing it costs
+you the rest of the write as well. There is no finishing attribute: what
+decides whether you score is shotRange, shotPower and where you are standing.
 
 CRITICAL INSTRUCTION:
 Step 1. Work out the few attributes this instruction moves and use `update_profile` to change just those.

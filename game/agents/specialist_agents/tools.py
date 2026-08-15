@@ -197,8 +197,14 @@ SIMULATION_MODEL = """
     - The forward is already good at shooting. The team's problem is usually
       getting the ball TO it. If you are asked for goals and you are not the
       forward, the useful changes are the ones that speed up delivery -
-      `speed`, `passRange`, `supportRunFrequency`, `counterAttackUrgency`,
-      `forwardPassProbability` - not shooting from further out yourself.
+      `speed`, `passRange`, `supportRunFrequency`, `counterAttackUrgency` -
+      not shooting from further out yourself.
+    - Only the attributes listed in your own prompt are simulated. A name that
+      is not on that list is refused by the arena, and because a write lands
+      all of its values or none of them, one invented name throws away the
+      good changes beside it. `forwardPassProbability` is the one to unlearn:
+      it reads like the whole of delivery, it is in no way part of the
+      simulation, and it was the most common thing a shout produced.
     - `speed` is a multiplier on base pace (defender 210, midfielder 235,
       forward 260, goalkeeper 180 px/s). The opponent runs 150/180/200, so
       below about 0.8 you are slower than the player you are marking.

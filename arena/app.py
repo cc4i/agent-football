@@ -893,9 +893,14 @@ async def read_attributes():
 
 
 def _bands(role):
-    """One role's attributes, each with its shipped value and its two limits."""
+    """One role's attributes, each with its shipped value and its two limits.
+
+    Only the ones the match reads. The shipped files carry a good many more,
+    and offering those to a tuner is offering a lever with nothing on the end
+    of it -- the write would now be refused anyway.
+    """
     bands = {}
-    for name, value in attributes.baseline_for(role).items():
+    for name, value in attributes.simulated_baseline_for(role).items():
         low, high = attributes.range_for(name, value)
         bands[name] = {"baseline": value, "min": low, "max": high}
     return bands

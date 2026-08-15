@@ -52,13 +52,11 @@ Here are the ONLY attributes that exist for the defender role:
 - interceptionRadius (0.0-1.0)
 - foulProbability (0.0-1.0)
 - decisionDelay (milliseconds, ~50-300)
-- lineHeight (0.0-1.0)
-- clearance (0.0-1.0)
-- longPassing (0.0-1.0)
-- tackleAggression (0.0-1.0)
-- foulRate (0.0-1.0)
-- kickPower (0.0-1.0)
-- passAccuracy (0.0-1.0)
+
+That list is exhaustive and it is the whole of it. Names that sound like they
+belong to a defender -- lineHeight, clearance, longPassing, tackleAggression --
+are not simulated, and the arena now refuses a write naming one, so proposing
+it costs you the rest of the write as well.
 
 CRITICAL INSTRUCTION:
 Step 1. Work out the few attributes this instruction moves and use `update_profile` to change just those.

@@ -54,23 +54,14 @@ Here are the ONLY attributes that exist for the goalkeeper role:
 - decisionDelay (milliseconds, ~50-300)
 - diveChance (0.0-1.0)
 - trackingSpeed (0.0-1.0)
-- positioning (0.0-1.0)
-- rushOut (0.0-1.0)
-- stayOnLine (0.0-1.0)
-- sweepAggression (0.0-1.0)
-- linePositioning (0.0-1.0)
-- sweeperTendency (0.0-1.0)
-- distributionAccuracy (0.0-1.0)
-- sweepingAggression (0.0-1.0)
-- runOutChance (0.0-1.0)
-- discipline (0.0-1.0)
-- joinAttack (0.0-1.0)
-- clearance (0.0-1.0)
-- kickLength (0.0-1.0)
-- sweeperKeeper (0.0-1.0)
-- foulTendency (0.0-1.0)
-- kickPower (0.0-1.0)
-- distributionRange (0.0-1.0)
+
+That list is exhaustive and it is the whole of it. A goalkeeper collects more
+plausible-sounding names than anybody -- sweeperKeeper, rushOut, stayOnLine,
+linePositioning, joinAttack, distributionRange -- and not one of them is
+simulated. How far you stray from your line is attackPositioning and nothing
+else. The arena now refuses a write naming an attribute that is not on the list
+above, and a patch is all or nothing, so proposing one costs you the rest of
+the write as well.
 - sweeperStyle (0.0-1.0)
 - positioningRange (0.0-1.0)
 - rushingOut (0.0-1.0)

@@ -1,10 +1,31 @@
 """The one validator. These rules used to exist in two copies."""
 
+import json
 import re
+from pathlib import Path
 
 import pytest
 
 import attributes
+
+GAME_JS = Path(__file__).parents[2] / "game" / "frontend" / "src" / "game.js"
+
+
+def _engine_vocabulary():
+    """The attribute names `game.js` seeds its squads from, role by role.
+
+    Read out of the source rather than duplicated here, because the point of
+    the test that uses it is to notice when the two stop agreeing.
+    """
+    source = GAME_JS.read_text()
+    start = source.index("const hardcodedDefaults")
+    block = source[start:source.index("};", start)]
+    vocabulary = {}
+    for role in attributes.ROLES:
+        segment = block[block.index(f"{role}:"):]
+        segment = segment[:segment.index("}")]
+        vocabulary[role] = set(re.findall(r"(\w+)\s*:", segment)) - {role}
+    return vocabulary
 
 
 def test_a_change_inside_the_unit_range_is_accepted():
@@ -71,7 +92,7 @@ def test_the_rules_are_published_role_by_role(client):
     # which is exactly how one of the two ends up wrong.
     roles = client.get("/api/attributes").json()["roles"]
     assert set(roles) == set(attributes.ROLES)
-    assert set(roles["defender"]) == set(attributes.baseline_for("defender"))
+    assert set(roles["defender"]) == set(attributes.simulated_baseline_for("defender"))
 
 
 def test_every_published_attribute_carries_its_shipped_value_and_its_band(client):
@@ -90,6 +111,56 @@ def test_a_value_at_either_end_of_a_published_band_is_one_the_validator_takes(cl
         for name, band in bands.items():
             assert attributes.validate(role, {name: band["min"]}) == []
             assert attributes.validate(role, {name: band["max"]}) == []
+
+
+def test_the_simulated_set_is_exactly_what_the_engine_reads():
+    # The guard on the whole idea. `game.js` seeds both squads from
+    # `hardcodedDefaults`, so that object is the engine's vocabulary; if it
+    # gains an attribute nobody may write it, and if it loses one every write
+    # to it is silently doing nothing. Either way this should fail first.
+    if not GAME_JS.exists():
+        pytest.skip("game.js is not in this image")
+    for role, reads in _engine_vocabulary().items():
+        assert set(attributes.SIMULATED[role]) == reads, (
+            f"the {role}'s simulated set and game.js have drifted apart")
+
+
+def test_an_attribute_the_engine_never_reads_is_refused_not_quietly_kept():
+    # Measured on the venue: 50 shouts out of 50 wrote
+    # midfielder.forwardPassProbability, which game.js has never read. It
+    # validated, it reached the log, the dugout drew it moving, and the
+    # football did not change.
+    assert "forwardPassProbability" in attributes.baseline_for("midfielder")
+    problems = attributes.validate("midfielder", {"forwardPassProbability": 1.0})
+    assert "'forwardPassProbability' is not simulated and would change nothing" in problems
+
+
+def test_a_refusal_names_what_the_role_could_have_been_told_instead():
+    # The caller is usually a language model with one shout's worth of time.
+    problems = attributes.validate("forward", {"finishing": 1.0})
+    assert any(line.startswith("the forward is simulated on: ") for line in problems)
+    assert "shotRange" in problems[-1]
+
+
+def test_a_write_mixing_a_real_lever_with_a_dead_one_lands_neither():
+    # A patch is all or nothing, so the agent is told about both at once and
+    # can send the good half again by itself.
+    problems = attributes.validate("forward", {"shotRange": 1.0, "finishing": 1.0})
+    assert "'finishing' is not simulated and would change nothing" in problems
+    assert not any("shotRange" in line and "outside" in line for line in problems)
+
+
+def test_the_published_bands_offer_no_lever_with_nothing_on_the_end(client):
+    for role, bands in client.get("/api/attributes").json()["roles"].items():
+        assert set(bands) <= set(attributes.SIMULATED[role])
+        assert set(bands) == set(attributes.simulated_baseline_for(role))
+
+
+def test_the_shipped_baselines_still_carry_the_whole_squad():
+    # Seeding a room and resetting one both write the file as it stands. Only
+    # what may be *changed* narrowed; what a player *is* did not.
+    assert "finishing" in attributes.baseline_for("forward")
+    assert "finishing" not in attributes.simulated_baseline_for("forward")
 
 
 def test_every_baseline_attribute_is_named_like_the_game_reads_it():

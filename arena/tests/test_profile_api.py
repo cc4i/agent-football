@@ -79,6 +79,33 @@ def test_the_manager_in_that_dugout_may_move_its_profiles(client, phones):
     assert response.json()["changed"] == {"aggression": 0.2}
 
 
+def test_a_write_the_match_would_ignore_comes_back_as_a_refusal(client, phones):
+    # The route a specialist writes through, with the attribute fifty measured
+    # shouts out of fifty chose. It used to answer 200 and report a change:
+    # the manager watched the needle move and the football did not.
+    code = open_room(client, phones)
+    client.post(f"/api/rooms/{code}/seats/blue", json={"philosophy": "high press"})
+    response = client.patch(f"/api/rooms/{code}/teams/blue/profiles/midfielder",
+                            json={"changes": {"forwardPassProbability": 1.0},
+                                  "reason": "get it to the forward", "actor": "coach"})
+    assert response.status_code == 422
+    problems = response.json()["detail"]["problems"]
+    assert "'forwardPassProbability' is not simulated and would change nothing" in problems
+    assert any("the midfielder is simulated on: " in line for line in problems)
+    # And the squad is untouched, rather than half-written.
+    assert profiles_of(client, code, "blue")["midfielder"]["forwardPassProbability"] == \
+        attributes.baseline_for("midfielder")["forwardPassProbability"]
+
+
+def test_a_real_lever_beside_a_dead_one_is_not_quietly_applied(client, phones):
+    code = open_room(client, phones)
+    client.post(f"/api/rooms/{code}/seats/blue", json={"philosophy": "high press"})
+    response = client.patch(f"/api/rooms/{code}/teams/blue/profiles/forward",
+                            json={"changes": {"shotRange": 1.0, "finishing": 1.0}})
+    assert response.status_code == 422
+    assert profiles_of(client, code, "blue")["forward"]["shotRange"] != 1.0
+
+
 def test_a_manager_cannot_reach_into_the_other_dugout(client, phones):
     code = open_room(client, phones)
     client.post(f"/api/rooms/{code}/seats/blue", json={"philosophy": "high press"})

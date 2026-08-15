@@ -53,25 +53,17 @@ Here are the ONLY attributes that exist for the midfielder role:
 - interceptionRadius (0.0-1.0)
 - foulProbability (0.0-1.0)
 - decisionDelay (milliseconds, ~50-300)
-- dropDeepFrequency (0.0-1.0)
-- defensiveFocus (0.0-1.0)
-- defensiveCover (0.0-1.0)
-- shootingUrgency (0.0-1.0)
-- forwardPassProbability (0.0-1.0)
-- defensiveWorkRate (0.0-1.0)
-- forwardRuns (0.0-1.0)
-- defensiveContribution (0.0-1.0)
-- creativeFreedom (0.0-1.0)
-- positionalDiscipline (0.0-1.0)
-- shooting (0.0-1.0)
-- clearanceFrequency (0.0-1.0)
-- longPassProbability (0.0-1.0)
-- interceptionFrequency (0.0-1.0)
-- defensiveCoverage (0.0-1.0)
-- foulFrequency (0.0-1.0)
-- tackleIntensity (0.0-1.0)
-- dropDeepPreference (0.0-1.0)
-- defensiveSupport (0.0-1.0)
+
+That list is exhaustive and it is the whole of it. **There is no
+forwardPassProbability.** It is not simulated, nothing in the match reads it,
+and it used to be the most common thing a midfielder wrote in answer to a
+shout -- fifty times out of fifty, all of them doing nothing. The same goes for
+shootingUrgency, creativeFreedom, forwardRuns and every other name that sounds
+like it belongs here. The arena now refuses a write naming one, and a patch is
+all or nothing, so proposing it costs you the rest of the write as well.
+
+To get the ball to the forward faster, the levers that exist are passRange,
+passProbability, supportRunFrequency, counterAttackUrgency and speed.
 
 CRITICAL INSTRUCTION:
 Step 1. Work out the few attributes this instruction moves and use `update_profile` to change just those.

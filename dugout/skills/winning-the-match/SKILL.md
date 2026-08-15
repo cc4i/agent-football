@@ -91,7 +91,7 @@ to 8. Start here, then adjust.
 | role | change to | and to | and to |
 |---|---|---|---|
 | forward | `speed` 0.95 | `shotRange` 1.0 | `shotPower` 0.95 |
-| midfielder | `speed` 0.85 | `decisionDelay` 60 | `defensiveWorkRate` 0.9 |
+| midfielder | `speed` 0.85 | `decisionDelay` 60 | `interceptionRadius` 0.95 |
 | defender | `defensePositioning` 0.95 | `interceptionRadius` 0.95 | `tackleCooldown` 200 |
 | goalkeeper | `trackingSpeed` 0.9 | `attackPositioning` 0.0 | |
 
@@ -99,10 +99,17 @@ Why each one:
 
 - The forward is the only player who reliably shoots, so it gets the reach
   and the power. `shotRange` 1.0 is 700px, matching the opponent's forward.
-- The midfielder's `defensiveWorkRate` is what wins the middle back. Raising
-  `passProbability` here instead was tried and is worse: it scores more, 13
-  goals against 9, but concedes 18 against 8 and loses the match. An open
-  game is not a won game.
+- The midfielder's third change used to be `defensiveWorkRate` 0.9. **That
+  attribute is not simulated** - `game.js` has never read it - so whatever the
+  eight matches behind this table measured, it was not that. The arena now
+  refuses a write naming it, and a write lands all its values or none, so
+  following the old table would have thrown away the two good changes beside
+  it. `interceptionRadius` is the real lever in that position: an opponent's
+  pass is checked against it, so a higher one breaks up more of what comes
+  through the middle. This row has not been re-measured.
+- Raising the midfielder's `passProbability` instead was tried and is worse: it
+  scores more, 13 goals against 9, but concedes 18 against 8 and loses the
+  match. An open game is not a won game.
 - `tackleCooldown` is milliseconds between tackles, so 200 means the defender
   can challenge again almost immediately.
 - The keeper's `trackingSpeed` is a per-frame lerp toward the ball, so higher

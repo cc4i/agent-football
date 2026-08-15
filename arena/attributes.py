@@ -17,6 +17,43 @@ ROLES = ("defender", "midfielder", "forward", "goalkeeper")
 
 BASELINE_DIR = Path(__file__).parent / "baselines"
 
+# The attributes the simulation actually reads.
+#
+# `game.js` seeds both squads from `hardcodedDefaults`, and that object is the
+# engine's entire vocabulary. The shipped baselines carry far more than this --
+# `finishing`, `sweeperKeeper`, `forwardPassProbability` -- names that read as
+# though they must do something and that nothing in the match ever looks at.
+#
+# Accepting one of those was the worst of both worlds: the write validated, the
+# event log recorded it, the dugout drew the needle moving, and the football did
+# not change. Measured over 50 shouts on the venue, every single one spent a
+# write on `midfielder.forwardPassProbability`. It has never existed in the
+# engine. So an attribute outside this set is now refused rather than stored,
+# because a refusal an agent can correct beats a change that quietly means
+# nothing.
+#
+# `tests/test_attributes.py` reads `hardcodedDefaults` out of `game.js` and
+# checks it against these, so the day the engine learns a new attribute -- or
+# stops reading one -- the suite says so instead of a measurement run finding
+# it six weeks later.
+_SIMULATED_OUTFIELD = frozenset({
+    "aggression", "attackPositioning", "counterAttackUrgency", "decisionDelay",
+    "defensePositioning", "dribbleTendency", "formationDiscipline",
+    "foulProbability", "interceptionRadius", "passProbability", "passRange",
+    "passRiskTolerance", "pressingIntensity", "recoverySpeedMultiplier",
+    "shotPower", "shotRange", "speed", "supportRunFrequency", "tackleCooldown",
+    "tackleRadius", "widthPreference",
+})
+
+# Only the keeper is read for these two: `updateGkAI` uses `trackingSpeed` for
+# how fast it follows the ball and `diveChance` for whether it dives.
+SIMULATED = {
+    "defender": _SIMULATED_OUTFIELD,
+    "midfielder": _SIMULATED_OUTFIELD,
+    "forward": _SIMULATED_OUTFIELD,
+    "goalkeeper": _SIMULATED_OUTFIELD | frozenset({"diveChance", "trackingSpeed"}),
+}
+
 # Everything is a 0.0-1.0 weight except these three, which carry real units.
 _EXPLICIT_RANGES = {
     "tackleCooldown": (100.0, 2000.0),
@@ -47,13 +84,29 @@ def range_for(attribute, baseline_value=None):
 
 
 def baseline_for(role):
-    """A role's shipped attributes, as a fresh dict the caller may keep."""
+    """A role's shipped attributes, as a fresh dict the caller may keep.
+
+    The whole file, including the attributes the engine ignores: this is what a
+    room is seeded with and what `reset` writes back, and dropping keys from a
+    squad is not this function's business. `simulated_baseline_for` is the one
+    to show anybody who is choosing what to change.
+    """
     if role not in ROLES:
         raise ValueError(f"unknown role {role!r}, expected one of {', '.join(ROLES)}")
     if role not in _baselines:
         with open(BASELINE_DIR / f"{role}.json") as handle:
             _baselines[role] = json.load(handle)
     return dict(_baselines[role])
+
+
+def simulated_baseline_for(role):
+    """The shipped attributes of a role that the match actually reads.
+
+    What the tuning panel offers and what a specialist is told it may write, so
+    that nobody spends their one shout on a number with no effect.
+    """
+    return {key: value for key, value in baseline_for(role).items()
+            if key in SIMULATED[role]}
 
 
 def validate(role, changes):
@@ -65,9 +118,16 @@ def validate(role, changes):
 
     baseline = baseline_for(role)
     problems = []
+    inert = False
     for key, value in changes.items():
         if key not in baseline:
             problems.append(f"{key!r} is not an attribute of the {role}")
+            continue
+        if key not in SIMULATED[role]:
+            # Refused rather than dropped. A caller that had this silently
+            # ignored would go on believing it had changed something.
+            problems.append(f"{key!r} is not simulated and would change nothing")
+            inert = True
             continue
         if isinstance(value, bool) or not isinstance(value, (int, float)):
             problems.append(f"{key} must be a number, got {value!r}")
@@ -75,4 +135,9 @@ def validate(role, changes):
         low, high = range_for(key, baseline[key])
         if not low <= value <= high:
             problems.append(f"{key}={value} is outside {low} to {high}")
+    if inert:
+        # The caller is usually a language model correcting itself in one go,
+        # so the refusal carries the list it should have chosen from.
+        problems.append(f"the {role} is simulated on: "
+                        f"{', '.join(sorted(SIMULATED[role]))}")
     return problems
