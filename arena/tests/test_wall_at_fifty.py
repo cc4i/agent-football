@@ -164,7 +164,13 @@ async def test_clicking_a_tile_pins_it(wall_page, fifty_live_rooms):
     # wall has; the pin outranks the arithmetic until somebody lifts it.
     await wall_page.wait_for_timeout(PAST_A_ROTATION_MS)
     assert await wall_page.locator("#court").get_attribute("data-showing") == code
-    assert "Pinned" in await wall_page.locator("#directing").inner_text()
+    # Named, and named by the half of the fixture that varies. Every match here
+    # is solo, so "v The house side" is true of all fifty and would be the part
+    # of the label that survives the chip's width while the manager's name is
+    # the part ellipsised away.
+    chip = await wall_page.locator("#directing").inner_text()
+    assert chip.startswith("Pinned · Manager "), chip
+    assert "house side" not in chip, chip
 
 
 async def test_a_pinned_match_holds_the_page_it_was_on(wall_page, fifty_live_rooms):

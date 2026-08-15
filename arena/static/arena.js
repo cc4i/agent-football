@@ -652,8 +652,21 @@ function worth(room, now) {
   return score;
 }
 
-const versus = (room) =>
-  `${room.blue || "Open"} v ${room.red || (room.mode === "solo" ? HOUSE : "Open")}`;
+/**
+ * Who is playing, for a chip with about thirty characters to say it in.
+ *
+ * The same rule the tiles use, and for the same reason: the house side is on
+ * the other end of every solo match in the building, so printing it spends the
+ * chip on a phrase that is true of everything and distinguishes nothing -- and
+ * spends it badly, because what gets ellipsised to pay for it is the one name
+ * that does distinguish this match. "Pinned · Wall Check 610 v The ho..." reads
+ * worse than "Pinned · Wall Check 610" and says less.
+ *
+ * Head to head has two names that are both worth printing, and prints both.
+ */
+const versus = (room) => (room.mode === "solo"
+  ? room.blue || "Open"
+  : `${room.blue || "Open"} v ${room.red || "Open"}`);
 
 /* ── Centre court ───────────────────────────────────────────────────── */
 
