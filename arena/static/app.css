@@ -540,29 +540,15 @@ body.big{padding:24px}
 .screen-id .where{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:.72rem;color:var(--faint)}
 .bar-right{display:flex;align-items:center;gap:14px}
 
-.roomcode{display:flex;flex-direction:column;align-items:flex-end;gap:2px;line-height:1}
-.roomcode span{font-size:.6rem;letter-spacing:.2em;color:var(--faint);text-transform:uppercase;font-weight:700}
-.roomcode b{
-  font-family:'IBM Plex Mono',ui-monospace,monospace;font-weight:600;
-  font-size:1.45rem;letter-spacing:.34em;color:var(--gold);
-  text-shadow:0 0 22px rgba(255,204,0,.35);
-  padding-left:.34em; /* balance the trailing letter-space */
-}
-.role-chip{
-  display:inline-flex;align-items:center;gap:7px;
-  border:1px solid var(--line);border-radius:999px;padding:5px 12px;
-  font-size:.68rem;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--mute);
-}
-.role-chip i{width:7px;height:7px;border-radius:50%;background:var(--emerald);box-shadow:0 0 9px var(--emerald)}
-.role-chip.viewer i{background:var(--faint);box-shadow:none}
-
 /* Solo or head to head, for a room that has not kicked off. Built to the same
-   pill as the two chips beside it rather than to the board's tabs, because it
-   stands in a row of chips and a control that reaches for attention from the
-   top corner of a wall screen takes it from the room code. */
+   pill as the director chip beside it rather than to the board's tabs, because
+   it stands in a row of chips. It is the only control in this corner now: the
+   room code and the hosting chip that used to crowd it said nothing a manager
+   could act on, and the one thing here that can be acted on was losing the
+   corner to them. */
 /* Padding on the segments rather than the pill, so this stands exactly as tall
-   as the two chips beside it: same border, same padding, same type. Inset by a
-   couple of pixels instead, it stood 3px proud of them and the bar read as
+   as the chip beside it: same border, same padding, same type. Inset by a
+   couple of pixels instead, it stood 3px proud of it and the bar read as
    crooked from across a room. */
 .mode-switch{
   display:inline-flex;align-items:center;

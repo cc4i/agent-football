@@ -179,7 +179,10 @@ const screenToken = () => sessionStorage.getItem(tokenKey(code)) || "";
 /* ── This screen's own room ─────────────────────────────────────────── */
 
 function dress(snapshot) {
-  el("code").textContent = snapshot.code;
+  // The code is drawn where somebody is being asked to type it -- under the QR
+  // in the join card, and on the mini card when this screen is showing
+  // somebody else's match. Not in the bar as well: a code a manager has no use
+  // for is the largest thing in the corner of the room, and it was there twice.
   el("code-2").textContent = snapshot.code;
   el("code-3").textContent = snapshot.code;
   el("join-url").textContent = snapshot.join_url;
@@ -192,10 +195,6 @@ function dress(snapshot) {
     el(holder).replaceChildren(qr);
   }
 
-  const hosting = Boolean(screenToken());
-  el("role").className = `role-chip${hosting ? "" : " viewer"}`;
-  el("role").replaceChildren(document.createElement("i"),
-                             document.createTextNode(hosting ? "Hosting" : "Watching"));
   describe(snapshot);
 }
 
