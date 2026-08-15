@@ -12,8 +12,12 @@ from google.antigravity import (
     CapabilitiesConfig,
     LocalAgentConfig,
 )
+from google.antigravity.connections.local.local_connection_config import (
+    WIRE_PATH_ARGUMENT_KEYS,
+    normalize_wire_path,
+)
 from google.antigravity.hooks import policy
-from google.antigravity.types import Text
+from google.antigravity.types import Text, ToolCall
 
 import channel
 from skills import SKILLS_DIR
@@ -128,7 +132,15 @@ async def multiplex(response):
     yield {"kind": "usage", "actor": ACTOR_AGENT, "data": usage}
 
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+DUGOUT_DIR = Path(__file__).resolve().parent
+REPO_ROOT = DUGOUT_DIR.parent
+
+# The agent writes somewhere, because stage 2 is it writing a Playwright script
+# and running it. That somewhere is not the repository. This is the default;
+# DUGOUT_SCRATCH_DIR moves it, and wherever it is moved to has to be outside
+# the repo or the boundary below draws itself around nothing.
+DEFAULT_SCRATCH_DIR = Path.home() / ".dugout" / "workspace"
+
 _AGENT = None
 _STACK = None
 _START_ERROR = None
@@ -138,38 +150,139 @@ class AgentUnavailable(RuntimeError):
     """The SDK could not start an agent, almost always because agy is not logged in."""
 
 
-def _policies():
-    """Let the agent run the script it just wrote, but only inside the repo.
+def _inside(path: Path, root: Path) -> bool:
+    """Whether `path` lands in `root`, symlinks followed.
 
-    The SDK default is confirm_run_command, which denies run_command outright
-    when there is no interactive handler to ask. Nothing can ask in a server,
-    and stage 2 is the agent running its own Playwright script, so it would
-    fail every time. Specific denials outrank the wildcard allow, so the file
-    tools stay scoped to the repository.
+    Resolved rather than compared as text, so a scratch file that is really a
+    link back into the repository is seen for what it is.
+    """
+    try:
+        return path.expanduser().resolve().is_relative_to(root)
+    except OSError:
+        return False
+
+
+def scratch_dir() -> Path:
+    """The one directory the agent may write to.
+
+    Read at call time, not at import: app.py loads the .env after it imports
+    this module, so anything read at import would never see DUGOUT_SCRATCH_DIR.
+    """
+    configured = os.environ.get("DUGOUT_SCRATCH_DIR")
+    scratch = (Path(configured) if configured else DEFAULT_SCRATCH_DIR)
+    scratch = scratch.expanduser().resolve()
+    if _inside(scratch, REPO_ROOT):
+        raise ValueError(
+            f"DUGOUT_SCRATCH_DIR points inside the repository ({scratch}). It "
+            f"is the one place the agent is allowed to write, so aiming it "
+            f"back at the repo removes the only boundary there is.")
+    return scratch
+
+
+# The agent is shown a denied policy's name as the reason, so this one is
+# written as a sentence. A refusal that says where to go instead costs one
+# retry; a bare "denied" costs the model several guesses.
+READ_ONLY_REPO = "the repository is read-only, write to your scratch workspace instead"
+
+
+def _target_of(call: ToolCall) -> str | None:
+    """The path a file tool is aimed at.
+
+    canonical_path is the field the SDK documents for exactly this, and on the
+    in-process hook route it is set. On the route these rules actually take it
+    is not. A policy carrying a predicate is decided by a callback from the
+    harness, and that side builds the ToolCall from the wire arguments alone
+    (event_processor._handle_policy_decision_request), normalizing neither the
+    paths nor the field, where the hook side does both. So the arguments are
+    read here directly, by the SDK's own keys and through its own normalizer,
+    rather than trusting a field that arrives empty. Both are imported rather
+    than copied: if a bump moves them, this should fail loudly at startup, not
+    quietly stop matching.
+    """
+    if call.canonical_path:
+        return call.canonical_path
+    # Sorted, so two path arguments on one call cannot decide it differently
+    # from one run to the next.
+    for key in sorted(WIRE_PATH_ARGUMENT_KEYS):
+        value = call.args.get(key)
+        if isinstance(value, str) and value:
+            return normalize_wire_path(value)
+    return None
+
+
+def _writes_into_the_repository(call: ToolCall) -> bool:
+    """Whether a write tool is aimed at the repository.
+
+    A path that cannot be read off the call counts as inside: a write nobody
+    can place is not one this can vouch for.
+    """
+    target = _target_of(call)
+    if target is None:
+        return True
+    return _inside(Path(target), REPO_ROOT)
+
+
+def _policies():
+    """Let the agent run the script it just wrote, and keep it out of the repo.
+
+    Three kinds of rule, written in the order the SDK sorts them into anyway -
+    specific denials outrank the wildcard allow.
 
     workspace_only is a marker now rather than a check. Up to SDK 0.1.10 it
     carried a path predicate; since 0.1.11 the builder discards the paths it is
     handed and the in-process hook skips every rule it names, because the
     boundary moved into the localharness binary, which takes it from
-    `workspaces` on the config below. Both are the repo root, and both have to
-    stay that way: the list is what the harness matches file tools against.
+    `workspaces` on the config below. The two lists have to stay in step: the
+    config's is the one the harness actually matches file tools against, and it
+    is what makes the repository readable and the scratch directory writable.
 
-    Understand what this grants before running the dugout: shell commands are
-    not restricted, so the agent can run anything you can, including outside
-    the repository. That is deliberate. Stage 2 exists to show the agent
-    writing and launching its own Playwright script, and in practice it also
-    self-heals - when the game stack is down it will restart it. A command
-    allowlist tight enough to be meaningful rejects the compound invocations
-    it actually needs. Run this on your own machine against a repo you trust,
-    not on a shared host or against untrusted input.
+    The denials on top of it are this module's own, and they are what the
+    workspace list cannot express: the repository is in `workspaces` so the
+    agent can read it, and these take the writing back out again. They carry a
+    predicate, so the harness calls back into the hook here to decide each one.
+
+    run_command is left wide open, and that is the honest limit of all of the
+    above. Shell has no path argument to match on, so the agent can still write
+    anywhere you can, repository included, by running a command that does. The
+    file rules stop it editing this code as a matter of course; they are not a
+    sandbox against one that means to. The SDK default here, confirm_run_command,
+    denies the tool outright when there is no interactive handler to ask, and
+    nothing can ask in a server. A command allowlist tight enough to be
+    meaningful rejects the compound invocations stage 2 needs. Run this on your
+    own machine against a repo you trust, not on a shared host or against
+    untrusted input.
     """
-    return [*policy.workspace_only([str(REPO_ROOT)]), policy.allow_all()]
+    return [
+        *policy.workspace_only([str(REPO_ROOT), str(scratch_dir())]),
+        policy.deny(BuiltinTools.CREATE_FILE.value,
+                    when=_writes_into_the_repository, name=READ_ONLY_REPO),
+        policy.deny(BuiltinTools.EDIT_FILE.value,
+                    when=_writes_into_the_repository, name=READ_ONLY_REPO),
+        policy.allow_all(),
+    ]
+
+
+def _instructions(scratch: Path) -> str:
+    """The system prompt, with the two paths that are not the agent's to guess.
+
+    Substituted rather than written into the markdown, so where the agent may
+    write is stated in exactly one place. Plain replacement rather than
+    str.format, because the instructions carry a JavaScript arrow function and
+    its braces are not fields.
+    """
+    return ((DUGOUT_DIR / "instructions.md").read_text()
+            .replace("{{SCRATCH}}", str(scratch))
+            .replace("{{DUGOUT}}", str(DUGOUT_DIR)))
 
 
 def _build_config() -> LocalAgentConfig:
+    scratch = scratch_dir()
+    # The harness is handed this as a workspace, so it has to be there before
+    # the agent starts rather than on the first write.
+    scratch.mkdir(parents=True, exist_ok=True)
     return LocalAgentConfig(
         policies=_policies(),
-        system_instructions=(Path(__file__).parent / "instructions.md").read_text(),
+        system_instructions=_instructions(scratch),
         capabilities=CapabilitiesConfig(
             enable_subagents=True,
             enabled_tools=[
@@ -190,7 +303,11 @@ def _build_config() -> LocalAgentConfig:
                *TUNING_TOOL_BY_ROLE.values()],
         subagents=list(SUBAGENTS),
         skills_paths=[str(SKILLS_DIR)],
-        workspaces=[str(REPO_ROOT)],
+        # The repo first, because it is the one the agent reads and the one
+        # relative paths in a shell command resolve against. The scratch
+        # directory is the only one it can write in; _policies takes the
+        # writing back out of the repo.
+        workspaces=[str(REPO_ROOT), str(scratch)],
         vertex=True,
         project=os.environ.get("GOOGLE_CLOUD_PROJECT"),
         location=os.environ.get("GOOGLE_CLOUD_LOCATION"),
