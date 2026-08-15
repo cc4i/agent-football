@@ -72,6 +72,32 @@ spec:
           # control socket, and a garbage collection that would otherwise be a
           # dropped frame in every match at once. GROUNDS_CAPACITY below is
           # measured against this size and means nothing away from it.
+          #
+          # Both numbers were measured on the deployed instance rather than
+          # reasoned about, twice, at two different loads:
+          #
+          #   23 matches   CPU 0.149   memory 0.34 of 4Gi   (1.36 GiB)
+          #   15 matches   CPU 0.12    memory 0.061 of 8Gi  (0.49 GiB)
+          #   idle         CPU 0.007   memory 0.63 GiB
+          #
+          # Read the CPU column against one thread, not against four vCPU. Cloud
+          # Run divides by everything allocated, so a saturated single thread of
+          # a 4-vCPU instance reads as 25% and never more. 0.149 is that thread
+          # at three fifths of the only core it can use. The two loads give
+          # roughly 0.017 vCPU a match over a fifth of a core of overhead, which
+          # puts the capacity ceiling of twenty at about 0.55 vCPU and the spec's
+          # fifty just past a whole one. Fifty is therefore not a number this
+          # file can buy: a fifth vCPU is a fifth place a single-threaded page
+          # cannot run. It is scale-out, which is the `maxScale` note above.
+          #
+          # The memory column is the answer to "should this be raised", and it
+          # is no. Twenty matches - the most this instance will ever be offered,
+          # by GROUNDS_CAPACITY below - sits comfortably under 1.5 GiB, so 4Gi is
+          # about three times what the ceiling costs. It was briefly deployed at
+          # 8Gi on an extrapolation that turned out to be wrong: the reading it
+          # rested on was a long-lived instance idling after the rehearsal with
+          # its heap not yet returned, mistaken for load. A second measurement on
+          # a fresh instance is what these two rows are.
           resources:
             limits:
               cpu: "4"
