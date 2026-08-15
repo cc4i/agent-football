@@ -94,6 +94,16 @@ NAME_LIMIT = 40
 # a full house and still refuses a loop.
 COACH_RATE, COACH_BURST = 5.0, 60
 
+# A manager asking the screen to turn its room. One at a time, per manager per
+# room: what this costs the arena is nothing, and what it costs the venue is a
+# pill lighting up on a wall screen somebody is watching from across a room.
+# The minute is how long that ask stands before the same person may repeat it.
+ASK_RATE, ASK_BURST = 1.0 / 60.0, 1
+
+# What the two modes are called in a sentence somebody reads. `rooms.MODES` are
+# the words the database and the API use; these are the words a phone says.
+MODE_NAMES = {"solo": "score attack", "versus": "head to head"}
+
 # How often one room's tile may redraw on the wall. The host reports at 10 Hz
 # because that is what the match it is running needs; a thumbnail on a
 # filmstrip does not, and fifty of them at 10 Hz is five hundred messages a
@@ -268,6 +278,7 @@ async def lifespan(fastapi_app: FastAPI):
     fastapi_app.state.names = limits.Bucket(NAME_RATE, NAME_BURST)
     fastapi_app.state.rooms_opened = limits.Bucket(ROOM_RATE, ROOM_BURST)
     fastapi_app.state.coach = limits.Bucket(COACH_RATE, COACH_BURST)
+    fastapi_app.state.asks = limits.Bucket(ASK_RATE, ASK_BURST)
     # How many screens are on the wall right now, here for the same reason as
     # the buckets above: a module-level counter is shared by every test in the
     # session, and one leaked socket would then fail an unrelated test later on.
@@ -411,6 +422,24 @@ class SeatRequest(BaseModel):
 
 class ReadyRequest(BaseModel):
     ready: bool
+
+
+class ModeAskRequest(BaseModel):
+    """A manager asking the screen to turn the room they are about to join.
+
+    No token of any kind. Asking is not doing, and the screen is still the one
+    that decides -- so the only thing this has to prove is that somebody real
+    is asking, which the session cookie already does.
+    """
+
+    mode: str
+
+    @field_validator("mode")
+    @classmethod
+    def known_mode(cls, value):
+        if value not in rooms.MODES:
+            raise ValueError(f"mode must be one of {', '.join(rooms.MODES)}")
+        return value
 
 
 class ShoutRequest(BaseModel):
@@ -695,6 +724,48 @@ async def change_mode(code: str, body: ModeRequest, request: Request):
     with _rules():
         rooms.set_mode(connection, room["id"], body.mode)
     return _announce(request.app, room, request)
+
+
+@app.post("/api/rooms/{code}/mode-request")
+async def ask_for_mode(code: str, body: ModeAskRequest, request: Request,
+                       player_id: int = Depends(current_player)):
+    """Ask the screen holding this room to turn it, and let the screen decide.
+
+    Only a screen may change what a room plays, and a screen holds one room. So
+    a venue whose screens all happened to open score attack has no head to head
+    anywhere in it, however many people are queuing for one, and the person
+    holding the phone had no way to say so: the choice was made before they
+    walked in, by somebody guessing.
+
+    This is that way, and it is deliberately only a way to ask. The room does
+    not move. What arrives at the screen is a name and a mode, and somebody
+    standing at the screen taps the switch that was already there. Nothing here
+    can reshape a lobby a stranger is reading, which is the property that made
+    the token rule worth having in the first place.
+
+    Refused by `require_mode_change`, which is what would refuse the screen, so
+    a phone is never told to go ahead and ask for something the screen would
+    then be told it cannot do.
+    """
+    connection, room = _profile_room(request, code)
+    with _rules():
+        rooms.require_mode_change(connection, room["id"], body.mode)
+    if room["mode"] == body.mode:
+        raise HTTPException(409, f"that room is already {MODE_NAMES[body.mode]}")
+    # Per manager per room. A screen on a wall cannot look away from a pill
+    # that keeps lighting up, so one bored phone must not be able to strobe it,
+    # and the manager beside them must still be able to ask.
+    if not request.app.state.asks.take((room["id"], player_id)):
+        raise HTTPException(429, "you have already asked - give the screen a moment")
+
+    asked = {"type": "mode.request", "mode": body.mode,
+             "by": rooms.get_player(connection, player_id)["display_name"]}
+    # Published and not logged. The room's log is what scoring is recomputed
+    # from, and an ask is neither a thing that happened in a match nor a thing
+    # a late arrival needs replayed at them: a screen that missed one is asked
+    # again by somebody who is still standing there wanting it.
+    request.app.state.bus.publish(room_topic(room["code"]), asked)
+    return {"mode": body.mode, "by": asked["by"]}
 
 
 @app.get("/api/rooms/{code}/me")

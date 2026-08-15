@@ -165,6 +165,7 @@ cannot tell a measured 8 from another guess.
 | GET | `/api/rooms/{code}/me` | a phone with a session - which dugout is mine |
 | GET | `/api/rooms/{code}/events` | anyone; `?since=` replays only what was missed |
 | GET | `/api/rooms/{code}/qr.svg` | anyone |
+| POST | `/api/rooms/{code}/mode-request` | a phone with a session - asks the screen to turn a waiting room; the room does not move |
 | POST | `/api/rooms/{code}/seats/{team}` | a phone with a session |
 | POST | `/api/rooms/{code}/seats/{team}/ready` | that dugout's manager |
 | POST | `/api/rooms/{code}/shout` | that dugout's manager, once the match is live; in `WRKS`, a caller with `X-Arena-Service` |

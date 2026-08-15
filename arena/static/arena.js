@@ -55,6 +55,13 @@ const SILENT_MS = 4000;
 // match. Long enough to read a scoreline from the back of a room, short enough
 // that the queue on the other side of it is not waiting on anybody.
 const NEXT_LOBBY_MS = 20000;
+// How long a manager's ask for the other mode stands on the screen before the
+// pill goes quiet again. Long enough for somebody to walk over to a screen,
+// short enough that an unattended one is not pulsing all evening.
+const ASK_STANDS_MS = 60000;
+
+// What the two modes are called in a sentence. The arena says the same words.
+const MODE_WORDS = { solo: "score attack", versus: "head to head" };
 
 let code = (params.get("room") || "").toUpperCase();
 let venue = { pitch_url: "" };
@@ -73,6 +80,8 @@ let pitch = null;           // centre court's canvas, once /pitch has been loade
 let leaving = false;        // this page is on its way out to a room that works
 let handover = 0;           // the countdown from a result to the next lobby
 let switching = false;      // a mode change is with the arena, awaiting its word
+let wanted = null;          // a mode a manager has asked for, until it is given
+let asking = 0;             // the timer putting that ask down again
 const live = new Map();     // code -> what the wall knows about that room
 const tiles = new Map();    // code -> the strip's elements for it
 
@@ -126,6 +135,7 @@ async function start() {
       clientId: screenToken(),
       onMessage(message) {
         if (message.type === "room") return mine(message);
+        if (message.type === "mode.request") return asked(message);
         if (showing === code) courtside(message);
       },
       onOpen() {
@@ -221,6 +231,9 @@ function dress(snapshot) {
  * re-fetch the QR and reload the standings under the lobby on each one.
  */
 function describe(snapshot) {
+  // Given, or gone past. Either way the ask has been answered and the pill
+  // should stop asking for attention it no longer needs.
+  if (wanted && (snapshot.mode === wanted || snapshot.status !== "lobby")) letItGo();
   el("where").textContent = snapshot.mode === "solo"
     ? "Solo · against the house side" : "Head to head";
   // Offered only while this tab is holding a room that has not kicked off. A
@@ -230,6 +243,41 @@ function describe(snapshot) {
   for (const mode of ["solo", "versus"]) {
     el(`mode-${mode}`).setAttribute("aria-pressed", String(snapshot.mode === mode));
   }
+}
+
+/**
+ * A manager in the queue wants the other mode, and cannot turn the room.
+ *
+ * Only a screen may change what a room plays, so somebody who wants head to
+ * head at a venue whose screens all opened score attack used to have nowhere
+ * to put that. The ask arrives here instead, and the answer is a person: the
+ * pill lights up on the half being asked for, with the name of whoever asked,
+ * and whoever is standing at the screen presses the control that was already
+ * there. Nothing about it moves the room on its own.
+ *
+ * Ignored by a screen that could not act on it anyway - one only watching, or
+ * one whose match has kicked off - because a prompt nobody in front of it can
+ * satisfy is a wall screen nagging a room full of strangers.
+ */
+function asked(message) {
+  if (el("mode-switch").hidden || !ours || message.mode === ours.mode) return;
+  letItGo();
+  wanted = message.mode;
+  el("ask").textContent = `${message.by} wants ${MODE_WORDS[message.mode]}`;
+  el("ask").hidden = false;
+  el(`mode-${message.mode}`).classList.add("wanted");
+  // An ask stands for a minute. A screen with nobody beside it must go quiet
+  // again rather than pulse at an empty room for the rest of the evening, and
+  // a manager who is still there is still there to ask a second time.
+  asking = setTimeout(letItGo, ASK_STANDS_MS);
+}
+
+function letItGo() {
+  clearTimeout(asking);
+  asking = 0;
+  wanted = null;
+  el("ask").hidden = true;
+  for (const mode of ["solo", "versus"]) el(`mode-${mode}`).classList.remove("wanted");
 }
 
 function mine(snapshot) {

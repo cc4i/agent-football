@@ -112,6 +112,13 @@ Two controls in the bar:
 Codes have no `O`, `0`, `I` or `1` in them, because they are read across a
 noisy room and typed on a phone.
 
+**If somebody wants the other mode**, they tap "Ask for head to head" under the
+room on their `/home` page. The screen's pill lights up gold - *Alex Rivera
+wants head to head* - and whoever is standing at the screen presses it. The ask
+never moves the room on its own, stands for a minute, and is one per manager
+per room, so a bored phone cannot strobe a wall screen. A screen with nobody
+next to it simply goes quiet again.
+
 ## 3. A manager arrives
 
 Two ways in, and they converge:
@@ -278,6 +285,8 @@ Symptoms in the words you will actually see.
 | Room goes live, clock never starts | Should not happen any more - it is what the check above exists to prevent. | Check the grounds' log. This is a bug worth reporting. |
 | `somebody at this event is already managing as Alex` | One manager per name. | Pick another name. The refusal shows the holder's spelling, so a near-miss is visible. |
 | `not every dugout is ready` | A seat is empty or unready. Head to head needs both. | Fill it, or switch the room to solo from the big screen. |
+| `you have already asked - give the screen a moment` | One mode request per manager per room, per minute. | Wait, or ask about a different room. |
+| `that room is already head to head` | Asking for the mode it already plays. | Nothing to do - just join it. |
 | `give the squad a moment` | Two of that dugout's shouts are still going out. | Wait, or use a chip - presets need no chain. |
 | *The screen running this match stopped reporting* | The grounds went away. The sweep notices within 30 seconds. | The match is gone. A grounds restart or redeploy takes every live match with it, by design. Deploy between events. |
 | A dot in the dugout header goes red | That service is down. The header polls every four seconds. | Arena red first: nothing else works until it answers. |

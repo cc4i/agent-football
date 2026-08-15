@@ -507,6 +507,27 @@ a.btn{display:block;text-align:center;text-decoration:none;line-height:1.2}
 .room.red em{color:#fca5a5}
 .room span{grid-column:1/-1;font-size:.74rem;color:var(--mute);min-width:0}
 
+/* The card and the one thing you can do to it that is not joining it. Stacked
+   rather than beside, because the ask is the secondary move and a thumb going
+   for the room must not find it by accident. */
+.room-card{display:grid;gap:5px}
+.ask-mode{
+  justify-self:end;background:none;border:0;padding:4px 2px;cursor:pointer;
+  font:inherit;font-size:.66rem;font-weight:700;letter-spacing:.1em;
+  /* Right, not the inherited left: the confirmed state is long enough to take
+     two lines on a small phone, and a second line starting under the middle of
+     the first reads as a layout accident rather than as a sentence. */
+  text-align:right;
+  text-transform:uppercase;color:var(--faint);
+  text-decoration:underline;text-underline-offset:3px;
+  text-decoration-color:rgba(255,255,255,.18);
+}
+.ask-mode:hover:not(:disabled){color:var(--mute)}
+/* Asked, and waiting on a person. Not greyed further than it already is: this
+   is the state the manager most wants to be able to read back. */
+.ask-mode:disabled{cursor:default;text-decoration:none;color:var(--gold);opacity:.85}
+.ask-mode:focus-visible{outline:2px solid var(--blue);outline-offset:2px;border-radius:6px}
+
 /* No room open is the ordinary state between matches, not a fault, so it is
    drawn as an empty shelf rather than as a warning. */
 .roomless{
@@ -563,6 +584,20 @@ body.big{padding:24px}
   padding:5px 13px;border-radius:999px;
   transition:color .12s ease,background .12s ease;
 }
+/* A manager has asked for this half. It pulses rather than shouting, because
+   the thing it wants is somebody's attention for one press, and it sits in the
+   corner of a screen a room full of people is already watching a match on. */
+.mode-pick.wanted:not([aria-pressed="true"]){
+  color:var(--gold);box-shadow:inset 0 0 0 1px rgba(255,204,0,.5);
+  animation:blip 1.6s ease-in-out infinite;
+}
+/* Somebody who does not want the motion still gets the colour, which is what
+   is actually carrying the message. */
+@media (prefers-reduced-motion:reduce){.mode-pick.wanted{animation:none}}
+.ask{
+  font-size:.68rem;font-weight:700;letter-spacing:.08em;color:var(--gold);
+  white-space:nowrap;
+}
 .mode-pick:hover:not([aria-pressed="true"]):not(:disabled){color:var(--ink)}
 .mode-pick[aria-pressed="true"]{background:var(--blue-dim);color:#fff;box-shadow:inset 0 0 0 1px var(--blue-line)}
 .mode-pick:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
@@ -588,7 +623,6 @@ body.big{padding:24px}
   font-family:'Outfit',system-ui,sans-serif;font-weight:700;font-size:.95rem;letter-spacing:.02em;
 }
 .lobby-badge i{width:8px;height:8px;border-radius:50%;background:var(--gold);animation:blip 1.6s ease-in-out infinite}
-@keyframes blip{0%,100%{opacity:1}50%{opacity:.25}}
 
 /* Stretched, not centred: one dugout carries a ready line and the other may
    not, and two cards of different heights read as a layout mistake. */

@@ -229,6 +229,29 @@ def set_ready(conn, room_id, team, ready):
     conn.commit()
 
 
+def require_mode_change(conn, room_id, mode):
+    """Everything that has to hold before a room may play something else.
+
+    Split out from `set_mode` so that a manager asking a screen to turn its
+    room is refused by these rules rather than by a copy of them kept
+    somewhere else. A phone told "ask away" and a screen then told "no" is a
+    worse answer than the phone hearing the reason first, and two copies of a
+    rule are two things to keep in step. Returns the room.
+    """
+    if mode not in MODES:
+        raise RoomError(f"mode must be one of {', '.join(MODES)}")
+    room = _room(conn, room_id)
+    if room["status"] != "lobby":
+        raise RoomError("that match has already started")
+    # A solo room has no red dugout, so becoming one would have to evict
+    # whoever is sitting in this one's. The manager who walked up second is not
+    # the screen's to remove; whoever wants score attack can ask them to stand.
+    if mode == "solo" and conn.execute(
+            "SELECT 1 FROM seat WHERE room_id = %s AND team = 'red'", (room_id,)).fetchone():
+        raise RoomError("somebody is in the red dugout, and a solo room has only a blue one")
+    return room
+
+
 def set_mode(conn, room_id, mode):
     """Change which dugouts a room still in its lobby is going to need.
 
@@ -243,19 +266,9 @@ def set_mode(conn, room_id, mode):
     Only in the lobby. After the whistle the mode is what the match was scored
     against, and the boards are keyed on it.
     """
-    if mode not in MODES:
-        raise RoomError(f"mode must be one of {', '.join(MODES)}")
-    room = _room(conn, room_id)
-    if room["status"] != "lobby":
-        raise RoomError("that match has already started")
+    room = require_mode_change(conn, room_id, mode)
     if room["mode"] == mode:
         return
-    # A solo room has no red dugout, so becoming one would have to evict
-    # whoever is sitting in this one's. The manager who walked up second is not
-    # the screen's to remove; whoever wants score attack can ask them to stand.
-    if mode == "solo" and conn.execute(
-            "SELECT 1 FROM seat WHERE room_id = %s AND team = 'red'", (room_id,)).fetchone():
-        raise RoomError("somebody is in the red dugout, and a solo room has only a blue one")
     conn.execute("UPDATE room SET mode = %s WHERE id = %s", (mode, room_id))
     conn.commit()
 

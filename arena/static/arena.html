@@ -21,6 +21,10 @@
     <div class="bar-right">
       <!-- The screen guessed a mode when it opened this room, before anybody
            had walked up to it. This is how it changes its mind. -->
+      <!-- A manager in the queue has asked for the other mode. Only ever shown
+           beside a switch somebody can actually press: the ask is addressed to
+           whoever is standing at this screen. -->
+      <span class="ask" id="ask" role="status" hidden></span>
       <div class="mode-switch" id="mode-switch" role="group"
            aria-label="What this room plays" hidden>
         <button class="mode-pick" type="button" id="mode-solo" aria-pressed="true">Solo</button>
