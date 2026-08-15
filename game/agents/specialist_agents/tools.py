@@ -169,8 +169,13 @@ SIMULATION_MODEL = """
        shotRange is a fraction of 700px. Below ~0.85 the forward runs into
        traffic instead of shooting.
     2. They choose to shoot rather than pass. That chance is `1 - passProbability`.
-       passProbability is THE shoot-or-pass lever. A forward on 0.8 shoots one
-       time in five. Lower it to make the team shoot.
+       This lever belongs to the FORWARD alone, and its shipped value is already
+       0.3 - it already shoots seven times in ten, so there is almost nothing to
+       win by lowering it further and it is rarely worth a change.
+       NEVER lower the midfielder's or the defender's passProbability. Their job
+       is to deliver the ball to the forward; a midfielder that shoots instead of
+       passing loses possession 490px from goal and hands over a counter. Making
+       the whole team shoot scores less, not more, and concedes more.
     3. NO TEAMMATE IS IN THE WAY. This is the trap that catches everyone: a kick
        is redirected into a pass if any teammate is within 47 degrees of it and
        closer than 480px. So a team with everybody pushed forward cannot shoot -
@@ -189,6 +194,11 @@ SIMULATION_MODEL = """
       told to push the keeper up.
     - Shooting attributes on a defender or a goalkeeper change almost nothing.
       Do not spend a change there.
+    - The forward is already good at shooting. The team's problem is usually
+      getting the ball TO it. If you are asked for goals and you are not the
+      forward, the useful changes are the ones that speed up delivery -
+      `speed`, `passRange`, `supportRunFrequency`, `counterAttackUrgency`,
+      `forwardPassProbability` - not shooting from further out yourself.
     - `speed` is a multiplier on base pace (defender 210, midfielder 235,
       forward 260, goalkeeper 180 px/s). The opponent runs 150/180/200, so
       below about 0.8 you are slower than the player you are marking.
