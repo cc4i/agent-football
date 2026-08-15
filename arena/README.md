@@ -25,7 +25,7 @@ uv run pytest
 
 `cp .env.example .env` and edit it, or export the same names in the shell. The
 shell wins where both say something, which is what lets one exported
-`ARENA_SERVICE_TOKEN` cover all three processes. `HOST` and `PORT` are read by
+`ARENA_SERVICE_TOKEN` cover all four processes. `HOST` and `PORT` are read by
 `run.sh` rather than by the arena, so they only work from the shell.
 
 | Variable | Default | What it does |
@@ -36,7 +36,7 @@ shell wins where both say something, which is what lets one exported
 | `ARENA_SECRET` | random per start | Signs session cookies. Unset means sessions do not survive a restart - set it in anything longer-lived than a demo. Production refuses to start without it. |
 | `ARENA_SERVICE_TOKEN` | unset | Lets a server-side caller patch profiles without a phone session. Unset refuses every such call. The specialist agents need the same value. Production refuses to start without it. |
 | `ARENA_PUBLIC_URL` | derived from request | What the QR codes encode. Unset, it is worked out from the request's forwarded headers - Cloud Run does not tell a service its own hostname before the first deploy. Set it explicitly once the service has a name, or for a tunnel or a LAN address. Set it before anybody prints `/poster`: a screen can be reloaded, a sheet on a wall has to be reprinted. |
-| `ARENA_PITCH_DIR` | unset | Where the built pitch bundle is, when the arena is the thing serving it. Unset locally, where Vite serves the pitch on :5173. |
+| `ARENA_PITCH_DIR` | unset | Where the built pitch bundle is, when the arena is the thing serving it. Set it locally too if a grounds is running: the page a grounds opens is this arena's `/pitch/host.html`, not Vite's, so an arena with this unset answers 404 and no match can be played. Build it with `PITCH_BASE=/pitch/`, which is what makes the page ask for the bundle where the arena serves it. |
 | `ARENA_PITCH_URL` | `http://localhost:5173` | Where the pitch is served from. The big screen frames it. |
 | `ARENA_COACH_URL` | `http://127.0.0.1:8000` | The ADK server a shout is carried to. |
 | `ARENA_COACH_APP` | `agents` | The application name `adk web .` registers for the package beside it. |

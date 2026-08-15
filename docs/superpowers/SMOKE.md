@@ -10,7 +10,7 @@ the pitch still renders and steps 1 to 10 all pass, but every call into the
 coach fails with "No API key was provided", which breaks the shout chain in
 step 9 and the baseline restore in step 11.
 
-Export `ARENA_SERVICE_TOKEN` in all three shells, the same value in each. The
+Export `ARENA_SERVICE_TOKEN` in every shell, the same value in each. The
 squad lives in the arena now, and the arena refuses a write from a caller with
 no token: the dugout's tuners and the game's four player agents both carry it
 instead of a phone session. Get it wrong in one shell only and the symptom is
@@ -151,3 +151,25 @@ shell access, so it does not just report
 game_not_running: it reads the logs, brings the stack back up with
 game/run.sh and restarts the match. That self-repair is worth watching. Give
 it about forty seconds; all three dots should go green, not just the pitch.
+
+## The venue
+
+Two checks the dugout stages do not reach, because they are about the venue's
+football rather than the workshop's. Both need a grounds up - see the fourth
+shell in the root README, and note the arena wants `ARENA_PITCH_DIR` for it.
+
+12. **A match outlives the screen watching it.** Open `/arena`, open a room,
+    join from a phone, take a dugout, kick off. Watch the clock start, then
+    close the arena tab entirely and wait ninety seconds - past
+    `HOST_GONE_SECONDS` and a sweep, which is when this used to be an abandoned
+    match. Reopen `/arena`. The match is still there, the clock has gone on
+    without you by about ninety seconds, and the score is whatever it became
+    while nobody was looking. This is the whole reason the grounds exists; if
+    it fails, nothing else on this page matters.
+
+13. **A venue with no pitch says so.** Stop the grounds and kick off. Expected:
+    a refusal in words - `no pitch is free to run this match` - and a room
+    still sitting in its lobby with its dugouts as they were. What must not
+    happen is a room that goes live with a clock that never starts, which is
+    the failure nobody can diagnose from the floor. Start the grounds again and
+    kick off the same room to confirm it recovers without being reopened.

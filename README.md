@@ -30,8 +30,9 @@ player agents, and they pick the numbers.
 
 ## Architecture
 
-Three processes on a laptop, or one Cloud Run service with three containers in
-it. Either way the arena owns the state and everything else asks it.
+Four processes on a laptop, or two Cloud Run services: the arena with three
+containers in it, and the grounds on its own. Either way the arena owns the
+state and everything else asks it.
 
 ```
   you, in a chat window        a phone, one per manager      the big screen
@@ -46,22 +47,27 @@ it. Either way the arena owns the state and everything else asks it.
   | subagents         |       | FastAPI + Postgres                          |
   +-------------------+       +---------------------------------------------+
                                  |   ^                            ^
-                    a shout,     |   |  PATCH the profiles        |  host frames
-                    as far as    |   |  they moved, carrying      |  up, squad
-                    /run_sse     v   |  X-Arena-Service           v  changes down
+                    a shout,     |   |  PATCH the profiles        |  frames up,
+                    as far as    |   |  they moved, carrying      |  matches to
+                    /run_sse     v   |  X-Arena-Service           v  play down
                               +------------------------+  +------------------+
-                              | game agents            |  | pitch      :5173 |
-                              | coach (ADK)      :8000 |  | Vite + Phaser    |
-                              | captain (A2A)    :8001 |  | physics runs in  |
-                              | four specialists       |  | the host tab     |
+                              | game agents            |  | grounds    :8004 |
+                              | coach (ADK)      :8000 |  | one Chromium,    |
+                              | captain (A2A)    :8001 |  | every match in   |
+                              | four specialists       |  | one page         |
                               | MCP tools over stdio   |  +------------------+
                               +------------------------+
 ```
 
+The pitch on :5173 is not in that picture any more, and that is the point: it
+is the lab where the simulator is worked on, not where the venue's football is
+played.
+
 | | what it is | on |
 |---|---|---|
 | `arena/` | Rooms, seats, player profiles, the event log, scoring and the live match bus. The only writer of the squad. | :8003 |
-| `game/` | The simulator, near enough as it was: a hook so the score is readable from outside the canvas, and a kit portrait in each top corner. The game's own agents live here too. | :5173 pitch, :8000 coach, :8001 captain |
+| `game/` | The simulator, near enough as it was: a hook so the score is readable from outside the canvas, and a kit portrait in each top corner. The game's own agents live here too. | :5173 lab, :8000 coach, :8001 captain |
+| `grounds/` | One headless Chromium, told by the arena which matches to play, holding all of them in a single page. | :8004 |
 | `dugout/` | The showcase: a chat UI over an in-process Antigravity agent, with one tuner subagent per player. | :8002 |
 
 **The arena owns the state.** Profiles used to be four JSON files beside the
@@ -71,11 +77,17 @@ refuses anything outside them naming every problem at once, records who moved
 what, and tells the pitch. A tuner's change and a shout's change land the same
 way, and neither has to know the other exists.
 
-**The host is trusted for physics and nothing else.** One tab per room advances
-the simulation and reports positions and events; the arena keeps the log and
-works the result out from it afterwards. A host cannot say who won. The Chrome
-window Antigravity opens in stage 2 is one of those tabs and nothing more
-special than that.
+**The football belongs to a server, not to a tab.** The grounds is one headless
+Chromium the arena assigns matches to, and every match in the venue runs in the
+same page there. Nothing a person can close is holding a simulation: shut the
+big screen mid-match, come back ninety seconds later, and the clock has moved
+on without you. The big screen only watches now.
+
+**The grounds is trusted for physics and nothing else.** It advances the
+simulation and reports positions and events; the arena keeps the log and works
+the result out from it afterwards. A host cannot say who won. The Chrome window
+Antigravity opens in stage 2 plays its own match in its own tab, which is what
+a lab is for, and it is nothing more special than that.
 
 **The two agent systems never blur.** The dugout embeds the Antigravity SDK
 directly, so thoughts, tool calls and subagent work stream into the match log
@@ -102,10 +114,12 @@ what keeps the workshop working with no room and no phone in sight.
    huddle. The phone, the dugout and the pitch all watch the same relay.
 
 A specialist can also call the MCP server its own process spawns over stdio, to
-report an injury or ask to come off. Those are the one thing that
-does not go through the arena: they are written per room into the pitch's
-public directory and polled by the browser, because they are a toast on screen
-rather than anything the match is scored on.
+report an injury or ask to come off. Those used to be written as JSON files
+beside the pitch and polled by the browser, which is why they only ever reached
+one screen. They go to the arena now, carrying the same `X-Arena-Service` as
+everything else, and come back out on the room's socket - so the toast reaches
+the wall and every phone at once, and is still in the log when you cut away and
+come back.
 
 ### One tune, end to end
 
@@ -143,12 +157,21 @@ cp game/.env.example   game/.env      # then set GOOGLE_CLOUD_PROJECT
 cp dugout/.env.example dugout/.env    # same
 cp arena/.env.example  arena/.env     # ships ready for one machine
 
-export ARENA_SERVICE_TOKEN=dev-token  # the same value in all three shells
+export ARENA_SERVICE_TOKEN=dev-token  # the same value in all four shells
+export ARENA_PITCH_DIR=$PWD/game/frontend/dist         # from the repository root
+(cd game/frontend && PITCH_BASE=/pitch/ npm run build) # what the grounds plays in
 
-cd arena  && ./run.sh                 # rooms, seats and player profiles
-cd game   && ./run.sh                 # frontend, coach and captain
-cd dugout && ./run.sh                 # then open http://localhost:8002
+cd arena   && ./run.sh                # rooms, seats and player profiles
+cd game    && ./run.sh                # the lab, the coach and the captain
+cd grounds && ./run.sh                # the Chromium that plays the matches
+cd dugout  && ./run.sh                # then open http://localhost:8002
 ```
+
+The build and `ARENA_PITCH_DIR` are what the fourth shell needs: the grounds
+opens the arena's copy of the pitch, not Vite's, and an arena with no pitch
+directory answers 404 for it. Without a grounds up, kick-off is refused in
+words - `no pitch is free to run this match` - and the room stays in its lobby.
+See `grounds/README.md`.
 
 The game's and the dugout's `.env` are both needed. Without `game/.env` the
 pitch still renders and most of the quest works, but every call into the game's
@@ -168,10 +191,13 @@ the script it writes in stage 2. Run this on your own machine.
 
 ## Deployed
 
-One Cloud Run service with three containers - the arena on the port, the coach
-and the captain on the loopback interface they share - and a Cloud SQL database
-behind it. `deploy/service.yaml` is the whole topology and `deploy/README.md`
-is how to put it there.
+Two Cloud Run services and a Cloud SQL database behind them. The arena is three
+containers - the arena on the port, the coach and the captain on the loopback
+interface they share. The grounds is its own service, because a browser holding
+a venue's football is the thing most likely to need replacing on its own and a
+container in the arena's instance cannot be replaced alone. `deploy/service.yaml`
+and `deploy/grounds.yaml` are the whole topology and `deploy/README.md` is how
+to put it there.
 
 The dugout does not go with it. It embeds the Antigravity CLI and runs shell
 commands unrestricted, which is exactly what stage 2 needs and exactly what has

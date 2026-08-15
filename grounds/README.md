@@ -30,8 +30,22 @@ someone tidied away), not infrastructure. Deploy between events.
 
 ## Running it
 
-Needs an arena to play for. It is allowed to be down at boot - this waits, and
-reconnects for as long as it is up.
+Needs an arena to play for, and that arena has to be serving the pitch: the
+page this opens is `{ARENA_URL}/pitch/host.html`, which is the arena's copy and
+not Vite's. A stock local arena leaves `ARENA_PITCH_DIR` unset and answers 404
+there, so build the bundle once and point the arena at it:
+
+```bash
+cd game/frontend && PITCH_BASE=/pitch/ npm run build
+```
+
+`PITCH_BASE` is not optional. Without it the built page asks for `/bundle/...`,
+the arena serves it under `/pitch/bundle/...`, and what you get is a page that
+loads, defines no `window.grounds`, and never says why. `arena/Dockerfile` sets
+the same value, so this is the deployed build rather than a special one.
+
+Then run the arena with `ARENA_PITCH_DIR=<repo>/game/frontend/dist` exported,
+and this beside it:
 
 ```bash
 cd grounds
@@ -39,6 +53,10 @@ ARENA_URL=http://localhost:8003 ARENA_SERVICE_TOKEN=dev-token ./run.sh
 ```
 
 The first run downloads Chromium (~150MB); every run after that is instant.
+
+Iterating on the simulation itself does not need any of that - :5173 is the lab
+and it reloads as you type. Rebuild when you want the venue's matches to pick
+the change up.
 
 ```bash
 uv run pytest
@@ -67,18 +85,36 @@ shell wins where both say something, which is what lets one exported
 ## Sizing `GROUNDS_CAPACITY`
 
 The number is per instance and it is a ceiling on CPU, not on memory. One match
-is one Phaser game stepping Arcade physics for four players and a ball, with no
-rendering and no audio - cheap, but not free, and fifty of them in one page all
-step on the same thread.
+is one Phaser game stepping Arcade physics for ten players and a ball, with no
+rendering and no audio - cheap, but not free, and every one of them in a page
+steps on that page's single thread. More vCPUs do not raise this directly; a
+faster one does.
 
-Measure it rather than guess: run the capacity check in
-`docs/superpowers/plans/2026-08-15-grounds-host-farm.md`, watch the frame
-interval as matches are added, and set the value where the interval is still
-flat. Set it too high and every match in the venue gets slow together, which is
-the failure nobody can see from a tile on a wall; set it too low and kick-off
-says the venue is full while there is CPU going spare. Scale out - more
-instances - rather than up, and the arena will fill each one to its stated
-capacity before it moves to the next.
+Measure it rather than guess. `tests/test_capacity_rehearsal.py` is the ramp:
+it opens matches one at a time against a real arena, watches every room's own
+socket, and stops when the slowest match drops below 8 frames a second or its
+match clock falls under 0.9 of real time.
+
+```bash
+ARENA_URL=http://localhost:8003 ARENA_SERVICE_TOKEN=dev-token \
+  GROUNDS_CAPACITY_CHECK=1 uv run pytest tests/test_capacity_rehearsal.py -s
+```
+
+On a laptop it went past 64 - the whole range the ramp looks at - with the
+slowest match at 9.5 Hz and its clock at 0.99x. Fifty matches in one page is
+not a stretch there. That is a laptop core, though, and the deployed number has
+to describe a Cloud Run one, so measure the deployed instance instead: point
+the same command at the deployed arena and add `GROUNDS_ALREADY_RUNNING=1`,
+which stops it launching a browser of its own and leaves the football to the
+grounds already connected. Give that instance a temporarily generous capacity
+first, or the arena runs out of pitches before the page runs out of CPU - the
+ramp says which of the two stopped it.
+
+Then set the value under the measured ceiling with a margin. Too high and every
+match in the venue gets slow together, which is the failure nobody can see from
+a tile on a wall; too low and kick-off says the venue is full while there is
+CPU going spare. Scale out - more instances - rather than up, and the arena
+fills each one to its stated capacity before it moves to the next.
 
 ## Health
 
