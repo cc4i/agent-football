@@ -240,8 +240,15 @@ export class SoccerGameScene extends Phaser.Scene {
     this.rightGoalBack = 1338;
 
     this.postsGroup = this.physics.add.staticGroup();
+    // Back of the net first, goal line second, for both ends. Passed the other
+    // way round, the right goal's back net -- a wall the full height of the
+    // mouth -- is built *on* the goal line at 1258 and boards the goal up. It
+    // is invisible, because the nets are painted into the pitch image: the
+    // screen looks right while blue's shots stop 5px short of scoring. Measured
+    // over 36 full matches, blue scored 0 and red 41, and the ball's x never
+    // once passed 0.890 of the pitch - the near face of a wall centred on 1258.
     this.buildGoalColliders(this.leftGoalBack, this.leftGoalLine);
-    this.buildGoalColliders(this.rightGoalLine, this.rightGoalBack);
+    this.buildGoalColliders(this.rightGoalBack, this.rightGoalLine);
     this.drawGoals();
     this.createAnimations();
 
