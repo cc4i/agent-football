@@ -22,6 +22,12 @@
   --emerald:#10b981;
   --violet:#9a7bff;
 
+  /* Google's four, for the venue's name and nothing else. Kept apart from the
+     tokens above on purpose: those are the product's palette, and these are a
+     wordmark. Anything reaching for --g-red to colour a red dugout has picked
+     up the wrong red. */
+  --g-blue:#4285f4;  --g-red:#ea4335;  --g-yellow:#fbbc04;  --g-green:#34a853;
+
   --ink:#f3f4f6;
   --mute:#9ca3af;
   --faint:#616b7d;
@@ -57,6 +63,28 @@ body{
 }
 .mono{font-family:'IBM Plex Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums}
 .display{font-family:'Outfit',system-ui,sans-serif;font-weight:800;letter-spacing:-.01em}
+
+/* The venue's name, in Google's four.
+
+   A letter to an element, cycling blue, red, yellow, blue, green, red the way
+   the Google wordmark itself does, so the name reads as one mark wherever it
+   is printed: the big screen, both phone headers, the pitch and the sheet on
+   the wall. The cycle carries across the space, so "WorldCup" picks up where
+   "Futsal" left off rather than restarting -- one wordmark of fourteen
+   letters, not two of six and eight.
+
+   Written into the markup rather than split by script. The name is the one
+   string on these pages that will never change at runtime, and a wall screen
+   painting its own title a frame after everything else is a wall screen that
+   flickers its title every time somebody walks past and reloads it.
+
+   The spaces between words are text rather than elements, which is what keeps
+   nth-child counting letters instead of gaps. */
+.brand>b{font-weight:inherit}
+.brand>b:nth-child(6n+1),.brand>b:nth-child(6n+4){color:var(--g-blue)}
+.brand>b:nth-child(6n+2),.brand>b:nth-child(6n+6){color:var(--g-red)}
+.brand>b:nth-child(6n+3){color:var(--g-yellow)}
+.brand>b:nth-child(6n+5){color:var(--g-green)}
 
 /* ══════════════════════════════════════════════════════════════════
    The phone: /join and /play
@@ -1002,6 +1030,12 @@ body.paper{display:flex;flex-direction:column;align-items:center;padding:26px 16
   padding:40px 34px 32px;text-align:center;box-shadow:0 22px 60px rgba(0,0,0,.55);
 }
 .poster .eyebrow{color:#6b7280}
+/* The wordmark as ink. The four above are mixed for a near-black screen and
+   two of them are barely there on white: the yellow at eyebrow size prints as
+   a gap in the middle of the word, and this is the one page in the product
+   that ends up on paper. Google's own darker set, which is what it uses on a
+   light background for the same reason. */
+.poster{--g-blue:#1a73e8;--g-red:#d93025;--g-yellow:#e37400;--g-green:#188038}
 .poster h1{
   font-family:'Outfit',system-ui,sans-serif;font-size:2.9rem;font-weight:800;
   letter-spacing:-.02em;line-height:1;margin:7px 0 10px;

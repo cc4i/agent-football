@@ -12,7 +12,16 @@
   --red-glow: rgba(239, 68, 68, 0.5);
   --gold-accent: #ffcc00;
   --neon-glow: 0 0 15px var(--blue-glow), 0 0 30px var(--red-glow);
-  
+
+  /* Google's four, for the wordmark and nothing else. The same values the
+     arena's app.css carries, because the pitch and the big screen print the
+     same name and it has to be the same mark on both. */
+  --g-blue: #4285f4;
+  --g-red: #ea4335;
+  --g-yellow: #fbbc04;
+  --g-green: #34a853;
+
+
   font-family: 'Inter', sans-serif;
   background-color: var(--bg-main);
   color: var(--text-primary);
@@ -74,11 +83,28 @@ body {
   line-height: 1.05;
   letter-spacing: 2px;
   margin: 0;
-  background: linear-gradient(135deg, #3b82f6 0%, #ef4444 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  filter: drop-shadow(0 0 12px rgba(59, 130, 246, 0.35));
+  /* What used to fill this was one gradient running blue to red across the
+     whole word. The name is Google's four now, a letter at a time, so the
+     colour belongs to each letter and what is left here is the light they sit
+     in -- white rather than blue, which would tint four colours towards one. */
+  filter: drop-shadow(0 0 14px rgba(255, 255, 255, 0.18));
 }
+
+/* The venue's name, in Google's four.
+
+   A letter to an element, cycling blue, red, yellow, blue, green, red the way
+   the Google wordmark itself does. The cycle carries across the space, so
+   "WorldCup" picks up where "Futsal" left off rather than restarting.
+
+   The same rule as the arena's app.css, and deliberately so: the pitch and the
+   big screen print the same name and it has to be the same mark on both. */
+.brand > b { font-weight: inherit; }
+.brand > b:nth-child(6n+1),
+.brand > b:nth-child(6n+4) { color: var(--g-blue); }
+.brand > b:nth-child(6n+2),
+.brand > b:nth-child(6n+6) { color: var(--g-red); }
+.brand > b:nth-child(6n+3) { color: var(--g-yellow); }
+.brand > b:nth-child(6n+5) { color: var(--g-green); }
 
 .sub-title {
   display: inline-flex;

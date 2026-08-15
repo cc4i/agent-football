@@ -40,7 +40,9 @@ document.querySelector('#app').innerHTML = `
     <!-- Title Header with Top-Right Simulation Speed -->
     <header class="game-header">
       <div class="header-titles">
-        <h1 class="neon-text">Futsal WorldCup</h1>
+        <!-- A letter to a <b>, so each can take its colour from the cycle in
+             style.css. No whitespace between them: it would set the word apart. -->
+        <h1 class="neon-text brand"><b>F</b><b>u</b><b>t</b><b>s</b><b>a</b><b>l</b> <b>W</b><b>o</b><b>r</b><b>l</b><b>d</b><b>C</b><b>u</b><b>p</b></h1>
         <p class="sub-title">
           <svg class="gemini-icon" viewBox="0 0 24 24" width="16" height="16" aria-label="Gemini">
             <defs>
