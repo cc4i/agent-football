@@ -371,15 +371,32 @@ const elsewhere = (now = Date.now()) =>
 /** How many pages of tiles the matches on now come to. Never fewer than one. */
 const pageCount = (count) => Math.max(1, Math.ceil(count / TILES));
 
+/**
+ * How many tiles go on each page, once those pages are spread evenly.
+ *
+ * Not TILES. Filling each page to twelve and letting the last one take the
+ * remainder is right for a list somebody scrolls and wrong for a strip that
+ * turns itself over: thirteen matches divide as twelve and one, and the
+ * carousel then puts that one tile up -- alone in a twelve-column grid, eleven
+ * columns of nothing beside it -- and holds it there for a full rotation. Seven
+ * and six is the same thirteen matches and no empty page to turn to.
+ *
+ * The page count is unchanged, so this moves tiles between pages rather than
+ * adding a page: fifty matches are five pages either way, 10 10 10 10 9 instead
+ * of 12 12 12 12 1.
+ */
+const perPage = (count) => Math.ceil(count / pageCount(count)) || TILES;
+
 function strip() {
   const others = elsewhere();
   const pages = pageCount(others.length);
+  const per = perPage(others.length);
   // Pages do not overlap, because a numbered page that shares half its tiles
   // with the one before it is a page nobody can hold in their head. The last
   // one is short instead, and a page that emptied under somebody -- matches do
   // end -- hands them the last page there is rather than a blank one.
   if (page >= pages) page = pages - 1;
-  const visible = others.slice(page * TILES, page * TILES + TILES);
+  const visible = others.slice(page * per, page * per + per);
 
   // Redrawn only when the page itself changes. The strip is repainted on every
   // director tick, and rebuilding twelve canvases each time would blank them

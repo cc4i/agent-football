@@ -56,6 +56,30 @@ async def test_every_match_is_reachable_by_paging(wall_page, fifty_live_rooms):
     assert codes - seen == {on_court}
 
 
+async def test_no_page_of_the_strip_is_left_nearly_empty(wall_page, fifty_live_rooms):
+    """Fifty matches make five pages, and none of them is one tile in a blank row.
+
+    The strip is a twelve-column grid, so a page holding one tile is a tile and
+    eleven columns of nothing. Filling each page to twelve puts the remainder on
+    the last one, and forty-nine matches divide as 12, 12, 12, 12, 1 -- which
+    the carousel then turns to unasked, every fifth rotation, and holds for
+    twelve seconds. Nobody clicked anything and the wall emptied itself.
+
+    So the pages are balanced rather than filled: 10, 10, 10, 10, 9. The
+    assertion is that no two pages differ by more than a tile, because that is
+    the property, and it holds at every number of matches rather than at this
+    one.
+    """
+    counts = []
+    for index in range(await wall_page.locator("#pages [data-page]").count()):
+        await wall_page.locator(f"#pages [data-page='{index}']").click()
+        await wall_page.wait_for_selector(f"#pages [data-page='{index}'].on")
+        counts.append(await wall_page.locator(".tile[data-code]").count())
+
+    assert min(counts) > 1, f"a page of the wall is nearly empty: {counts}"
+    assert max(counts) - min(counts) <= 1, f"the pages are lopsided: {counts}"
+
+
 async def test_clicking_a_tile_pins_it(wall_page, fifty_live_rooms):
     tile = wall_page.locator(".tile[data-code]").first
     code = await tile.get_attribute("data-code")
