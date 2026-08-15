@@ -213,12 +213,11 @@ function dress(snapshot) {
   el("join-url").textContent = snapshot.join_url;
   el("board").src = "/board";
 
-  for (const holder of ["qr", "qr-mini"]) {
-    const qr = document.createElement("img");
-    qr.src = `/api/rooms/${snapshot.code}/qr.svg`;
-    qr.alt = `QR code for room ${snapshot.code}`;
-    el(holder).replaceChildren(qr);
-  }
+  const qr = document.createElement("img");
+  qr.src = `/api/rooms/${snapshot.code}/qr.svg`;
+  qr.alt = `QR code for room ${snapshot.code}`;
+  el("qr").replaceChildren(qr);
+  // The rail's code is not this one's twin any more, so `wayIn` draws it.
 
   describe(snapshot);
 }
@@ -288,6 +287,11 @@ function mine(snapshot) {
   if (snapshot.status === "abandoned") return startFresh(snapshot.mode);
   el("again").hidden = snapshot.status !== "finished";
   describe(snapshot);
+  // Kick-off is the moment this room stops being one to walk into, and full
+  // time is the moment it starts again. Neither is a cut, so neither would
+  // reach `wayIn` through `cutTo`, and the rail would go on offering a code
+  // for a match that had already started.
+  wayIn();
   drawSeats(snapshot);
   if (snapshot.status === "finished" && screenToken()) handOver();
   direct();
@@ -754,6 +758,48 @@ async function bootCourt() {
   }
 }
 
+/**
+ * The way into the venue, kept on the screen for as long as football is on it.
+ *
+ * There used to be no way in at all for the commonest thing a screen does: its
+ * own match, on its own centre court. The rail's code was shown only while the
+ * screen had been given over to somebody *else's* match, on the reasoning that
+ * the lobby carries its own way in - and the lobby is precisely what is not on
+ * the screen once a match is. So a room walked up to mid-match had a pitch, two
+ * relays, and a footer reading "scan the code to start one" over no code.
+ *
+ * Which code, though, is the whole of it, and it is not always this room's.
+ * A room with a match in it has its dugouts full: its own QR leads to a join
+ * form for a match that has already started, which is a worse answer than none.
+ * The venue's code is the one that is true whatever this screen is doing - it
+ * lands on the rooms that are open now, and on the form first for anybody who
+ * has not registered. So: this room's code while this room can still be walked
+ * into, and the venue's the moment it cannot.
+ */
+function wayIn() {
+  // The lobby is up, and carries a far larger version of this.
+  el("join-mini").hidden = !showing;
+  if (!showing) return;
+
+  const joinable = ours && ours.status === "lobby" && showing !== code;
+  const want = joinable ? `room:${code}` : "venue";
+  el("way-in").textContent = joinable ? "Start a match here" : "Scan to play";
+  // There is no venue code to read out and type - the sheet on the wall is a
+  // QR and nothing else - so the line under it goes rather than sits empty.
+  el("code-3").hidden = !joinable;
+  if (joinable) el("code-3").textContent = code;
+
+  // Only when it actually changes. Re-setting src on every cut re-fetches the
+  // image, and a QR that blinks each time the carousel turns is one nobody
+  // gets their phone up to in time.
+  if (el("qr-mini").dataset.showing === want) return;
+  el("qr-mini").dataset.showing = want;
+  const qr = document.createElement("img");
+  qr.src = joinable ? `/api/rooms/${code}/qr.svg` : "/qr.svg";
+  qr.alt = joinable ? `QR code for room ${code}` : "QR code to play here";
+  el("qr-mini").replaceChildren(qr);
+}
+
 function cutTo(wanted, now) {
   showing = wanted;
   framedAt = now;
@@ -763,9 +809,7 @@ function cutTo(wanted, now) {
   // it is for the test that drives fifty matches past this screen, and for
   // anybody with the inspector open wondering which room they are looking at.
   court.dataset.showing = wanted || "";
-  // The lobby carries its own way in. The rail only needs one when the screen
-  // has given the room over to somebody else's match.
-  el("join-mini").hidden = !wanted || wanted === code;
+  wayIn();
   strip();
 
   if (courtRoom) {

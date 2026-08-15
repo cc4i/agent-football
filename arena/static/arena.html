@@ -53,7 +53,7 @@
     </div>
 
     <aside class="join-card">
-      <h2>Scan to manage</h2>
+      <h2>Scan to play</h2>
       <p>Your phone becomes the dugout. Talk to the squad; they decide how to play it.</p>
       <div class="qr" id="qr"></div>
       <div class="or-code">
@@ -90,18 +90,16 @@
         <div class="relay-scroll" id="relay-red"></div>
       </section>
 
-      <!-- Somebody else's match is on the screen, so the way into this one has
-           to stay on it.
-
-           Not "Scan to manage", which is the lobby card's wording and belongs
-           there: the lobby is the only thing on the screen when it is up, so
-           the room it means is not in question. Here it is, because the pitch
-           beside this code is showing a different match, and a code offering
-           to "manage" what somebody is watching is offering the wrong room. -->
+      <!-- Football is on the screen, so the lobby card that carries the way in
+           has gone, and this has to carry it instead. Both halves are written
+           by `wayIn` in arena.js, which decides *which* code belongs here:
+           this room's while this room can still be walked into, and the
+           venue's the moment its dugouts are full. A code offering a match
+           that has already kicked off is a worse answer than no code. -->
       <div class="join-mini" id="join-mini" hidden>
         <div class="qr" id="qr-mini"></div>
         <div>
-          <span class="eyebrow">Start a match here</span>
+          <span class="eyebrow" id="way-in">Start a match here</span>
           <b id="code-3">····</b>
         </div>
       </div>
