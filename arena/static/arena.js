@@ -95,6 +95,17 @@ async function start() {
     // before the room is drawn rather than after the socket says the same
     // thing, so nobody watches a dead room's QR code go up and come down.
     if (ours.status === "abandoned") return startFresh(ours.mode);
+    // A room in the address this tab holds no token for. The address outlives
+    // the tab that earned it -- a bookmark, an autocompleted URL, a restored
+    // session, the same link opened on a second display -- and the token does
+    // not, because it is in sessionStorage on purpose. Left as it was, the page
+    // drew a screen that could do nothing: no way to turn the room between solo
+    // and head to head, no way to open another, and nothing on it saying why.
+    // Every screen that lands here wants the same thing, so give it that rather
+    // than a read-only copy of somebody else's lobby.
+    if (!sessionStorage.getItem(tokenKey(ours.code))) {
+      return startFresh(ours.mode, "This screen is not running that room. Opening a new one…");
+    }
     code = ours.code;
     dress(ours);
     // Our own room's socket stays open whatever is on the screen: it is how the
@@ -162,13 +173,17 @@ async function open() {
  * load rather than opening a room in place: `start` already does all of it in
  * the right order, and the alternative is unpicking a socket, a token and a
  * strip by hand to arrive in the same state.
+ *
+ * The other way in is an address naming a room this tab never held. That room
+ * is alive and somebody else's, rather than dead, but the answer is the same:
+ * this screen can do nothing with it, and what it is for is hosting.
  */
-function startFresh(mode) {
+function startFresh(mode, why = "That room closed. Opening a new one…") {
   // The arena publishes an ending to its own watchers as well as deciding it,
   // so one dead room can arrive here more than once.
   if (leaving) return;
   leaving = true;
-  el("badge").textContent = "That room closed. Opening a new one…";
+  el("badge").textContent = why;
   el("again").hidden = true;
   location.assign(`/arena?mode=${mode || MODE}`);
 }
