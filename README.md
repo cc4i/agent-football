@@ -7,6 +7,10 @@ work and judge whether it was any good.
 You are the manager. You type what you want in plain English. Antigravity does
 the work, in front of you.
 
+Operating it rather than reading about it? **[`GUIDE.md`](GUIDE.md)** walks the
+whole thing in order: bringing it up, an event from the printed sheet to the
+board, the workshop's five stages, and what every failure message means.
+
 ## What Antigravity actually does here
 
 Five things, in any order and as often as you like:
@@ -224,6 +228,9 @@ team sheet too, by clicking the skill on stage 4.
 
 ## Docs
 
+- `GUIDE.md` - how it runs, in the order it happens: bringing it up, the venue
+  flow end to end, the workshop's five stages, and what each failure message
+  means. Start here if you are operating it rather than reading it.
 - `docs/superpowers/SMOKE.md` - the manual checklist, and what each step should
   look like when it is working.
 - `docs/superpowers/specs/` - the design, including why the dugout is built the
