@@ -65,22 +65,30 @@ body.phone{display:flex;justify-content:center}
 /* Three heights for one box, because the oldest phone in the venue decides
    which of them is used.
 
-   `100dvh` is the right answer and iOS Safari only learned it in 15.4. Before
-   that there is `100vh`, and on iOS `100vh` is the screen with both toolbars
-   retracted -- taller than what anybody can actually see. Every phone page
+   `100vh` is first and is wrong everywhere it is read: on iOS it is the screen
+   with both toolbars retracted, taller than anybody can see. Every phone page
    pins its primary action to the bottom of this box, so that difference is the
-   Ready button sitting behind the address bar: on the dugout, which is
-   `overflow:hidden` below, with no scrolling to go and get it. A manager on an
-   old handset scans the code and simply cannot start the match.
+   Ready button sitting behind the address bar.
 
-   `-webkit-fill-available` is what those versions call the space actually
+   `-webkit-fill-available` is what Safari before 15.4 calls the space actually
    available, toolbars already subtracted. It sits in the middle because the
    cascade takes the last declaration the browser understood: old Safari stops
-   at it, everything else goes on to `dvh` and never uses it. Nothing has to be
-   removed when the old handsets age out -- the line stops being reached. */
+   at it, everything else goes on to the last line and never uses it. Nothing
+   has to be removed when the old handsets age out.
+
+   `svh` last, and not the `dvh` that was here. `dvh` is the viewport as it is
+   *this second*, which sounds like the honest number and is the wrong one to
+   build a fixed shell out of: the dugout cannot scroll, so Safari never
+   retracts a toolbar for it, and both an iPhone XR with the full bottom bar
+   and an iPhone 17 with the floating one laid the page out to a height neither
+   of them was showing -- 161px of it past the bottom of the glass, the shout
+   chips among them, with `overflow:hidden` and no scrolling to go and get
+   them. `svh` is the small viewport: the height with every toolbar out, which
+   is the one state a page that never scrolls is ever in. It is the same 15.4
+   that brought `dvh`, so this costs no phone anything. */
 .pscreen{
   width:100%;max-width:430px;
-  min-height:100vh;min-height:-webkit-fill-available;min-height:100dvh;
+  min-height:100vh;min-height:-webkit-fill-available;min-height:100svh;
   display:flex;flex-direction:column;
   padding:calc(14px + env(safe-area-inset-top)) 16px calc(16px + env(safe-area-inset-bottom));
 }
@@ -93,7 +101,15 @@ html.phone{height:-webkit-fill-available}
    screen, where nobody can reach them. The join form is the other way round:
    it has to be able to run past a short screen. */
 body.phone.fixed{
-  height:100vh;height:-webkit-fill-available;height:100dvh;overflow:hidden;
+  height:100vh;height:-webkit-fill-available;height:100svh;
+  /* `auto`, where this was `hidden`, and it should never once be used: the
+     relay above is the flexible child and it is the thing that scrolls, so the
+     shell has nothing to overflow with. It is here because `hidden` is what
+     turned a viewport unit reading a few pixels long into a manager who could
+     not shout -- the chips were laid out, and then clipped away with no way
+     back to them. A browser that lies about its own height should cost
+     somebody a scroll, not the match. */
+  overflow-y:auto;overscroll-behavior:contain;
 }
 body.phone.fixed .pscreen{height:100%;min-height:0}
 
@@ -360,8 +376,23 @@ a.btn{display:block;text-align:center;text-decoration:none;line-height:1.2}
 .relay-empty span{font-size:.79rem;color:var(--faint);line-height:1.5}
 
 /* ── The dugout's lower half ─────────────────────────────────────── */
-.prelay{flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden}
+/* The relay is the only child of the dugout that can give, so on a short
+   screen it gave everything: at 320x454 it measured zero and a manager shouted
+   into a panel that was not there. A floor, and the pitch above it shrinks
+   first -- see the short-screen block below for why that is the right order. */
+.prelay{flex:1;min-height:132px;display:flex;flex-direction:column;overflow:hidden}
 .prelay .relay{flex:1;min-height:0;overflow:hidden;padding:11px 12px}
+
+/* Short screens, in the order things should be given up.
+
+   The mini pitch is the first to go and the relay is the last, because the
+   venue has a wall with the real match on it and this panel is the only place
+   the squad answers you. A phone showing a 60px thumbnail of a game that is
+   already six feet tall behind it, next to nothing at all from four agents
+   that just replied, has its priorities backwards. */
+@media (max-height:700px){ .mini{height:82px} }
+@media (max-height:620px){ .mini{height:62px;margin-bottom:9px} }
+@media (max-height:540px){ .mini{display:none} }
 
 .composer{flex:none;margin-top:11px}
 .shout-row{display:flex;gap:6px;margin-bottom:8px}
