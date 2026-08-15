@@ -28,7 +28,12 @@
                 aria-pressed="false">Head to head</button>
       </div>
       <button class="btn ghost slim" id="again" type="button" hidden>New room</button>
-      <span class="dir-chip" id="director" hidden><i></i><span id="directing">Auto</span></span>
+      <!-- A button rather than a label, because it is the only way back. A pin
+           puts its match on centre court and centre court is the one room the
+           strip leaves out, so there is no tile left to click a second time,
+           and a screen on a wall has no Escape key to fall back on. -->
+      <button class="dir-chip" id="director" type="button" disabled hidden
+      ><i></i><span id="directing">Auto</span><b class="dir-off" aria-hidden="true">✕</b></button>
       <span class="role-chip" id="role"><i></i>Hosting</span>
       <span class="roomcode"><span>Room</span><b id="code">····</b></span>
     </div>
@@ -104,10 +109,16 @@
   <!-- Always: what else is going on right now -->
   <section class="wall" id="wall">
     <div class="wall-hd">
-      <span class="eyebrow">Also on now</span>
+      <!-- How many, from whichever page is up. The tiles are numbered along the
+           whole strip, so this is also the last number on the last page. Inside
+           the heading rather than beside it: it is part of what the heading
+           says, and the row below spaces its children apart. -->
+      <span class="eyebrow">Also on now <b class="wall-count" id="wall-count"
+                                           hidden>0</b></span>
       <!-- Filled in by the wall, and only there when there is a second page. -->
       <nav class="pages" id="pages" aria-label="Pages of matches" hidden></nav>
-      <span class="wall-hint" id="wall-hint">Click a match to put it on the big screen · Esc for auto</span>
+      <span class="wall-hint" id="wall-hint">Click a match to put it on the big
+        screen · the chip above hands it back</span>
     </div>
     <div class="wall-strip" id="tiles"></div>
   </section>

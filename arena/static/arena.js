@@ -396,22 +396,39 @@ function strip() {
   // one is short instead, and a page that emptied under somebody -- matches do
   // end -- hands them the last page there is rather than a blank one.
   if (page >= pages) page = pages - 1;
-  const visible = others.slice(page * per, page * per + per);
+  const first = page * per;
+  const visible = others.slice(first, first + per);
 
   // Redrawn only when the page itself changes. The strip is repainted on every
   // director tick, and rebuilding twelve canvases each time would blank them
   // until their next frame -- a wall that flickers every two seconds.
-  const shown = visible.map((room) => room.code).join(" ");
+  //
+  // Keyed on where the page starts as well as what is on it, because the
+  // numbering below is drawn from that offset and the two can move apart:
+  // thirteen matches put codes 8 to 13 on page two, and one of the first seven
+  // ending leaves the same six codes there numbered 7 to 12.
+  const shown = `${first} ${visible.map((room) => room.code).join(" ")}`;
   if (shown !== stripped) {
     stripped = shown;
     tiles.clear();
     el("wall-hint").hidden = visible.length === 0;
-    el("tiles").replaceChildren(...visible.map((room, index) => tileFor(room, index + 1)));
+    // Numbered along the whole strip rather than from one on every page. A
+    // number that restarts counts nothing -- page two reads 1 to 10 exactly
+    // like page one -- where a number that runs on is a count: the last tile
+    // on the last page is how many matches are on.
+    el("tiles").replaceChildren(
+        ...visible.map((room, index) => tileFor(room, first + index + 1)));
     if (!visible.length) {
       el("tiles").append(text("p", "wall-none",
                               "No other matches right now. Scan the code to start one."));
     }
   }
+  // Outside the redraw, which only runs when the page turns: a match ending on
+  // page four changes the total without changing anything on page one, and the
+  // total is the one number on this header that has to be right from any page.
+  const total = el("wall-count");
+  total.textContent = String(others.length);
+  total.hidden = others.length === 0;
   pager(pages);
   for (const room of visible) paintTile(room);
 }
@@ -473,6 +490,9 @@ function tileFor(room, number) {
   tile.type = "button";
   tile.className = "tile";
   tile.dataset.code = room.code;
+  // What is printed on it, so the keyboard can find a tile by the number
+  // somebody is reading off it rather than by where it happens to be drawn.
+  tile.dataset.no = String(number);
   tile.title = `Put ${room.code} on the big screen`;
   tile.addEventListener("click", () => pin(room.code));
 
@@ -575,10 +595,17 @@ function direct() {
   if (showing) label(showing);
   strip();
 
-  el("director").hidden = ![...live.values()].some((room) => onNow(room, now));
+  const chip = el("director");
+  chip.hidden = ![...live.values()].some((room) => onNow(room, now));
   const chosen = pinned && live.get(pinned);
   el("directing").textContent = chosen ? `Pinned · ${versus(chosen)}` : "Auto";
-  el("director").className = `dir-chip${chosen ? " pinned" : ""}`;
+  chip.className = `dir-chip${chosen ? " pinned" : ""}`;
+  // Inert while the director has it. The chip reports who is choosing and its
+  // only power is to stop being the operator, so on auto there is nothing for
+  // a press to do -- and pinning whatever happens to be up at that moment,
+  // silently, is the one thing it must not do.
+  chip.disabled = !chosen;
+  chip.title = chosen ? "Hand the big screen back to auto" : "";
 }
 
 /**
@@ -764,30 +791,47 @@ function pin(wanted) {
   direct();
 }
 
+/**
+ * Give the screen back to the director, all of it.
+ *
+ * The carousel starts again on the next turn rather than in half a minute,
+ * because this is somebody saying they have finished rather than somebody
+ * pausing between tiles -- which is what `browsingNow` is already for.
+ *
+ * Two ways in, one behaviour. Escape is the operator at a keyboard; the chip
+ * is the same intent on a screen that has no keyboard, and a wall that meant
+ * two slightly different things by "auto" would be a wall nobody trusts.
+ */
+function toAuto() {
+  pinned = null;
+  clearTimeout(browsing);
+  browsing = null;
+  problem.hidden = true;
+  direct();
+}
+
+el("director").addEventListener("click", toAuto);
+
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape") {
-    // The one gesture that hands the screen back, so it hands back all of it:
-    // the carousel starts again on the next turn rather than in half a minute.
-    pinned = null;
-    clearTimeout(browsing);
-    browsing = null;
-    problem.hidden = true;
-    return direct();
-  }
+  if (event.key === "Escape") return toAuto();
   // Cmd-1 and Ctrl-1 belong to the browser's tabs, and an operator reaching for
   // one of those is not asking for a match.
   if (event.metaKey || event.ctrlKey || event.altKey) return;
   if (event.key === "ArrowLeft") return goToPage(page - 1);
   if (event.key === "ArrowRight") return goToPage(page + 1);
-  // One key, so the last three tiles on a page have a number and no shortcut.
-  // The mouse reaches them, the arrows page past them, and a two-key sequence
-  // to save a click on a wall screen would be worse than either.
+  // One key, so the shortcuts run out at nine and the rest of the wall is
+  // reached with the mouse. The alternative is a two-key sequence to save a
+  // click on a screen somebody is already standing at, which is worse.
   const number = Number(event.key);
   if (!Number.isInteger(number) || number < 1 || number > 9) return;
-  // Off the strip as drawn rather than the list behind it, so the number on a
-  // tile is the number that puts it up whatever the rotation is doing.
-  const wanted = [...tiles.keys()][number - 1];
-  if (wanted) pin(wanted);
+  // The tile wearing that number, not the nth tile drawn. Those were the same
+  // thing while every page started at one; now that the numbering runs on
+  // across the strip, following the position instead would answer 9 on page
+  // two with a tile printed 19. A number that means one thing everywhere is
+  // worth more than a shortcut on every page, so past the ninth match the key
+  // does nothing and the tile says as much by not being numbered 1 to 9.
+  const wanted = el("tiles").querySelector(`.tile[data-no="${number}"]`);
+  if (wanted) pin(wanted.dataset.code);
 });
 
 // The mode of the match just played rather than the page's, which after a room

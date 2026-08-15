@@ -746,6 +746,13 @@ body.big{padding:24px}
 .wall{flex:none;margin-top:16px;padding-top:14px;border-top:1px solid var(--line)}
 .wall-hd{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:10px}
 .wall-hint{font-size:.68rem;color:var(--faint)}
+/* How many are on, inside the eyebrow rather than out with the pager: it is
+   part of what that heading says. Monospaced and unspaced against the tracked
+   capitals around it, so it reads as a figure and not as a last word. */
+.wall-count{
+  font-family:'IBM Plex Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums;
+  font-size:.76rem;color:var(--gold);letter-spacing:0;
+}
 /* One row of twelve, however few are on: a tile that grows to fill the row is
    a tile that changes size when a match ends, and the eye reads that as
    something having happened. The row is the shape; the page fills what it can. */
@@ -805,17 +812,31 @@ body.big{padding:24px}
 }
 
 /* Who is choosing what is on the big screen. It is only ever the director or
-   whoever is standing at the keyboard, so the chip says which. */
+   whoever is standing at the keyboard, so the chip says which -- and while it
+   is the second of those, the chip is also the way back to the first.
+
+   A button, so `font` and `background` are reset rather than inherited, and
+   `disabled` while the director has it: on auto there is nothing to hand back
+   and a press that silently pinned the current pick would be the opposite of
+   what it says. Nothing about it looks pressable until there is. */
 .dir-chip{
   display:inline-flex;align-items:center;gap:7px;
   border:1px solid var(--line);border-radius:999px;padding:5px 12px;
-  font-size:.68rem;font-weight:700;letter-spacing:.1em;color:var(--mute);
-  max-width:270px;overflow:hidden;
+  font:inherit;font-size:.68rem;font-weight:700;letter-spacing:.1em;color:var(--mute);
+  background:none;max-width:270px;overflow:hidden;cursor:default;
+  transition:background .15s,border-color .15s;
 }
 .dir-chip i{width:7px;height:7px;border-radius:50%;flex:none;background:var(--violet);box-shadow:0 0 9px var(--violet)}
 .dir-chip span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.dir-chip.pinned{border-color:rgba(255,204,0,.45);color:var(--gold)}
+.dir-chip.pinned{border-color:rgba(255,204,0,.45);color:var(--gold);cursor:pointer}
 .dir-chip.pinned i{background:var(--gold);box-shadow:0 0 9px var(--gold)}
+.dir-chip.pinned:hover{background:rgba(255,204,0,.12);border-color:rgba(255,204,0,.75)}
+/* The affordance, and only when there is something to undo. Sized off the chip
+   rather than the page so it stays a mark beside the label instead of a second
+   thing to read, and given room a thumb can land on at arm's length. */
+.dir-off{display:none;flex:none;margin:-4px -6px -4px 1px;padding:4px 6px;font-size:.8em;opacity:.65}
+.dir-chip.pinned .dir-off{display:block}
+.dir-chip.pinned:hover .dir-off{opacity:1}
 
 /* ══════════════════════════════════════════════════════════════════
    The standings: /board

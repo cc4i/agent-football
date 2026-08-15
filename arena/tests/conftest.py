@@ -307,8 +307,21 @@ async def fifty_live_rooms(wall_server):
     # The physics tokens went down the control socket at kick-off and nowhere
     # else, which is the whole point of the split: the stand-ins read them from
     # the grounds they are standing in for.
+    #
+    # Waited for rather than read the instant the last `/start` returns. The
+    # send is awaited inside that request, so fifty replies ought to mean fifty
+    # assignments -- but this has come up short once, and an assertion that
+    # fires on the first pass turns a slow one into a failure that says nothing
+    # about which room it was. Twenty seconds of patience costs a passing run
+    # nothing and gives a failing one the codes.
+    await _until(lambda: len(farm.assignments) >= FIFTY,
+                 f"the arena assigned a pitch to only {{}} of {FIFTY} rooms",
+                 farm.assignments)
     tokens = {sent["code"]: sent["token"] for sent in farm.assignments}
-    assert set(tokens) == set(codes), "the arena did not assign every room a pitch"
+    assert set(tokens) == set(codes), (
+        "the arena did not assign every room a pitch; missing "
+        f"{sorted(set(codes) - set(tokens))}, unexpected "
+        f"{sorted(set(tokens) - set(codes))}")
 
     socket_url = wall_server.replace("http://", "ws://", 1)
     stop = asyncio.Event()

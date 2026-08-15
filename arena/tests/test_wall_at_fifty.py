@@ -80,6 +80,78 @@ async def test_no_page_of_the_strip_is_left_nearly_empty(wall_page, fifty_live_r
     assert max(counts) - min(counts) <= 1, f"the pages are lopsided: {counts}"
 
 
+async def test_the_tile_numbers_run_on_across_the_pages(wall_page, fifty_live_rooms):
+    """One numbering for the whole strip, not one per page.
+
+    A number that restarts at 1 on every page is a number that counts nothing:
+    the second page of a wall reads 1 to 10 exactly like the first, so the only
+    thing it tells you is where a tile sits in a slice you cannot see the edges
+    of. Running the numbers on turns them into a count -- the last tile on the
+    last page is how many matches are on -- and the header prints that total so
+    it can be read from the first page too.
+    """
+    numbers = []
+    for index in range(await wall_page.locator("#pages [data-page]").count()):
+        await wall_page.locator(f"#pages [data-page='{index}']").click()
+        await wall_page.wait_for_selector(f"#pages [data-page='{index}'].on")
+        numbers += [int(await no.inner_text())
+                    for no in await wall_page.locator(".tile-no").all()]
+
+    assert numbers == list(range(1, len(numbers) + 1)), (
+        f"the strip is numbered {numbers}, which restarts rather than counts")
+    assert await wall_page.locator("#wall-count").inner_text() == str(len(numbers))
+
+
+async def test_a_digit_puts_up_the_tile_wearing_it(wall_page, fifty_live_rooms):
+    """The number printed on a tile is the key that pins it, on any page.
+
+    The shortcut used to mean "the nth tile drawn", which was the same thing
+    back when every page started at 1. Now that the numbering runs on, it has
+    to follow the print rather than the position, or page two would answer 1
+    with a tile wearing an 11.
+    """
+    await wall_page.locator("#pages [data-page='1']").click()
+    await wall_page.wait_for_selector("#pages [data-page='1'].on")
+
+    # On `data-no`, which is what the shortcut resolves against, and exactly:
+    # page two prints 11 to 20, and asking for tiles whose number *contains* a
+    # nine would find the nineteenth and pass for the wrong reason.
+    assert await wall_page.locator(".tile[data-no='9']").count() == 0, (
+        "page two of a fifty-match wall starts past nine, so no digit reaches it")
+
+    await wall_page.keyboard.press("9")
+    await wall_page.wait_for_timeout(1_000)
+    # Nothing was pinned, rather than the second page's first tile being pinned
+    # because it happens to be drawn ninth somewhere.
+    assert await wall_page.locator("#directing").inner_text() == "Auto"
+
+
+async def test_the_chip_hands_the_screen_back_without_a_keyboard(wall_page,
+                                                                 fifty_live_rooms):
+    """A wall is a screen on a wall. Escape is not a gesture it has.
+
+    Clicking a tile a second time would be the obvious way out, and there is no
+    tile: pinning a match moves it to centre court, and centre court is the one
+    room the strip leaves out. So the only thing on the page that knows a pin is
+    in force is the chip that says so, and that is what has to lift it.
+    """
+    tile = wall_page.locator(".tile[data-code]").first
+    code = await tile.get_attribute("data-code")
+    await tile.click()
+    await wall_page.wait_for_function(
+        "(code) => document.querySelector('#court').dataset.showing === code", arg=code)
+    assert await wall_page.locator(f".tile[data-code='{code}']").count() == 0
+
+    await wall_page.locator("#director").click()
+    await wall_page.wait_for_function(
+        "(code) => document.querySelector('#court').dataset.showing !== code",
+        arg=code, timeout=30_000)
+    assert await wall_page.locator("#directing").inner_text() == "Auto"
+    # And it is inert on the way back, so a second click cannot pin the auto
+    # pick and leave the wall stuck on it with the chip still reading "Auto".
+    assert await wall_page.locator("#director").is_disabled()
+
+
 async def test_clicking_a_tile_pins_it(wall_page, fifty_live_rooms):
     tile = wall_page.locator(".tile[data-code]").first
     code = await tile.get_attribute("data-code")
