@@ -91,9 +91,18 @@ steps on that page's single thread. More vCPUs do not raise this directly; a
 faster one does.
 
 Measure it rather than guess. `tests/test_capacity_rehearsal.py` is the ramp:
-it opens matches one at a time against a real arena, watches every room's own
-socket, and stops when the slowest match drops below 8 frames a second or its
-match clock falls under 0.9 of real time.
+each step names a target, opens whatever the page is short of, watches every
+room's own socket, and stops when the slowest match drops below 8 frames a
+second or its match clock falls under 0.9 of real time.
+
+The shortfall goes out all at once rather than one room after another, and that
+is the difference between measuring the page and measuring the ramp. Holding N
+matches means replacing one every 180/N seconds, because a match is three
+minutes and lets itself go at full time; a serial top-up pays five HTTP round
+trips and a pickup wait per match, and against a venue across the internet that
+price passes 180/N in the low twenties. A run that opened them one at a time
+stopped dead at 23 with the page still at 9.9 Hz and its clocks at 1.01x - no
+strain anywhere, just a ramp that could no longer outrun full time.
 
 ```bash
 ARENA_URL=http://localhost:8003 ARENA_SERVICE_TOKEN=dev-token \
@@ -115,6 +124,35 @@ match in the venue gets slow together, which is the failure nobody can see from
 a tile on a wall; too low and kick-off says the venue is full while there is
 CPU going spare. Scale out - more instances - rather than up, and the arena
 fills each one to its stated capacity before it moves to the next.
+
+### What the deployed instance actually did
+
+On the 4 vCPU / 4 GiB instance in `deploy/grounds.yaml`: **23 concurrent
+matches, slowest 9.6 Hz, median 9.9 Hz, slowest clock 0.99x.** No ceiling was
+found. Nothing in those numbers trends toward one either - the clocks sat
+between 0.98x and 1.01x the whole way up, which is real time to within the
+measurement.
+
+The ramp stopped three times and not once was it the football:
+
+1. the serial top-up above, at 23;
+2. the same wall again after that was fixed, this time as a client-side read
+   timeout on a kick-off POST;
+3. Cloud Run recycling the arena instance underneath it - `1012 (service
+   restart)` on every socket at once, six seconds of `no available instance`,
+   then a clean boot. See "When Cloud Run recycles the arena" in
+   `deploy/README.md`.
+
+So `GROUNDS_CAPACITY` is 20: under the largest number actually demonstrated,
+with margin, on the reasoning about asymmetry above. The real ceiling is
+somewhere above 23 and finding it needs a driver closer to the venue than a
+laptop on the other side of the internet - the page was never the thing that
+ran out.
+
+The spec's fifty in one page is unproven here and is not reached by raising
+this number on a guess. It is scale-out, and scale-out needs each grounds
+instance individually addressable; `deploy/grounds.yaml` says so where it pins
+`maxScale` to one.
 
 ## Health
 

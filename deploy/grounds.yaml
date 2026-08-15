@@ -86,8 +86,20 @@ spec:
             # How many matches this instance offers to run. A promise about CPU:
             # past it the arena refuses kick-off rather than letting every match
             # in the venue slow down together.
+            #
+            # Measured on this instance, not guessed and not carried over from
+            # the laptop: the capacity rehearsal held 23 concurrent matches here
+            # with the slowest at 9.6 Hz and its clock at 0.99x - no strain at
+            # all, and no ceiling found. Twenty sits under the largest number
+            # actually demonstrated, because the two ways of being wrong are not
+            # the same size. Too low refuses a kick-off and says so. Too high
+            # slows every match in the venue together, which is the one failure
+            # nobody watching a tile on a wall can see.
+            #
+            # Raising it to reach the spec's fifty would be a guess. Fifty is
+            # scale-out, and scale-out is the `maxScale` note above.
             - name: GROUNDS_CAPACITY
-              value: "12"
+              value: "20"
             # The one credential this service has, and the same secret the arena
             # reads. A different one is a control socket closed with 4403 and an
             # instance retrying forever against a token that will never work.

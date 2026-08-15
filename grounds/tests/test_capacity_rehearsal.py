@@ -170,14 +170,29 @@ async def _top_up_to(venue, farm, target):
     the authority on what is being played: matches reach full time on their own
     and let themselves go, and a step that assumed otherwise would report a
     number of matches that had already finished.
+
+    The shortfall is opened all at once rather than one room after another, and
+    that is the difference between measuring the page and measuring this loop.
+    Holding N matches on means replacing one every 180/N seconds; a serial
+    top-up pays five HTTP round trips and a pickup wait per match, and against
+    a venue on the other side of the internet that price passes 180/N somewhere
+    in the low twenties. An earlier run stopped dead at 23 for exactly that
+    reason, with the page still at 9.9 Hz and its clocks at 1.01x -- no strain
+    anywhere, simply a ramp that could no longer outrun full time.
     """
     for _ in range(target * 2 + 4):
         await farm.reconcile()
-        if len(farm.running) >= target:
+        missing = target - len(farm.running)
+        if missing <= 0:
             return
-        await _picked_up(farm, await venue.open_and_kick_off())
+        await asyncio.gather(*(_open_one(venue, farm) for _ in range(missing)))
     raise AssertionError(f"could not get {target} matches running at once; "
                          f"the page is playing {len(farm.running)}")
+
+
+async def _open_one(venue, farm):
+    """One room, kicked off, waited on until the page has it."""
+    await _picked_up(farm, await venue.open_and_kick_off())
 
 
 async def _picked_up(farm, code):

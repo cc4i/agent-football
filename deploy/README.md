@@ -438,6 +438,46 @@ address, so the laptop has no route to it. That leaves the fifty rooms and their
 event logs behind, which nothing renders and nothing reaps. They are a few
 thousand rows and the tier will not notice, but they are there.
 
+### Clearing both rehearsals, rooms and all
+
+The grounds capacity ramp leaves the same kind of mess under its own domain -
+managers named `Rehearsal 0` upward, at `@grounds.example.com` - and after
+three runs against prod it was 96 managers and 181 rooms, which is a standings
+board with nothing human on the first page.
+
+A Cloud Run job clears both, and unlike the SQL above it takes the rooms and
+their event logs too. It runs on the arena's own image inside the VPC, which is
+what gives it a route to the private instance:
+
+```bash
+gcloud run jobs create tidy-rehearsals --region="$REGION" \
+    --image="$IMAGE" \
+    --network=default --subnet=default --vpc-egress=private-ranges-only \
+    --set-env-vars="ARENA_DB=$ARENA_DB,TIDY_B64=$(base64 < tidy_rehearsals.py | tr -d '\n')" \
+    --set-secrets="PGPASSWORD=arena-db-password:latest" \
+    --max-retries=0 --task-timeout=5m \
+    --command=/app/.venv/bin/python \
+    --args='^@^-c@import base64,os;exec(base64.b64decode(os.environ["TIDY_B64"]))'
+
+gcloud run jobs execute tidy-rehearsals --region="$REGION" --wait
+```
+
+The script is `deploy/tidy_rehearsals.py`. It matches on the masked email's
+domain rather than on the display name, because a human who types "Rehearsal
+12" into the lobby is a manager whose row this has no business touching, and it
+deletes a room only when every seat in it belongs to a rehearsal player. It
+rolls back and prints its counts unless `TIDY_APPLY=1` is set, so the first run
+is always the dry run.
+
+Read what it did with `gcloud logging read`, not from the execute command -
+the job's stdout goes to Cloud Logging:
+
+```bash
+gcloud logging read \
+    'resource.type="cloud_run_job" AND resource.labels.job_name="tidy-rehearsals"' \
+    --limit=40 --format='value(textPayload)' --freshness=20m
+```
+
 ## If the first revision never goes ready
 
 The coach and the captain bound `127.0.0.1` once, on the argument that the
@@ -562,9 +602,42 @@ The grounds answers the same four commands with `grounds` in place of `arena`,
 and one line in its log is worth knowing:
 
 ```
-connected to the arena at https://arena-... , offering 12 pitches
+connected to the arena at https://arena-... , offering 20 pitches
 ```
 
 Without it, nothing is being played anywhere and every kick-off in the venue is
-a 503. The arena's side of the same moment is `grounds joined, capacity 12; 1
+a 503. The arena's side of the same moment is `grounds joined, capacity 20; 1
 connected`, and the pair is the whole handshake.
+
+## When Cloud Run recycles the arena
+
+It does, on its own schedule, and `maxScale: 1` means there is no second
+instance to carry the venue while it happens. Seen in prod during the capacity
+rehearsal, and worth recognising in a log before a workshop rather than during
+one:
+
+```
+grounds: the arena socket dropped (received 1012 (service restart)); back in 0.5s
+grounds: the arena socket dropped (timed out during opening handshake); back in 1.0s
+grounds: connected to the arena at https://arena-..., offering 20 pitches
+```
+
+Twenty-three seconds end to end, and the grounds' backoff handled it without
+help - that part works. What did not survive is the matches. Every room's
+socket comes back at once against an arena that is still booting, and the page
+logs `WebSocket is closed before the connection is established` and, for the
+ones that got far enough, `Unexpected response code: 429`. A match whose socket
+does not come back is dropped, and the supervisor counts it finished:
+
+```
+grounds: page: WebSocket connection to '.../ws/rooms/GQV2' failed: ...
+supervisor: 3 finished: 5CXX, GQV2, J36K (18 of 64)
+```
+
+That is five matches lost to one recycle. The spec accepts the same failure for
+a grounds restart - "one process holds the venue" - and this is the arena's
+half of it, which the spec does not call out. Nothing here reconnects a match
+that was mid-play: kick-off is the only thing that starts one. It is a real
+limit on a long workshop and it is not a tuning knob; closing it means the
+grounds resuming a room it already holds rather than dropping it, which is a
+design change and not a deploy setting.

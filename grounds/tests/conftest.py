@@ -52,6 +52,12 @@ PATIENCE_SECONDS = 20
 # refuses a kick-off the ramp meant to make.
 CEILING_TO_LOOK_FOR = 64
 
+# How long a room may go without a frame before it stops counting as one being
+# played. Frames come at ten a second, so this is twenty missed in a row: past
+# anything a network hiccup explains, and far short of the thirty seconds the
+# arena's own sweep waits before calling a match abandoned.
+SILENT_SECONDS = 2.0
+
 
 class NoPitchFree(Exception):
     """Every grounds the arena knows about is full.
@@ -124,10 +130,10 @@ class Venue:
         self.token = token
         self.seen = {}
         self.watchers = {}
-        # The rooms a frame has actually arrived from and not yet stopped
-        # arriving from. Kept apart from `seen`, which is emptied every window:
-        # this is what is being played, not what has been measured lately.
-        self.playing = set()
+        # Room -> when a frame last arrived from it. Kept apart from `seen`,
+        # which is emptied every window: this is what is being played, not what
+        # has been measured lately.
+        self.heard_from = {}
         self._numbered = itertools.count()
 
     @property
@@ -177,7 +183,7 @@ class Venue:
                     message = json.loads(await socket.recv())
                     if message.get("type") != "state":
                         continue
-                    self.playing.add(code)
+                    self.heard_from[code] = time.monotonic()
                     self._note(self.seen[code], message.get("clock"))
         except asyncio.CancelledError:
             raise
@@ -187,7 +193,7 @@ class Venue:
             # top-up is what notices, which is the same thing the venue does.
             return
         finally:
-            self.playing.discard(code)
+            self.heard_from.pop(code, None)
 
     @staticmethod
     def _note(watched, clock):
@@ -211,6 +217,20 @@ class Venue:
         """
         for watched in self.seen.values():
             watched.update(_nothing_seen_yet(), clock=watched["clock"])
+
+    def playing_now(self):
+        """The rooms a frame has arrived from in the last `SILENT_SECONDS`.
+
+        Recently, rather than ever, and that distinction is the whole of this
+        method. A room's socket stays open after full time -- the phone reads
+        its result off the same socket -- so a finished match goes on looking
+        connected while sending nothing at all. Counting those, a ramp that
+        believed it had 33 matches on was measuring a page playing 17: it kept
+        being told the target was met and stopped opening rooms, and every
+        number it printed past the eighteenth carried the wrong label.
+        """
+        cutoff = time.monotonic() - SILENT_SECONDS
+        return {code for code, at in self.heard_from.items() if at >= cutoff}
 
     async def settle(self, seconds):
         """Sit still for a window, having forgotten the one before it."""
@@ -249,11 +269,11 @@ class Venue:
 class Elsewhere:
     """A grounds this rehearsal did not launch: a deployed one, measured.
 
-    The local farm knows what it is playing because it is what was told to play
-    it. This one is inferred from the only evidence that crosses the network: a
-    room sending frames is a room somebody is simulating. That is a stricter
-    reading than the arena's own books, which record what was assigned rather
-    than what is actually being played.
+    The local farm knows what it is playing because it asks the page. This one
+    is inferred from the only evidence that crosses the network: a room sending
+    frames right now is a room somebody is simulating right now. That is a
+    stricter reading than the arena's own books, which record what was assigned
+    rather than what is actually being played.
     """
 
     def __init__(self, venue):
@@ -261,7 +281,7 @@ class Elsewhere:
 
     @property
     def running(self):
-        return self.venue.playing
+        return self.venue.playing_now()
 
     async def reconcile(self):
         """Nothing to do: `running` is read off the frames every time."""
