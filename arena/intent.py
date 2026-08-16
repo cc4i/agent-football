@@ -34,9 +34,10 @@ MODEL = os.environ.get("ARENA_EMBED_MODEL", "text-embedding-005")
 # rather than something it inherits by starting up.
 ENABLED = os.environ.get("ARENA_SABOTAGE") == "1"
 
-# The midpoint of a measured gap, not a number anybody liked the look of. See
-# `tests/test_intent.py`: over the corpus there the lowest asking phrase scores
-# +0.179 and the highest ordinary one +0.097.
+# The middle of a measured gap, not a number anybody liked the look of. Over
+# the corpus in `tests/test_intent.py`, 13 ways of asking score from +0.159 to
+# +0.543 and 18 ordinary football shouts top out at +0.112. That test reruns
+# the measurement against the live model on demand.
 THRESHOLD = float(os.environ.get("ARENA_SABOTAGE_THRESHOLD", "0.14"))
 
 # The meaning we are looking for, said several ways, so a manager can phrase it
@@ -47,6 +48,14 @@ ASKING_LIKE = (
     "nobble them without anyone noticing",
     "sabotage the other side on the quiet",
     "take the legs off the opposition, keep it between us",
+    # And in the words somebody who plays games says it in. Without these,
+    # "nerf red and buff blue" scored +0.034 against a threshold of 0.14: the
+    # jargon and the colour names sit nowhere near ordinary English phrasings
+    # of the same request. With them it scores +0.543.
+    "nerf the red team",
+    "buff blue and nerf red",
+    "hobble the other side",
+    "take the legs off them",
 )
 
 # And the meaning it is otherwise mistaken for.
