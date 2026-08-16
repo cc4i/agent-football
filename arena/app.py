@@ -1672,6 +1672,55 @@ class _HeldRooms:
         return list(self._held[kind])
 
 
+class _TheRoomAsItStands:
+    """The room row this socket acts on, re-read no more often than it needs.
+
+    `_handle_from_host` used to read the room from the database on every
+    message it accepted. A match reports ten frames a second and the venue is
+    sized for twenty at once, so that was two hundred `SELECT * FROM room` a
+    second down the one shared connection, every one of them a Cloud SQL round
+    trip taken on the event loop.
+
+    Measured in production on 2026-08-16 with twenty real matches playing:
+    `/health` -- which does one subtraction -- went from 2ms to 3.7s, the
+    liveness probe timed out three times over, and Cloud Run shut the arena
+    down ninety seconds into the venue, twice. Every phone and every screen in
+    the building took a 1012. The container was at two per cent CPU throughout,
+    which is the whole story: none of that was work, it was waiting.
+
+    What the handler needs from the row is one field that cannot change and two
+    that change in one direction only. `host_client_id` is minted when the room
+    is opened and never touched again -- `room_socket` says so where it settles
+    what this socket is holding -- and `id` and `code` with it. `status` goes
+    lobby to live to finished, and `ranked` goes one to zero.
+
+    So the row is re-read on the rule `_HostReporting` already writes on, and
+    for the same reason it gives: the sweep runs every SWEEP_SECONDS, so a
+    status that lags by one changes no outcome a sweep can reach. A room that
+    is not live is re-read every time instead, because a lobby is not sending
+    ten frames a second so freshness costs nothing there -- and because the
+    first frames after kick-off must not be dropped waiting for a cached
+    `lobby` to expire.
+
+    The two mutable fields are written back into the cached row by whoever
+    changes them, which is what stops a stale `ranked` re-issuing `unrank` on
+    every frame for a whole sweep.
+    """
+
+    def __init__(self):
+        self._row = None
+        self._read = None
+
+    def as_it_stands(self, connection, code):
+        now = time.monotonic()
+        if (self._row is not None and self._row["status"] == "live"
+                and now - self._read < SWEEP_SECONDS):
+            return self._row
+        self._row = rooms.by_code(connection, code)
+        self._read = now
+        return self._row
+
+
 class _HostReporting:
     """When this socket last told its room that the host is here.
 
@@ -1746,6 +1795,10 @@ async def room_socket(socket: WebSocket, code: str, client_id: str = ""):
     pump = None
     holding = None
     reporting = _HostReporting()
+    # One per socket, like `reporting` and for the same reason: it is a cache
+    # of this room as this connection last saw it, and it goes away when the
+    # connection does.
+    standing = _TheRoomAsItStands()
     try:
         try:
             await socket.send_json(
@@ -1781,7 +1834,7 @@ async def room_socket(socket: WebSocket, code: str, client_id: str = ""):
                 continue
             try:
                 _handle_from_host(message, connection, match_bus, room, client_id,
-                                  reporting, socket)
+                                  reporting, socket, standing)
             finally:
                 # One message is one unit of work. No middleware reaches a
                 # WebSocket route, so this socket puts the connection back
@@ -1838,16 +1891,20 @@ def _wire_bytes(value):
         return None
 
 
-def _handle_from_host(message, connection, match_bus, room, client_id, reporting, socket):
+def _handle_from_host(message, connection, match_bus, room, client_id, reporting,
+                      socket, standing=None):
     """Apply one up-message, if the sender is the client holding physics."""
     if not isinstance(message, dict):
         return
     kind = message.get("type")
     if kind not in ("host.here", "host.state", "host.event"):
         return
-    # Re-read the room: sockets are usually open well before the whistle, and
-    # both the host token and the status are checked against it as it is now.
-    current = rooms.by_code(connection, room["code"])
+    # The room as it stands: sockets are usually open well before the whistle,
+    # and both the host token and the status are checked against it as it is
+    # now rather than as it was at the handshake. Not read afresh every time --
+    # see `_TheRoomAsItStands` for what that cost a venue of twenty matches.
+    standing = _TheRoomAsItStands() if standing is None else standing
+    current = standing.as_it_stands(connection, room["code"])
     host_client_id = current["host_client_id"]
     if not client_id or not host_client_id or not _same_secret(_text_bytes(client_id),
                                                                _text_bytes(host_client_id)):
@@ -1912,6 +1969,11 @@ def _handle_from_host(message, connection, match_bus, room, client_id, reporting
         # theirs to give back and there is nothing to tell them.
         _end_match(connection, match_bus, room, event_kind, socket,
                    farm=socket.app.state.grounds if socket is not None else None)
+        # And this socket has just ended the match itself, so it cannot go on
+        # holding a row that says the match is live: everything above is
+        # gated on that, and a whole sweep's worth of frames would otherwise
+        # keep being published and logged after full time.
+        current["status"] = "finished" if event_kind == "full_time" else "abandoned"
 
 
 def _watch_the_clock(connection, room, payload):
@@ -1929,6 +1991,11 @@ def _watch_the_clock(connection, room, payload):
     if speed != 1.0:
         logger.info("room %s unranked: host reported speed %s", room["code"], speed)
         rooms.unrank(connection, room["id"])
+        # Written back into the row the caller is holding, which may be a
+        # cached one. The guard above is what stops this being an UPDATE and a
+        # commit on every frame for the rest of the match; without this line a
+        # row that is not re-read keeps saying `ranked` and keeps arriving here.
+        room["ranked"] = 0
 
 
 def _end_match(connection, match_bus, room, event_kind, socket=None, farm=None):

@@ -188,10 +188,24 @@ spec:
           # on 2026-08-16, and which took a human forty minutes. Nothing inside
           # the container can see that: the symptom is an absence of requests,
           # and a quiet venue looks identical from in here.
+          #
+          # `timeoutSeconds: 10` rather than the default 1, and the default is
+          # what made this worth writing down. `/health` does one subtraction,
+          # so its latency is entirely how long it waited to be scheduled --
+          # and under twenty matches that reached 3.7 seconds while the
+          # container sat at two per cent CPU. Three probes timed out at one
+          # second each and Cloud Run shut the arena down ninety seconds into
+          # the venue, twice. Every phone and every screen took a 1012.
+          #
+          # Ten seconds is headroom, not a fix: a probe that waits ten seconds
+          # is still an arena nobody is enjoying. What it buys is that a slow
+          # moment costs a slow moment rather than the whole workshop. Must
+          # stay under periodSeconds.
           livenessProbe:
             httpGet: {path: /health, port: 8080}
             periodSeconds: 30
             failureThreshold: 3
+            timeoutSeconds: 10
 
         - name: coach
           image: __REGION__-docker.pkg.dev/__PROJECT__/futsal/coach:__TAG__
