@@ -52,12 +52,19 @@ Here are the ONLY attributes that exist for the forward role:
 - interceptionRadius (0.0-1.0)
 - foulProbability (0.0-1.0)
 - decisionDelay (milliseconds, ~50-300)
+- finishing (0.0-1.0; how near the post you place a shot. Ships at 0.5)
 
 That list is exhaustive and it is the whole of it. Names that sound like they
-belong to a forward -- finishing, pace, acceleration, shortPassing -- are not
-simulated, and the arena now refuses a write naming one, so proposing it costs
-you the rest of the write as well. There is no finishing attribute: what
-decides whether you score is shotRange, shotPower and where you are standing.
+belong to a forward -- pace, acceleration, shortPassing, defensiveWorkRate --
+are not simulated, and the arena refuses a write naming one, so proposing it
+costs you the rest of the write as well.
+
+Asked for goals, `finishing` is your lever. It is the only attribute that
+changes whether a chance is taken rather than where you stand, and at 0.5 it
+has room to go up. Your `attackPositioning` ships at 1.0, which is already the
+maximum: do not write 0.9 or 0.95 to it thinking that is high, because that
+moves you backwards. The only time it is worth writing is when a defensive
+opening stance has lowered it and you are putting it back to 1.0.
 
 CRITICAL INSTRUCTION:
 Step 1. Work out the few attributes this instruction moves and use `update_profile` to change just those.

@@ -137,7 +137,7 @@ def test_an_attribute_the_engine_never_reads_is_refused_not_quietly_kept():
 
 def test_a_refusal_names_what_the_role_could_have_been_told_instead():
     # The caller is usually a language model with one shout's worth of time.
-    problems = attributes.validate("forward", {"finishing": 1.0})
+    problems = attributes.validate("forward", {"pace": 1.0})
     assert any(line.startswith("the forward is simulated on: ") for line in problems)
     assert "shotRange" in problems[-1]
 
@@ -145,8 +145,8 @@ def test_a_refusal_names_what_the_role_could_have_been_told_instead():
 def test_a_write_mixing_a_real_lever_with_a_dead_one_lands_neither():
     # A patch is all or nothing, so the agent is told about both at once and
     # can send the good half again by itself.
-    problems = attributes.validate("forward", {"shotRange": 1.0, "finishing": 1.0})
-    assert "'finishing' is not simulated and would change nothing" in problems
+    problems = attributes.validate("forward", {"shotRange": 1.0, "pace": 1.0})
+    assert "'pace' is not simulated and would change nothing" in problems
     assert not any("shotRange" in line and "outside" in line for line in problems)
 
 
@@ -159,8 +159,8 @@ def test_the_published_bands_offer_no_lever_with_nothing_on_the_end(client):
 def test_the_shipped_baselines_still_carry_the_whole_squad():
     # Seeding a room and resetting one both write the file as it stands. Only
     # what may be *changed* narrowed; what a player *is* did not.
-    assert "finishing" in attributes.baseline_for("forward")
-    assert "finishing" not in attributes.simulated_baseline_for("forward")
+    assert "pace" in attributes.baseline_for("forward")
+    assert "pace" not in attributes.simulated_baseline_for("forward")
 
 
 def test_every_baseline_attribute_is_named_like_the_game_reads_it():

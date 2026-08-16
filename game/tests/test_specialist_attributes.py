@@ -76,7 +76,6 @@ def test_a_specialist_is_offered_exactly_what_the_match_reads(role):
 @pytest.mark.parametrize("role,gone", [
     ("midfielder", "forwardPassProbability"),
     ("midfielder", "shootingUrgency"),
-    ("forward", "finishing"),
     ("forward", "pace"),
     ("goalkeeper", "sweeperKeeper"),
     ("goalkeeper", "stayOnLine"),

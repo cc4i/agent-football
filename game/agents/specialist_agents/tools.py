@@ -166,8 +166,13 @@ SIMULATION_MODEL = """
     A shot only exists if ALL of these hold, so these are the levers that matter:
 
     1. The shooter is in the opposition half and within `shotRange` of the goal.
-       shotRange is a fraction of 700px. Below ~0.85 the forward runs into
-       traffic instead of shooting.
+       shotRange is a fraction of 700px.
+    1b. AND it chooses to shoot rather than dribble on. Outside 220px of the
+       goal that is a roll against `dribbleTendency`, which ships at 0.8 for
+       the forward - so nine times in ten it carries the ball closer instead,
+       into the one part of the pitch where both defenders and the keeper are
+       standing. Lowering the FORWARD's `dribbleTendency` is what makes it
+       shoot from where there is space. Inside 220px it always shoots.
     2. They choose to shoot rather than pass. That chance is `1 - passProbability`.
        This lever belongs to the FORWARD alone, and its shipped value is already
        0.3 - it already shoots seven times in ten, so there is almost nothing to
@@ -180,13 +185,22 @@ SIMULATION_MODEL = """
        is redirected into a pass if any teammate is within 47 degrees of it and
        closer than 480px. So a team with everybody pushed forward cannot shoot -
        the forward's efforts keep turning into square balls.
-    4. The shot beats the keeper. Speed is 420 + 360 x `shotPower`.
+    4. The shot beats the keeper. Speed is 420 + 360 x `shotPower`, and how
+       near the open post it is placed is the FORWARD's `finishing`, which
+       ships at 0.5. That is the one attribute that decides whether a chance is
+       taken rather than where somebody stands, and it is the first thing to
+       reach for when the manager wants a goal.
 
     WHAT THIS MEANS FOR YOU:
 
-    - "Attack" does NOT mean every role raises `attackPositioning`. Raise the
-      FORWARD's and leave the defender's and the goalkeeper's low, or you crowd
-      the shooting lane and the team scores less than before.
+    - CHECK WHAT A NUMBER ALREADY IS BEFORE RAISING IT. Most of this squad's
+      attacking attributes ship at or near their maximum of 1.0, and writing
+      0.9 or 0.95 to one of those lowers it. The forward's `attackPositioning`
+      is already 1.0. An opening stance may also have moved an attribute before
+      you were asked: never write a number below what is there now.
+    - "Attack" does NOT mean every role raises `attackPositioning`. Leave the
+      defender's and the goalkeeper's low, or you crowd the shooting lane and
+      the team scores less than before.
     - The forward is the only player who reliably scores. Never reduce the
       forward's `shotPower`, `shotRange` or `speed` when asked for goals.
     - The goalkeeper's `attackPositioning` is how far off its line it strays -
@@ -194,11 +208,12 @@ SIMULATION_MODEL = """
       told to push the keeper up.
     - Shooting attributes on a defender or a goalkeeper change almost nothing.
       Do not spend a change there.
-    - The forward is already good at shooting. The team's problem is usually
-      getting the ball TO it. If you are asked for goals and you are not the
-      forward, the useful changes are the ones that speed up delivery -
-      `speed`, `passRange`, `supportRunFrequency`, `counterAttackUrgency` -
-      not shooting from further out yourself.
+    - If you are asked for goals and you are not the forward, the useful
+      changes are the ones that speed up delivery - `speed`, `passRange`,
+      `supportRunFrequency`, `counterAttackUrgency` - and NOT your own
+      `shotRange` or `shotPower`. Raising a midfielder's `shotRange` makes it
+      shoot from 490px with the forward unmarked ahead of it, and it was the
+      most common mistake left once the invented attributes were taken away.
     - Only the attributes listed in your own prompt are simulated. A name that
       is not on that list is refused by the arena, and because a write lands
       all of its values or none of them, one invented name throws away the

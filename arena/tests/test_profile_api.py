@@ -101,7 +101,7 @@ def test_a_real_lever_beside_a_dead_one_is_not_quietly_applied(client, phones):
     code = open_room(client, phones)
     client.post(f"/api/rooms/{code}/seats/blue", json={"philosophy": "high press"})
     response = client.patch(f"/api/rooms/{code}/teams/blue/profiles/forward",
-                            json={"changes": {"shotRange": 1.0, "finishing": 1.0}})
+                            json={"changes": {"shotRange": 1.0, "pace": 1.0}})
     assert response.status_code == 422
     assert profiles_of(client, code, "blue")["forward"]["shotRange"] != 1.0
 

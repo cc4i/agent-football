@@ -23,7 +23,7 @@
   "defensiveAwareness": 0.3,
   "acceleration": 0.95,
   "pace": 0.95,
-  "finishing": 1,
+  "finishing": 0.5,
   "defensiveWorkRate": 0.3,
   "shortPassing": 0.7,
   "defensiveContribution": 0.2,

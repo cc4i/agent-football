@@ -50,7 +50,12 @@ _SIMULATED_OUTFIELD = frozenset({
 SIMULATED = {
     "defender": _SIMULATED_OUTFIELD,
     "midfielder": _SIMULATED_OUTFIELD,
-    "forward": _SIMULATED_OUTFIELD,
+    # `finishing` decides how near the post a shot is placed, in `aimAtGoal`.
+    # It is the forward's alone, and it ships at 0.5 rather than at either end
+    # so that a shout has somewhere to move it. Every other attacking lever the
+    # squad owns was already at its ceiling, which is how a month of shouts
+    # came to spend their most reliable write on a number that could not rise.
+    "forward": _SIMULATED_OUTFIELD | frozenset({"finishing"}),
     "goalkeeper": _SIMULATED_OUTFIELD | frozenset({"diveChance", "trackingSpeed"}),
 }
 
