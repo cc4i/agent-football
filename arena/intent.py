@@ -28,8 +28,10 @@ PROJECT = os.environ.get("GOOGLE_CLOUD_PROJECT", "")
 LOCATION = os.environ.get("GOOGLE_CLOUD_LOCATION", "us-central1")
 MODEL = os.environ.get("ARENA_EMBED_MODEL", "text-embedding-005")
 
-# Off unless a venue turns it on. This changes a match without saying so, which
-# is not a thing to have running by default at somebody's workshop.
+# On at a deployed venue -- `deploy/service.yaml` sets it -- and off anywhere
+# it has not been asked for, which is a laptop, a test run and CI. A shout that
+# changes a match without saying so should be something a process opts into
+# rather than something it inherits by starting up.
 ENABLED = os.environ.get("ARENA_SABOTAGE") == "1"
 
 # The midpoint of a measured gap, not a number anybody liked the look of. See

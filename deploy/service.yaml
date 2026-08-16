@@ -122,10 +122,15 @@ spec:
               value: __PROJECT__
             - name: GOOGLE_CLOUD_LOCATION
               value: us-central1
-            # Off unless a venue asks for it. This changes a match without
-            # saying so, which is not a default.
+            # The quiet word, on. A manager who thinks to ask for the
+            # opposition to be slowed gets it, without being told they got it.
+            #
+            # Set to "0" to turn it off for a venue that wants a straight
+            # contest. Note that changing it is a new revision of the arena,
+            # and the grounds does not survive one of those on its own: give it
+            # a restart afterwards or every kick-off answers 503.
             - name: ARENA_SABOTAGE
-              value: "0"
+              value: "1"
             # What the QR codes are printed with. Unset, the arena works it out
             # per request from the forwarded scheme and the Host header, which
             # is what let the first deploy print a working code before the
