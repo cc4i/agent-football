@@ -15,7 +15,8 @@
 
 import { get, post, Refused } from "/static/api.js";
 import { relayFeed } from "/static/relay.js";
-import { openRoom, openWall } from "/static/socket.js";
+import { keepScreenToken, openRoom, openWall, screenToken as tokenFor }
+  from "/static/socket.js";
 
 const el = (id) => document.getElementById(id);
 const problem = el("problem");
@@ -107,7 +108,7 @@ async function start() {
     // and head to head, no way to open another, and nothing on it saying why.
     // Every screen that lands here wants the same thing, so give it that rather
     // than a read-only copy of somebody else's lobby.
-    if (!sessionStorage.getItem(tokenKey(ours.code))) {
+    if (!tokenFor(ours.code)) {
       return startFresh(ours.mode, "This screen is not running that room. Opening a new one…");
     }
     code = ours.code;
@@ -152,7 +153,7 @@ async function open() {
   // The token is the room's physics, and it exists in exactly two places: the
   // arena's database and this tab. sessionStorage rather than localStorage so
   // closing the tab gives it up, and reloading does not.
-  sessionStorage.setItem(tokenKey(opened.code), opened.screen_token);
+  keepScreenToken(opened.code, opened.screen_token);
   // The mode stays in the URL beside the code. Replaced by the code alone, a
   // head-to-head screen forgot what it was the moment it opened its first
   // room, and every reload of it after that was a solo screen.
@@ -193,8 +194,10 @@ function startFresh(mode, why = "That room closed. Opening a new one…") {
   location.assign(`/arena?mode=${mode || MODE}`);
 }
 
-const tokenKey = (roomCode) => `arena.screen.${roomCode}`;
-const screenToken = () => sessionStorage.getItem(tokenKey(code)) || "";
+// This screen's own token, for the room it is holding. The key itself lives
+// in socket.js now, because a phone can open a room too and the two must not
+// disagree about how it is spelt.
+const screenToken = () => tokenFor(code);
 
 /* ── This screen's own room ─────────────────────────────────────────── */
 

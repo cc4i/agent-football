@@ -6,6 +6,7 @@ import httpx
 import pytest
 from httpx._content import AsyncIteratorByteStream
 
+import app
 import limits
 from app import COACH_BURST, PLAYER_BURST
 
@@ -236,3 +237,30 @@ def test_valid_user_segments_are_allowed(client, coach_calls):
         reply = client.post(f"/api-apps/agents/users/{user}/sessions", json={})
         assert reply.status_code == 200, f"user={user} should be allowed"
         assert coach_calls == [f"/apps/agents/users/{user}/sessions"]
+
+
+def test_a_full_venue_can_keep_opening_rooms_back_to_back():
+    """The rate has to clear the venue's own turnover, not just a burst.
+
+    Every phone in a hall leaves by one address, so `client_ip` gives the whole
+    room one bucket. The burst covers the rush when the doors open; what has to
+    clear the rate is the steady state, and a venue running matches back to
+    back opens one room per match length per match in play.
+
+    At 0.5 a second this was comfortable at fifty and short at a hundred -- 0.56
+    needed against 0.5 refilled -- so a full venue drained the burst and then
+    refused about one kick-off in ten, with a 429 the manager reads as the
+    venue being broken.
+    """
+    match_seconds = 180
+    for concurrent in (20, 50, 100):
+        needed = concurrent / match_seconds
+        assert app.ROOM_RATE >= needed, (
+            f"{concurrent} matches back to back need {needed:.2f} rooms a second "
+            f"and the bucket refills {app.ROOM_RATE}")
+
+
+def test_the_opening_rush_fits_in_the_burst():
+    # Everybody arriving at once, each opening a room, before anything refills.
+    assert app.ROOM_BURST >= 100
+    assert app.PLAYER_BURST >= 100

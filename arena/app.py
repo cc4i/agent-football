@@ -71,8 +71,24 @@ MAX_LIVE_ROOMS = int(os.environ.get("ARENA_MAX_LIVE_ROOMS", "120"))
 # The room burst matches the cap above rather than sitting under it: whichever
 # of the two is smaller is the one that answers a flood, and the 503 has a
 # sentence in it where a 429 has a number.
+#
+# A venue is one bucket. `limits.client_ip` keys on the address a request
+# arrives from, and every phone on the hall's wifi leaves by the same one, so
+# these numbers are the whole room's rather than a manager's.
+#
+# The burst covers any opening rush. What has to clear the rate is the steady
+# state: a match is three minutes, so a venue running N of them back to back
+# opens N/180 rooms a second. At 0.5 that was comfortable to fifty and short of
+# a hundred - 0.56 a second needed against 0.5 refilled - so a full venue would
+# have drained the burst and then refused about one kick-off in ten. At 1.0 it
+# is 180 rooms per three minutes against a hundred concurrent, and still a
+# script held to one room a second.
+#
+# Raising it costs abuse resistance and nothing else, which is why it is here
+# rather than removed: this endpoint takes no session, and keying it on one
+# would not help, since `POST /api/players` hands sessions to anybody who asks.
 PLAYER_RATE, PLAYER_BURST = 1.0, 120
-ROOM_RATE, ROOM_BURST = 0.5, 120
+ROOM_RATE, ROOM_BURST = 1.0, 120
 
 # Asking whether a name is free costs one indexed lookup and creates nothing,
 # but the join form asks while somebody is still typing, so one manager

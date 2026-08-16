@@ -9,7 +9,7 @@
 import { get, post, Refused } from "/static/api.js";
 import { icon } from "/static/dom.js";
 import { relayFeed } from "/static/relay.js";
-import { openRoom } from "/static/socket.js";
+import { openRoom, screenToken } from "/static/socket.js";
 import { figure, ordinal } from "/static/words.js";
 
 const CODE = (new URLSearchParams(location.search).get("room") || "").toUpperCase();
@@ -81,6 +81,13 @@ async function start() {
 
 function listen() {
   openRoom(CODE, {
+    // The token, if this phone is the one that opened the room. Between sitting
+    // down and kicking off there is nobody else behind a phone's room -- no
+    // screen, and no grounds until the whistle -- so without this the sweep
+    // gives up on it while its manager is deciding whether to press Ready. A
+    // phone that walked into somebody else's room holds no token, passes the
+    // empty string, and is the viewer it has always been.
+    clientId: screenToken(CODE),
     onMessage(message) {
       if (message.type === "room") return draw(message);
       if (message.type === "state") return paint(message);

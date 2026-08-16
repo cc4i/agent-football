@@ -157,12 +157,35 @@ def test_a_phone_with_nowhere_to_go_is_told_what_is_being_played(client, live_ro
         [{"code": code, "mode": "solo", "blue": "Alex Rivera", "red": None}]
 
 
-def test_the_page_names_them_rather_than_saying_no_screen_is_waiting(client):
-    # Both branches out of one empty list, because the difference between them
-    # is the whole point of asking what is on.
+def test_the_page_names_them_rather_than_leaving_an_empty_list_to_speak(client):
+    """Both branches out of one empty list, still told apart.
+
+    "N matches are on right now" and "nobody has a room open" are two different
+    situations and an empty list is the same shape for both, which is what this
+    has always been about.
+
+    What changed is what each of them then tells somebody to do. Both used to
+    say wait -- for the screen to finish, or for somebody to plug one in -- and
+    waiting was the honest answer while a screen was the only thing that could
+    open a room. A phone can open one now, so neither sentence may send anybody
+    away, and the one that named the wait by name is checked for below.
+    """
     js = client.get("/static/home.js").text
     assert "playing right now" in js
-    assert "No screen is waiting" in js
+    assert "Nobody has a room open" in js
+
+
+def test_the_page_no_longer_tells_anybody_to_wait_for_a_screen(client):
+    """The sentence a manager read for three minutes with nothing to tap.
+
+    Reported from the venue: first phone scans, takes the dugout, kicks off;
+    second phone scans the same screen and is told "A screen opens its next
+    lobby as soon as the match on it ends". It was true, and it was the whole
+    turnstile being one page wide.
+    """
+    js = client.get("/static/home.js").text
+    assert "opens its next lobby" not in js
+    assert "No screen is waiting" not in js
 
 
 def test_a_match_that_ended_is_not_still_being_played(client, live_room, conn):

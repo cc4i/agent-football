@@ -15,6 +15,28 @@ export function openRoom(code, { clientId = "", ...handlers } = {}) {
   return open(`/ws/rooms/${encodeURIComponent(code)}${query}`, handlers);
 }
 
+/**
+ * The screen token for a room this tab opened, and where it is kept.
+ *
+ * Whoever opened a room holds the one token that says so, and a socket
+ * carrying it is what tells the arena somebody is still behind the lobby --
+ * without which the sweep gives up on it in HOST_GONE_SECONDS. That used to be
+ * the big screen's business alone and lived privately in `arena.js`. A phone
+ * can open a room now, so three pages need the same spelling of the key and
+ * none of them should be inventing it.
+ *
+ * sessionStorage rather than localStorage, which is the part worth keeping
+ * deliberate: the token dies with the tab. A lobby whose opener closed the
+ * page stops being vouched for, and the sweep clears it rather than leaving a
+ * room in the venue's list that nobody is behind.
+ */
+const tokenKey = (code) => `arena.screen.${code}`;
+
+export const screenToken = (code) => sessionStorage.getItem(tokenKey(code)) || "";
+
+export const keepScreenToken = (code, token) =>
+  sessionStorage.setItem(tokenKey(code), token);
+
 export function openWall(handlers = {}) {
   return open("/ws/wall", handlers);
 }

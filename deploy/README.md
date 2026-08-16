@@ -602,6 +602,30 @@ curl -s localhost:8004/healthz         # {"ok":true,"running":0,"capacity":12}
 body - and so the log is the thing to watch if it stays false: it says which of
 the two it is still waiting for, every few seconds, by name.
 
+## Do not put a load balancer in front of this without reading `limits.py`
+
+The arena rate-limits the two endpoints that create rows without a session -
+opening a room and joining as a player - and it keys those buckets on the
+caller's address. `limits.client_ip` takes the **last** entry of
+`X-Forwarded-For`, which is correct here and only here: a direct `*.run.app`
+service has Cloud Run append the true client, and everything before it is
+whatever the caller claimed.
+
+A Google external HTTPS load balancer appends **its own** address after the
+client's. Put one in front - which is what a custom domain usually means - and
+the last entry is the balancer for every request on earth. The whole world then
+shares one bucket of 120 rooms at one a second, and it presents as a venue
+refusing kick-offs at random with nothing in any log naming the cause.
+
+If you add one, `client_ip` has to change with it: the client becomes the
+second-from-last entry, and how many to trust is a property of the topology
+rather than something the code can work out. The same goes for any other proxy
+that rewrites the header.
+
+A venue behind one NAT already shares a bucket, and that is by design - the
+numbers in `app.py` are sized for a room of people rather than one manager, and
+the comment there does the arithmetic.
+
 ## Watching it
 
 ```bash

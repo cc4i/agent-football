@@ -13,6 +13,7 @@
  */
 
 import { get, post, Refused } from "/static/api.js";
+import { keepScreenToken } from "/static/socket.js";
 import { figure, ordinal } from "/static/words.js";
 
 // How often to look for a room that has opened. Slow enough to be nothing at
@@ -26,6 +27,38 @@ const problem = document.getElementById("problem");
 const resume = document.getElementById("resume");
 const resumeCode = document.getElementById("resume-code");
 const rooms = document.getElementById("rooms");
+const ownRoom = document.getElementById("open-room");
+
+/**
+ * Open a room from the hand, which is the second way into the venue.
+ *
+ * A screen can open a room and holds one at a time, so the whole venue used to
+ * be one page wide: the second manager to walk up to a screen with football on
+ * it was told to wait for the match to end. Nothing on the arena had to change
+ * to widen it -- `POST /api/rooms` has always answered anybody, and the token
+ * it hands back has always been what vouches for the lobby.
+ *
+ * The token is kept before leaving, because the next page is the one that has
+ * to hold the room: a lobby nobody is behind is swept in HOST_GONE_SECONDS,
+ * and picking a philosophy takes longer than that if the phone rings.
+ */
+for (const button of ownRoom.querySelectorAll("[data-mode]")) {
+  button.addEventListener("click", async () => {
+    for (const other of ownRoom.querySelectorAll("[data-mode]")) other.disabled = true;
+    problem.hidden = true;
+    try {
+      const opened = await post("/api/rooms", { mode: button.dataset.mode });
+      keepScreenToken(opened.code, opened.screen_token);
+      location.assign(`/join/${encodeURIComponent(opened.code)}`);
+    } catch (failure) {
+      // The venue's own limits speak here: too many rooms too fast from one
+      // address, or a venue already at MAX_LIVE_ROOMS. Both say so in words a
+      // manager can act on, so they are shown rather than translated.
+      complain(failure);
+      for (const other of ownRoom.querySelectorAll("[data-mode]")) other.disabled = false;
+    }
+  });
+}
 
 const MODES = { solo: "Score attack", versus: "Head to head" };
 // The same two, in the middle of a sentence rather than at the head of a line.
@@ -208,6 +241,12 @@ function waitingIn(room) {
  * used to find said no screen was waiting, which is what a venue with nothing
  * plugged in says too. They had no way to tell "two minutes" from "broken",
  * and the honest answer was standing on the wall in front of them.
+ *
+ * Both of those sentences then told somebody to wait, which was true when a
+ * screen was the only thing that could open a room and is not any more: the
+ * control underneath this is one tap from a room of their own. So what is left
+ * to say here is only which of the three situations it is, and the way out is
+ * the same in every one.
  */
 function nothingOpen(playing, me) {
   const box = document.createElement("p");
@@ -215,10 +254,8 @@ function nothingOpen(playing, me) {
   box.textContent = me.room
     ? "Nothing else is open. Finish the match you are in."
     : playing.length
-      ? `${onNow(playing)} A screen opens its next lobby as soon as the match`
-        + " on it ends, and the room turns up here by itself."
-      : "No screen is waiting for a manager this second. One appears here as soon as"
-        + " somebody opens a lobby, or scan the code on the big screen itself.";
+      ? `${onNow(playing)} Nothing is waiting for a manager, so start your own below.`
+      : "Nobody has a room open this second. Start one below.";
   return box;
 }
 

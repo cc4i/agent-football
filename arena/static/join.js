@@ -20,6 +20,7 @@
 import { get, post, Refused } from "/static/api.js";
 import { icon } from "/static/dom.js";
 import { signup } from "/static/signup.js";
+import { openRoom, screenToken } from "/static/socket.js";
 
 const CODE = decodeURIComponent(location.pathname.split("/").pop() || "").toUpperCase();
 const SIDE = { blue: "blue", red: "red" };
@@ -53,6 +54,15 @@ const who = signup({
 });
 
 document.getElementById("code").textContent = CODE;
+
+// A room this phone opened is a room only this phone is behind: no screen, and
+// no grounds until the whistle. The sweep gives up on a lobby nobody vouches
+// for after HOST_GONE_SECONDS, and picking a philosophy is easily that long, so
+// the socket is opened for no other reason than to say somebody is still here.
+// Nothing is read off it -- this form draws from the one snapshot it fetched --
+// and a phone joining a room somebody else opened holds no token, so it opens
+// nothing at all.
+if (screenToken(CODE)) openRoom(CODE, { clientId: screenToken(CODE) });
 
 start();
 

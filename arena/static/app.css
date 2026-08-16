@@ -566,6 +566,29 @@ a.btn{display:block;text-align:center;text-decoration:none;line-height:1.2}
 .room.red em{color:#fca5a5}
 .room span{grid-column:1/-1;font-size:.74rem;color:var(--mute);min-width:0}
 
+/* Starting your own, when nothing on the list suits. Two across rather than
+   stacked: they are the same weight of choice and a thumb should be able to
+   see both without scrolling past the rooms that are already open. */
+#open-room{flex:none;margin-top:14px}
+.modes{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:9px}
+.modes .btn{
+  display:grid;gap:3px;padding:11px 10px;text-align:left;height:auto;line-height:1.2;
+}
+.modes .btn b{font-size:.8rem;font-weight:800;letter-spacing:.05em;color:var(--ink)}
+/* The line under the name is what tells the two apart, and it is the reason
+   this is not a pair of one-word buttons: "head to head" is a promise that
+   somebody else has to turn up, and nobody should find that out afterwards.
+   Which means it has to read as a sentence, so it gives back everything `.btn`
+   imposes on a label - the caps, the weight and the tracking. Left inherited
+   it shouted "BRING SOMEBODY WITH THE CODE" in bold, which reads as a second
+   heading rather than as the small print under the first. */
+.modes .btn span{
+  font-family:'Inter',system-ui,sans-serif;
+  font-size:.7rem;font-weight:400;letter-spacing:normal;text-transform:none;
+  color:var(--mute);white-space:normal;
+}
+.modes .btn:disabled{opacity:.5}
+
 /* The card and the one thing you can do to it that is not joining it. Stacked
    rather than beside, because the ask is the secondary move and a thumb going
    for the room must not find it by accident. */

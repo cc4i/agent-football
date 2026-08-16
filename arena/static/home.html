@@ -36,6 +36,27 @@
   <div class="stack">
     <span class="eyebrow">Rooms open now</span>
     <div class="rooms" id="rooms"></div>
+
+    <!-- The second door, and it lives here rather than at the foot of the page
+         because it is an answer to the same question the list above answers.
+         A screen holds one room and opens its next only when the match on it
+         ends, so anybody who walked up mid-match read the empty list and had
+         nothing to tap until it did.
+
+         Inside the growing box and not beside it: two `.stack`s split the
+         slack between them, which left this one adrift in the middle of an
+         empty page and pressed against the standings button at the bottom. -->
+    <div id="open-room">
+      <span class="eyebrow">Or start your own</span>
+      <div class="modes">
+        <button class="btn ghost" type="button" data-mode="solo">
+          <b>Score attack</b><span>You against the house side</span>
+        </button>
+        <button class="btn ghost" type="button" data-mode="versus">
+          <b>Head to head</b><span>Bring somebody with the code</span>
+        </button>
+      </div>
+    </div>
   </div>
 
   <a class="btn ghost push" href="/board">See the standings</a>
