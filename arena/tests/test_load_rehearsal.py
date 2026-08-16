@@ -85,6 +85,12 @@ VIEWERS_PER_ROOM = 2
 COOKIE = "arena_session"
 FIXTURE = Path(fake_host.__file__).resolve().parent / "fixtures" / "match-3-1.jsonl"
 
+# What the rehearsal's own arena and its own grounds authenticate to each other
+# with. A fixed string rather than a secret, because both ends of it are this
+# file. Kick-off needs somewhere to play or it answers the honest 503, and the
+# subprocess arena has no grounds unless this one connects to it.
+SERVICE_TOKEN = "rehearsal-service-token"
+
 # The frame `arena/README.md` documents and `game.js` builds: a scoreline, a
 # clock and eleven points, at the three decimals the pitch rounds to. Kept here
 # to be measured rather than described, because the fixture's state frames
@@ -230,7 +236,11 @@ def venue(dsn, tmp_path):
     port = _a_free_port()
     readings = tmp_path / "instruments.json"
     here = Path(fake_host.__file__).resolve().parent
-    environment = {**os.environ, "ARENA_DB": dsn}
+    # The token is what lets `_StandInGrounds` hold `/ws/grounds` at all: unset,
+    # the arena refuses every service caller, and kick-off then has nowhere to
+    # play and answers 503.
+    environment = {**os.environ, "ARENA_DB": dsn,
+                   "ARENA_SERVICE_TOKEN": SERVICE_TOKEN}
     # The image sets this and refuses to start without three secrets, which is
     # the image working and is not what this measures.
     environment.pop("ARENA_ENV", None)
@@ -381,7 +391,20 @@ def _a_match_at(hz, seconds):
 
 
 async def _asked(caller, refusals, method, path, headers=None, **body):
-    """One HTTP call, with a 429 recorded rather than retried or raised past."""
+    """One HTTP call, with a 429 recorded rather than retried or raised past.
+
+    One client stands in for a hundred phones and its cookie jar is shared by
+    every one of them, so a session left in it speaks for whoever joined last
+    rather than for the phone this call is being made as. Fifty rooms open at
+    once here, so the two managers of a room were being seated as one player
+    and the second seat came back 409 from `one_dugout_per_player`.
+
+    Emptied on every call rather than after each join, because a jar cleared on
+    the way out of one join is refilled by the next before the seat request
+    that needed it empty. Nothing awaits between this line and the request
+    being built out of it, so no other room can get in between the two.
+    """
+    caller.cookies.clear()
     answer = await caller.request(method, path, headers=headers, **body)
     if answer.status_code == 429:
         refusals.append(f"{method} {path} -> 429 {answer.text}")
@@ -397,8 +420,77 @@ async def _a_phone(caller, refusals, name, email):
     return {"Cookie": f"{COOKIE}={answer.cookies[COOKIE]}"}
 
 
-async def _a_full_room(caller, refusals, index, conn):
-    """Two managers, a room, both dugouts ready, kick-off. Returns code and token."""
+class _StandInGrounds:
+    """A grounds, as far as the arena can tell.
+
+    It authenticates with the service token, offers pitches, and is told at
+    each kick-off which match to run and with which physics token. The real one
+    launches a browser per match; this one only has to receive the assignment,
+    because the frames are what the rehearsal sends itself.
+
+    Not `tests.standins.connect_grounds`, which registers straight into the
+    registry: that needs the app object, and the arena under test here is a
+    subprocess on a socket, which is the whole point of it.
+
+    The assignment is also where the physics token comes from. Since the two
+    tokens went in, that token is sent to exactly one place -- this socket --
+    and written to the room table, and reading the table is what tied this
+    rehearsal to a database it can only have when the arena is local.
+    """
+
+    def __init__(self, wire, capacity):
+        self._url = f"{wire}/ws/grounds"
+        self._capacity = capacity
+        self._socket = None
+        self._reading = None
+        self.tokens = {}
+        self.drops = []
+
+    async def __aenter__(self):
+        self._socket = await websockets.connect(
+            self._url, additional_headers={"X-Arena-Service": SERVICE_TOKEN})
+        await self._socket.send(json.dumps({"type": "grounds.here",
+                                            "capacity": self._capacity}))
+        self._reading = asyncio.create_task(self._listen())
+        return self
+
+    async def _listen(self):
+        async for raw in self._socket:
+            message = json.loads(raw)
+            if message.get("type") == "host":
+                self.tokens[message["code"]] = message["token"]
+            elif message.get("type") == "drop":
+                self.drops.append(message["code"])
+
+    async def __aexit__(self, *gone):
+        self._reading.cancel()
+        try:
+            await self._reading
+        except asyncio.CancelledError:
+            pass
+        await self._socket.close()
+        return False
+
+    async def told_about(self, codes, patience=60.0):
+        """Hold until every one of these rooms has been handed to us."""
+        deadline = time.monotonic() + patience
+        while not set(codes) <= set(self.tokens):
+            if time.monotonic() > deadline:
+                missing = sorted(set(codes) - set(self.tokens))
+                raise AssertionError(
+                    f"the arena assigned a pitch to only {len(self.tokens)} of "
+                    f"{len(codes)} rooms; missing {missing}")
+            await asyncio.sleep(0.05)
+        return [(code, self.tokens[code]) for code in codes]
+
+
+async def _a_full_room(caller, refusals, index):
+    """Two managers, a room, both dugouts ready, kick-off. Returns the code.
+
+    The physics token is not here to be returned: no HTTP response carries it
+    any more. It arrives on the grounds' control socket, which is what
+    `_StandInGrounds.told_about` collects.
+    """
     stance = rooms.PHILOSOPHIES[index % len(rooms.PHILOSOPHIES)]
     seats = {}
     for team in rooms.TEAMS:
@@ -414,7 +506,7 @@ async def _a_full_room(caller, refusals, index, conn):
                      headers=phone, json={"ready": True})
     await _asked(caller, refusals, "POST", f"/api/rooms/{code}/start",
                  headers=seats["blue"])
-    return code, rooms.by_code(conn, code)["host_client_id"]
+    return code
 
 
 async def _drain(wire):
@@ -522,16 +614,26 @@ async def test_fifty_rooms_at_ten_hertz(venue):
     state_frames = sum(1 for frame in frames if frame["type"] == "state")
     before = _row_counts(venue.database) if venue.database else None
 
-    refusals, opened = [], []
+    refusals, codes = [], []
     started = time.monotonic()
-    async with httpx.AsyncClient(base_url=venue.base, timeout=30.0) as caller:
-        for room in await asyncio.gather(
-                *(_a_full_room(caller, refusals, index, conn) for index in range(ROOMS)),
-                return_exceptions=True):
-            if isinstance(room, tuple):
-                opened.append(room)
-            elif not isinstance(room, _Refused):
-                raise room
+    # A pitch to play on, before anything kicks off. Without one the arena
+    # answers the honest 503 to every `/start`, which is what it did to this
+    # rehearsal from the day matches stopped being played in the tab that
+    # opened them.
+    async with _StandInGrounds(venue.wire, ROOMS + 4) as farm:
+        async with httpx.AsyncClient(base_url=venue.base, timeout=30.0) as caller:
+            for room in await asyncio.gather(
+                    *(_a_full_room(caller, refusals, index) for index in range(ROOMS)),
+                    return_exceptions=True):
+                if isinstance(room, str):
+                    codes.append(room)
+                elif not isinstance(room, _Refused):
+                    raise room
+        # Awaited rather than read: the send happens inside `/start`, so fifty
+        # replies ought to mean fifty assignments, and an assertion that fires
+        # on the first pass turns a slow run into a failure that says nothing
+        # about which room it was.
+        opened = await farm.told_about(codes)
     seated = time.monotonic() - started
 
     latencies, wall_latencies, watching = [], [], []
