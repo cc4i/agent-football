@@ -398,6 +398,20 @@ def _a_frame(index, tick):
     }
 
 
+def _worth_complaining_about(note, complaints):
+    """Console errors the arena is answerable for.
+
+    Everything except the browser's own line for a failed subresource, which
+    carries no URL at all: the response listener reports those, scoped to the
+    arena's own origin, with something in them a person can act on.
+    """
+    if note.type != "error":
+        return
+    if note.text.startswith("Failed to load resource"):
+        return
+    complaints.append(note.text)
+
+
 @pytest.fixture
 async def wall_page(wall_server, fifty_live_rooms):
     """A browser in front of the big screen, with the venue already playing.
@@ -411,9 +425,21 @@ async def wall_page(wall_server, fifty_live_rooms):
         browser = await driving.chromium.launch()
         page = await browser.new_page(viewport={"width": 1920, "height": 1080})
         complaints = []
-        page.on("console",
-                lambda note: complaints.append(note.text) if note.type == "error" else None)
+        page.on("console", lambda note: _worth_complaining_about(note, complaints))
         page.on("pageerror", lambda blew_up: complaints.append(str(blew_up)))
+        # Subresource failures, named. The console's own line for one says only
+        # `Failed to load resource: ... 404 ()` and never which resource, so a
+        # failure here used to give nobody anything to go and look at.
+        #
+        # The arena's own origin only. Google Fonts rotates the woff2 behind a
+        # stylesheet browsers have cached and answers 404 for the old name,
+        # which fails roughly one run in three and has nothing to do with the
+        # venue. What the wall depends on a CDN for is a font, and the fallback
+        # is in `app.css`.
+        page.on("response",
+                lambda answer: complaints.append(
+                    f"{answer.status} {answer.request.method} {answer.url}")
+                if answer.status >= 400 and answer.url.startswith(wall_server) else None)
         await page.goto(f"{wall_server}/arena")
         # A tile appears as soon as the roster lands, which is before a single
         # frame has. The screen is only up when the director has framed a match:
