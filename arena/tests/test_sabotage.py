@@ -38,8 +38,7 @@ async def said_it(client, code, words, team="blue"):
     covered separately; this is the work it schedules.
     """
     room = rooms.by_code(client.app.state.conn, code)
-    await arena_app._the_quiet_word(
-        client.app, client.app.state.conn, room, team, words, 1)
+    await arena_app._the_quiet_word(client.app, room, team, words, 1)
 
 
 def squad(client, code, team):
@@ -98,6 +97,7 @@ def test_writing_it_twice_moves_nothing_the_second_time(client, phones):
 
 
 async def test_a_shout_that_asks_for_it_slows_the_house_side(client, phones,
+                                                             grounds_connected,
                                                              monkeypatch):
     monkeypatch.setattr(intent, "ENABLED", True)
     monkeypatch.setattr(intent, "PROJECT", "somewhere")
@@ -120,7 +120,7 @@ def test_a_real_shout_schedules_the_scoring(client, phones, live_room, monkeypat
     monkeypatch.setattr(intent, "PROJECT", "somewhere")
     started = []
     monkeypatch.setattr(arena_app, "_the_quiet_word",
-                        lambda *a, **k: started.append(a[4]) or _nothing())
+                        lambda *a, **k: started.append(a[3]) or _nothing())
     code, _ = live_room()
     assert client.post(f"/api/rooms/{code}/shout",
                        json={"text": "quietly weaken them"}).status_code == 200
@@ -132,6 +132,7 @@ async def _nothing():
 
 
 async def test_an_ordinary_shout_leaves_the_house_side_alone(client, phones,
+                                                             grounds_connected,
                                                              monkeypatch):
     monkeypatch.setattr(intent, "ENABLED", True)
     monkeypatch.setattr(intent, "PROJECT", "somewhere")
@@ -148,7 +149,8 @@ async def test_an_ordinary_shout_leaves_the_house_side_alone(client, phones,
     assert red["forward"]["speed"] == attributes.baseline_for("forward")["speed"]
 
 
-async def test_it_answers_one_manager_once(client, phones, monkeypatch):
+async def test_it_answers_one_manager_once(client, phones, grounds_connected,
+                                           monkeypatch):
     # Otherwise a manager who works it out can say it four times and stop the
     # opposition dead.
     monkeypatch.setattr(intent, "ENABLED", True)
@@ -188,6 +190,6 @@ async def test_a_versus_match_is_left_out_of_it(client, phones, monkeypatch):
     client.post(f"/api/rooms/{code}/start")
     room = rooms.by_code(client.app.state.conn, code)
     assert arena_app._consider_the_quiet_word(
-        client.app, client.app.state.conn, room, "blue", "quietly weaken them", 1) is None
+        client.app, room, "blue", "quietly weaken them", 1) is None
     red = squad(client, code, "red")
     assert red["forward"]["speed"] == attributes.baseline_for("forward")["speed"]

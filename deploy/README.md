@@ -556,11 +556,18 @@ podman run --rm -p 8080:8080 \
   -e ARENA_SERVICE_TOKEN=dummy-token \
   arena:local
 
-curl -s localhost:8080/health          # {"ok":true,"service":"arena"}
+curl -s localhost:8080/health          # {"ok":true,"service":"arena","swept_ago":2.1}
 ```
 
 `curl -s` and not `curl -I`: `/health` is a FastAPI route and GET-only, so a
 HEAD against a perfectly healthy arena answers 405.
+
+`swept_ago` is the seconds since the watchdog last got all the way round, and
+it is the whole of what this route answers for. Over `HEALTH_STALE_SECONDS`
+the same call answers 503 with `"ok":false`, which is the liveness probe's cue
+to have the instance replaced. A number that climbs rather than sitting under
+the sweep interval means the loop has stopped turning or the database has
+stopped answering; the log says which, once, when it crosses.
 
 The image bakes in `ARENA_ENV=production`, so it refuses to start without those
 three. That refusal is the image working.

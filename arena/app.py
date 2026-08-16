@@ -15,13 +15,13 @@ import os
 import re
 import secrets
 import time
-from contextlib import asynccontextmanager, contextmanager
+from contextlib import asynccontextmanager, contextmanager, suppress
 from pathlib import Path
 
 from dotenv import load_dotenv
 from fastapi import (Depends, FastAPI, HTTPException, Request, Response, WebSocket,
                      WebSocketDisconnect)
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator, model_validator
 from uvicorn.protocols.utils import ClientDisconnected
@@ -223,6 +223,18 @@ HOST_GONE_SECONDS = 30
 # How often to look. A dead room should leave the wall while somebody is still
 # standing in front of it, and the sweep costs one query.
 SWEEP_SECONDS = 5
+# How stale the last completed sweep may get before this instance says it is
+# not fit to serve. Six sweeps rather than one: a single missed turn is a slow
+# moment on a busy loop, and Cloud Run's liveness probe needs three consecutive
+# failures thirty seconds apart, so this is already ninety seconds of patience
+# before anything is restarted.
+#
+# See `health` for why the sweep is what the probe answers for.
+HEALTH_STALE_SECONDS = SWEEP_SECONDS * 6
+# How long the sweep will wait to tell one grounds that a match it was running
+# has been given up on. Short, because this is a courtesy on the way past and
+# the sweep's own turn is what the liveness probe reads: see the send itself.
+TELLING_THE_GROUNDS_SECONDS = 2
 # What the phones are told. It goes in the log with the event, so a manager who
 # reloads afterwards is still told why their match stopped.
 HOST_GONE_REASON = "The screen running this match stopped reporting, so it was abandoned."
@@ -274,8 +286,13 @@ async def lifespan(fastapi_app: FastAPI):
     fastapi_app.state.bus = Bus()
     fastapi_app.state.chain = chain.Chain(fastapi_app.state.bus)
     # Rooms whose opposition has already been slowed, so the quiet word
-    # works once and a manager cannot stack it.
+    # works once and a manager cannot stack it. Pruned to the rooms still being
+    # played by every sweep; see `_forget_the_rooms_that_are_over`.
     fastapi_app.state.slowed = set()
+    # The scorings in flight, held so that asyncio cannot collect one of them
+    # part way through its call out to Vertex, and so that shutdown has
+    # something to cancel. See `_consider_the_quiet_word`.
+    fastapi_app.state.scoring = set()
     # Per app rather than per module, so that a test's client gets its own and
     # the suite cannot fail in whichever test happens to run last. There is one
     # instance, so per app is per process anyway.
@@ -305,12 +322,26 @@ async def lifespan(fastapi_app: FastAPI):
     if server_logger.handlers and not logger.handlers:
         logger.handlers = server_logger.handlers
         logger.setLevel(logging.INFO)
+    # When the watchdog last got all the way round, which is what `/health`
+    # answers for. Seeded with the boot rather than left unset, because the
+    # startup probe arrives seconds after the port opens and the first sweep is
+    # SWEEP_SECONDS behind it: an instance that failed its own startup probe
+    # for the want of a turn nobody had given it yet would never go ready.
+    fastapi_app.state.swept_at = time.monotonic()
     watchdog = asyncio.create_task(_watch_for_the_missing(fastapi_app))
     yield
     watchdog.cancel()
     # Chains first: one still talking to the coach would otherwise come back to
     # a closed database when its specialists write.
     await fastapi_app.state.chain.close()
+    # And the scorings for the same reason, which is the one this used to get
+    # wrong: a shout scored ten seconds after its request returned would come
+    # back to write through a connection closed on the line below.
+    for task in tuple(fastapi_app.state.scoring):
+        task.cancel()
+    for task in tuple(fastapi_app.state.scoring):
+        with suppress(asyncio.CancelledError):
+            await task
     connection.close()
 
 
@@ -322,19 +353,55 @@ app = FastAPI(title="Arena", lifespan=lifespan)
 app.include_router(proxy.router)
 
 
-@app.middleware("http")
-async def put_the_connection_back(request: Request, call_next):
+class PutTheConnectionBack:
     """End every request on an idle connection, including one that raised.
 
     One request is one unit of work against the one shared connection, and this
     is the only place that is true of every route at once. The sockets are not
-    covered by this -- middleware does not wrap a WebSocket route -- so they
-    call `db.finish` for themselves.
+    covered by this -- a WebSocket is not one unit of work, it is an evening of
+    them -- so they call `db.finish` per message for themselves.
+
+    Written against ASGI directly rather than as `@app.middleware("http")`,
+    which is Starlette's `BaseHTTPMiddleware`, for two reasons.
+
+    The first is that this was not true when it was written that way. That
+    decorator hands `call_next` back as soon as the response *headers* exist,
+    so the `finally` fired at the *start* of a response rather than the end of
+    one. For every buffered route that is the same instant; for `/run_sse`, the
+    one route that streams, it meant the unit of work ended tens of seconds
+    before the request it belonged to, with the connection handed back while
+    the relay was still running.
+
+    The second is what the class does to every other response on the way past.
+    It pipes each one through a memory stream inside a task group of its own,
+    and a client that goes away mid-body can leave that arrangement waiting on
+    a stream nobody will read -- a response that never completes. Cloud Run
+    reports one of those as `the HTTP response was malformed or connection to
+    the instance had an error`, which is what production logged at 10:19:01 on
+    2026-08-16, sixty seconds before it stopped being routed to at all. Nothing
+    proves that middleware was the cause of that outage. It is one of the ways
+    the symptom is produced, it is here on every request, and there is a plain
+    ASGI wrapper that does the same job without any of it.
+
+    `scope["app"]` rather than a reference captured at construction: what
+    `add_middleware` hands over is the next app in the stack, and Starlette
+    puts the real one in the scope before the stack runs.
     """
-    try:
-        return await call_next(request)
-    finally:
-        db.finish(request.app.state.conn)
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            db.finish(scope["app"].state.conn)
+
+
+app.add_middleware(PutTheConnectionBack)
 
 
 class JoinRequest(BaseModel):
@@ -504,8 +571,37 @@ async def current_player(request: Request) -> int:
 
 
 @app.get("/health")
-async def health():
-    return {"ok": True, "service": "arena"}
+async def health(request: Request):
+    """Whether this instance can do its job, not merely whether it is running.
+
+    This used to answer a constant, and a constant is what Cloud Run's liveness
+    probe was reading. An instance that had lost its database, or whose event
+    loop had stopped turning, went on answering 200 to that probe forever -- and
+    with `minScale: 1` and `maxScale: 1` there is no second instance to carry
+    the venue and no restart coming, because the one signal that would order a
+    restart is the one saying everything is fine.
+
+    What it answers for instead is the watchdog's last completed turn. That one
+    reading covers both failures at once: a turn only completes if the loop
+    reached it and the database answered the rooms it read. Nothing else in the
+    arena is on a clock of its own -- every other statement waits for somebody
+    to call a route -- so on a quiet venue this is the only proof there is.
+
+    Deliberately no statement of its own. A probe that ran one would inherit
+    every way the shared connection can wedge, and a wedged probe on the loop
+    the whole arena shares is a timeout rather than an answer.
+
+    It will not catch a frontend that has stopped routing to a container that
+    is otherwise perfectly well. Nothing inside the container can: the symptom
+    is the absence of requests, and a quiet venue looks the same from in here.
+    """
+    swept_ago = time.monotonic() - request.app.state.swept_at
+    if swept_ago <= HEALTH_STALE_SECONDS:
+        return {"ok": True, "service": "arena", "swept_ago": round(swept_ago, 1)}
+    logger.error("not fit to serve: the last completed sweep was %.1fs ago", swept_ago)
+    return JSONResponse(
+        status_code=503,
+        content={"ok": False, "service": "arena", "swept_ago": round(swept_ago, 1)})
 
 
 def _page(name):
@@ -949,31 +1045,56 @@ async def shout(code: str, body: ShoutRequest, request: Request):
                                  "are still going out")
     said = _say(request.app, connection, room, team, words, actor)
     ahead = request.app.state.chain.submit(room, team, said["seq"], words, actor)
-    _consider_the_quiet_word(request.app, connection, room, team, words, said["seq"])
+    _consider_the_quiet_word(request.app, room, team, words, said["seq"])
     return {**said, "ahead": ahead}
 
 
-def _consider_the_quiet_word(app, connection, room, team, words, seq):
+def _consider_the_quiet_word(app, room, team, words, seq):
     """Schedule the scoring of a shout, if this room is one that can have it.
 
     Scheduled rather than awaited: scoring is a call out to Vertex and the
     manager is holding a phone waiting for their words to be accepted. Solo
     only, because the other dugout in a versus match belongs to a person.
     Returns the task, which is what lets a test await the thing it scheduled.
+
+    No connection is handed over. The task outlives the request by up to the
+    two five-second hops in `intent`, and a connection captured here is one it
+    could still be holding after the instance closed it on the way out of
+    `lifespan`. There is one connection and it lives on the app, so the app is
+    the thing worth carrying and `state.conn` is read at the moment of writing.
     """
     if not intent.configured() or room["mode"] != "solo":
         return None
-    return asyncio.create_task(
-        _the_quiet_word(app, connection, room, team, words, seq))
+    task = asyncio.create_task(_the_quiet_word(app, room, team, words, seq))
+    # Held for its lifetime, because asyncio keeps only a weak reference to a
+    # running task and says so: one nobody else holds can be collected
+    # mid-await, and the longest await in the arena is the one directly below.
+    # Discarded on the way out, so this is the size of what is in flight rather
+    # than of the evening.
+    app.state.scoring.add(task)
+    task.add_done_callback(app.state.scoring.discard)
+    return task
 
 
-async def _the_quiet_word(app, connection, room, team, words, seq):
+async def _the_quiet_word(app, room, team, words, seq):
     """Slow the house side, if that is what the manager just asked for."""
     if room["id"] in app.state.slowed:
         return
     matched, found = await intent.asked_for_it(words)
     logger.info("shout %s scored %.3f for the quiet word", seq, found)
     if not matched or room["id"] in app.state.slowed:
+        return
+    connection = app.state.conn
+    # Read back across the await rather than trusted from before it. Ten
+    # seconds is a long time in a three minute match and full time is not the
+    # only way out of one: the sweep gives up on a room whose screen has gone.
+    # Either ending computed the result from the log and wrote it to the board,
+    # so a patch landing after that leaves the log saying the squad changed and
+    # the standings worked out from a log that did not say so -- permanently,
+    # and with nothing anywhere reporting a fault.
+    current = rooms.by_code(connection, room["code"])
+    if current is None or current["status"] != "live":
+        logger.info("shout %s asked for the quiet word, but that match is over", seq)
         return
     # Claimed before writing, so two shouts landing together cannot both slow
     # the same squad.
@@ -984,6 +1105,23 @@ async def _the_quiet_word(app, connection, room, team, words, seq):
     for result in sabotage.slow_the_opposition(connection, room["id"], against):
         _record_patch(app, connection, room, against, result,
                       reason=sabotage.REASON, actor=sabotage.ACTOR)
+
+
+def _forget_the_rooms_that_are_over(app, connection):
+    """Drop the finished rooms from the set of squads already slowed.
+
+    One entry per room that got the quiet word, and nothing was ever removing
+    them. A venue plays a few hundred matches in an evening behind one
+    instance, so the set is small -- and it is also the shape of every leak
+    that was small once. A room that is over cannot be slowed again, so its
+    entry says nothing that the room's own status does not.
+    """
+    slowed = app.state.slowed
+    if not slowed:
+        return
+    live = {room["id"] for room in rooms.hosted_with_liveness(connection)
+            if room["status"] == "live"}
+    slowed.intersection_update(live)
 
 
 def _who_is_shouting(request, connection, room):
@@ -1594,36 +1732,48 @@ async def room_socket(socket: WebSocket, code: str, client_id: str = ""):
         return
 
     await socket.accept()
-    try:
-        await socket.send_json({"type": "room", **_snapshot(connection, room["id"], socket)})
-    finally:
-        # The snapshot is a read, and a read opens a transaction like anything
-        # else. A viewer that never says a word would otherwise hold one open
-        # for as long as its tab is, and one that closed its tab between the
-        # read and the send would hold it forever.
-        db.finish(connection)
-
-    # Which kind of client this socket is, settled once at the handshake: both
-    # tokens are minted when the room is opened and neither ever changes, so a
-    # client that holds one now holds it for the life of the room. From here on
-    # this connection existing is what says that client is still there, which
-    # is the one thing a backgrounded tab can still do.
-    holding = None
-    if client_id:
-        offered = _text_bytes(client_id)
-        if room["host_client_id"] and _same_secret(
-                offered, _text_bytes(room["host_client_id"])):
-            holding = "grounds"
-        elif room["screen_client_id"] and _same_secret(
-                offered, _text_bytes(room["screen_client_id"])):
-            holding = "screen"
-    if holding:
-        socket.app.state.held.took(code, holding)
-
+    # Subscribed before the snapshot is read, and pumped only after it has been
+    # sent. The send is an await, and anything published across it used to
+    # reach a bus this socket was not on yet and a snapshot taken before it:
+    # the event was in neither, so the log had the goal and the live feed
+    # silently did not, until something made the client read the log again.
+    #
+    # Queued here instead and delivered behind the snapshot, so the worst this
+    # can now do is repeat something the snapshot already showed. Every message
+    # on this wire is a statement of fact a client redraws from, so a duplicate
+    # is a repaint and a gap is a screen that is wrong about a match.
     subscription = match_bus.subscribe(room_topic(code))
-    pump = asyncio.create_task(_pump(socket, subscription))
+    pump = None
+    holding = None
     reporting = _HostReporting()
     try:
+        try:
+            await socket.send_json(
+                {"type": "room", **_snapshot(connection, room["id"], socket)})
+        finally:
+            # The snapshot is a read, and a read opens a transaction like
+            # anything else. A viewer that never says a word would otherwise
+            # hold one open for as long as its tab is, and one that closed its
+            # tab between the read and the send would hold it forever.
+            db.finish(connection)
+
+        # Which kind of client this socket is, settled once at the handshake:
+        # both tokens are minted when the room is opened and neither ever
+        # changes, so a client that holds one now holds it for the life of the
+        # room. From here on this connection existing is what says that client
+        # is still there, which is the one thing a backgrounded tab can still do.
+        if client_id:
+            offered = _text_bytes(client_id)
+            if room["host_client_id"] and _same_secret(
+                    offered, _text_bytes(room["host_client_id"])):
+                holding = "grounds"
+            elif room["screen_client_id"] and _same_secret(
+                    offered, _text_bytes(room["screen_client_id"])):
+                holding = "screen"
+        if holding:
+            socket.app.state.held.took(code, holding)
+
+        pump = asyncio.create_task(_pump(socket, subscription))
         while True:
             try:
                 message = await socket.receive_json()
@@ -1645,14 +1795,34 @@ async def room_socket(socket: WebSocket, code: str, client_id: str = ""):
         # bad hang-up leaves a match live for the rest of the evening.
         if holding:
             socket.app.state.held.gave_up(code, holding)
-        pump.cancel()
-        if pump.done() and not pump.cancelled():
-            exc = pump.exception()
-            # Disconnects are expected: a tab closes mid-send, or the network drops.
-            # Only log genuinely unexpected exceptions.
-            if exc and not isinstance(exc, (WebSocketDisconnect, ClientDisconnected)):
-                logger.exception("room socket pump died", exc_info=exc)
+        if pump is not None:
+            await _stopped(pump, "room socket pump")
         subscription.close()
+
+
+async def _stopped(task, what):
+    """Cancel a task and wait for it to actually be gone.
+
+    `cancel()` is a request rather than a stop. The socket handlers used to
+    make it and return on the next line, which left the task live while
+    Starlette closed the socket underneath it: its next send raised, and by
+    then nobody was holding the task to retrieve the exception from. That is
+    what production logged twelve of in the same second on 2026-08-16, as
+    `ConnectionClosedError exception in shielded future`.
+
+    Waiting also means the subscription is only closed once nothing is still
+    iterating it.
+    """
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+    except (WebSocketDisconnect, ClientDisconnected):
+        # Expected: a tab closed mid-send, or the network dropped.
+        pass
+    except Exception:
+        logger.exception("%s died", what)
 
 
 def _wire_bytes(value):
@@ -1953,18 +2123,34 @@ async def _watch_for_the_missing(fastapi_app):
                 fastapi_app.state.conn, fastapi_app.state.bus, time.time(),
                 fastapi_app.state.held, fastapi_app.state.grounds, drops))
             for socket, code in drops:
-                # Best effort. A grounds that has already gone is why we are
-                # here, and one that fails to hear this is not worth taking the
-                # sweep down over: it stops reporting and the next sweep is
-                # somebody else's problem.
+                # Best effort, and on a clock. A grounds that has already gone
+                # is why we are here, and one that fails to hear this is not
+                # worth taking the sweep down over: it stops reporting and the
+                # next sweep is somebody else's problem.
+                #
+                # The clock is the part that matters now. This is the only
+                # await inside the watchdog's turn, and a turn is what
+                # `/health` answers for: a send to a socket whose far end is
+                # gone but whose connection has not noticed would hang here,
+                # stop the stamp, and have the instance restarted for it. A
+                # half-open socket is exactly the state this branch exists to
+                # clean up after, so it is the one that must not block.
                 try:
-                    await socket.send_json({"type": "drop", "code": code})
+                    async with asyncio.timeout(TELLING_THE_GROUNDS_SECONDS):
+                        await socket.send_json({"type": "drop", "code": code})
                 except Exception:
                     logger.warning("could not tell the grounds to drop %s", code)
             _tell_our_own_rooms_it_is_over(fastapi_app.state.conn,
                                            fastapi_app.state.bus, announced)
             wall = _tell_our_own_wall_who_is_playing(
                 fastapi_app.state.conn, fastapi_app.state.bus, wall)
+            _forget_the_rooms_that_are_over(fastapi_app, fastapi_app.state.conn)
+            # Last, and only on the way through. This is what `/health` reads,
+            # and what it is worth reading is a turn that got all the way
+            # round: one that could not reach the database raised above and
+            # must leave the stamp where it was, or a dead connection would go
+            # on reporting an instance fit to serve for the rest of the day.
+            fastapi_app.state.swept_at = time.monotonic()
         except Exception:
             # One bad sweep must not take the watchdog down for the life of the
             # process: every room after it would then hang live forever.
@@ -2054,30 +2240,38 @@ async def wall_socket(socket: WebSocket):
     match_bus = state.bus
     try:
         await socket.accept()
-        try:
-            await socket.send_json({"type": "wall", "rooms": rooms.live(socket.app.state.conn)})
-        finally:
-            # The wall's only statement is that one read, and it then sits there all
-            # evening. Nothing else here touches the database, so this is the whole
-            # of what it owes the connection - owed just the same by a screen whose
-            # tab closed between the read and the send, which is the one path that
-            # would otherwise hold a transaction open with nobody left to close it.
-            db.finish(socket.app.state.conn)
-
+        # Subscribed before the list is read, for the reason `room_socket`
+        # gives at length: the send below is an await, and a match kicking off
+        # across it reached neither the list this screen was given nor the bus
+        # it was not yet on. The sweep does reconcile a wall within five
+        # seconds, so what that cost was a tile that was late rather than one
+        # that was wrong all evening - and five seconds is most of a goal
+        # celebration.
         subscription = match_bus.subscribe(WALL, maxsize=128)
-        tasks = [asyncio.create_task(_pump_wall(socket, subscription)),
-                 asyncio.create_task(_until_closed(socket))]
-        done, pending = set(), set(tasks)
         try:
-            done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+            try:
+                await socket.send_json(
+                    {"type": "wall", "rooms": rooms.live(socket.app.state.conn)})
+            finally:
+                # The wall's only statement is that one read, and it then sits
+                # there all evening. Nothing else here touches the database, so
+                # this is the whole of what it owes the connection - owed just
+                # the same by a screen whose tab closed between the read and the
+                # send, which is the one path that would otherwise hold a
+                # transaction open with nobody left to close it.
+                db.finish(socket.app.state.conn)
+
+            tasks = [asyncio.create_task(_pump_wall(socket, subscription)),
+                     asyncio.create_task(_until_closed(socket))]
+            try:
+                await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+            finally:
+                # Every one of them, waited for. `_stopped` on a task that has
+                # already finished cancels nothing and re-raises whatever it
+                # died of, which is where the log line below comes from.
+                for task in tasks:
+                    await _stopped(task, "wall socket task")
         finally:
-            for task in pending:
-                task.cancel()
-            for task in done:
-                if not task.cancelled():
-                    exc = task.exception()
-                    if exc:
-                        logger.exception("wall socket task died", exc_info=exc)
             subscription.close()
     finally:
         state.walls -= 1

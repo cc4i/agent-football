@@ -2,7 +2,11 @@ import rooms
 
 
 def test_health_says_which_service_answered(client):
-    assert client.get("/health").json() == {"ok": True, "service": "arena"}
+    # `swept_ago` rides along with it and varies; what this is about is the
+    # name. See `test_health.py` for what the probe is actually answering for.
+    answered = client.get("/health").json()
+    assert answered["ok"] is True
+    assert answered["service"] == "arena"
 
 
 def test_joining_returns_a_masked_email_and_sets_a_session(client):

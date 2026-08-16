@@ -169,9 +169,29 @@ spec:
             httpGet: {path: /health, port: 8080}
             periodSeconds: 3
             failureThreshold: 20
+          # `/health` used to answer a constant, so this probe proved that a
+          # Python process existed and nothing else. It now answers for the
+          # watchdog's last completed turn, which is the one thing the arena
+          # does on a clock of its own: a turn only completes if the event loop
+          # reached it and the database answered the rooms it read. An instance
+          # that has lost either stops being restarted-proof.
+          #
+          # The arithmetic is worth keeping in one place, because it is the
+          # difference between a self-healing venue and a restart loop. The
+          # route reports stale after ARENA's HEALTH_STALE_SECONDS, which is
+          # six sweeps, or thirty seconds. Three consecutive failures thirty
+          # seconds apart is ninety seconds of continuously stale before
+          # anything is killed, and a fresh instance is up inside thirty.
+          #
+          # What it cannot see is a frontend that has stopped routing to a
+          # container that is otherwise perfectly well - which is what happened
+          # on 2026-08-16, and which took a human forty minutes. Nothing inside
+          # the container can see that: the symptom is an absence of requests,
+          # and a quiet venue looks identical from in here.
           livenessProbe:
             httpGet: {path: /health, port: 8080}
             periodSeconds: 30
+            failureThreshold: 3
 
         - name: coach
           image: __REGION__-docker.pkg.dev/__PROJECT__/futsal/coach:__TAG__

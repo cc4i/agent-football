@@ -153,7 +153,7 @@ cannot tell a measured 8 from another guess.
 
 | Method | Path | Who |
 |---|---|---|
-| GET | `/health` | anyone |
+| GET | `/health` | anyone - 200 while the watchdog is still turning, 503 once its last completed sweep is older than `HEALTH_STALE_SECONDS`. A sweep only completes if the event loop reached it and the database answered, so one reading covers both. This is what Cloud Run's liveness probe restarts the instance on; it asks the database nothing of its own, because a probe that can hang is worse than no probe |
 | GET | `/api/venue` | anyone - where the pitch and the public address are |
 | POST | `/api/players` | anyone - name and email in, session cookie out |
 | GET | `/api/players/available` | anyone - is this name free, and if not, whose spelling of it |
