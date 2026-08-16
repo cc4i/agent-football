@@ -273,15 +273,45 @@ def test_a_grounds_that_cannot_play_football_is_replaced():
     assert "livenessProbe" in block("grounds", GROUNDS_SERVICE)
 
 
-def test_the_grounds_run_exactly_one_instance():
-    """Two would double-run any room the arena assigned once.
+def test_the_grounds_run_a_fixed_number_of_instances():
+    """However many there are, there is no autoscaling between them.
 
-    The arena assigns a match to a socket, and a second instance behind one
-    revision is a second socket: two simulations of the same room, two clocks,
-    and two streams of frames racing each other into one match's log.
+    This used to assert one, on the grounds that two would double-run a match.
+    They cannot: `Grounds.assign` records one socket per room in `_where` and
+    gives each new match to the emptiest instance with room, which is what
+    `test_grounds_socket.py` covers at length. A second instance is a second
+    socket, and the socket is how the registry tells them apart.
+
+    What still has to hold is that the two numbers are equal. Cloud Run scales
+    on request load and the grounds takes no requests but its own health
+    probes, so a range would leave the venue's capacity decided by something
+    that has nothing to do with how much football is being played -- and an
+    instance scaled away mid-match takes its matches with it.
     """
-    assert scalar("autoscaling.knative.dev/minScale", GROUNDS_SERVICE) == '"1"'
-    assert scalar("autoscaling.knative.dev/maxScale", GROUNDS_SERVICE) == '"1"'
+    least = scalar("autoscaling.knative.dev/minScale", GROUNDS_SERVICE)
+    most = scalar("autoscaling.knative.dev/maxScale", GROUNDS_SERVICE)
+    assert least == most, f"the grounds would autoscale between {least} and {most}"
+    assert int(least.strip('"')) >= 1
+
+
+def test_the_grounds_offer_enough_pitches_for_the_venue():
+    """The spec's fifty matches have to fit, with something left over.
+
+    Capacity is instances times `GROUNDS_CAPACITY`, and a kick-off past it is
+    a 503 that a manager reads as a broken venue.
+
+    Not sized to survive losing an instance, and that is deliberate rather than
+    an oversight. An instance that goes takes its own matches with it --
+    `Grounds.left` says so, and re-hosting is refused there for good reasons --
+    so spare capacity buys the venue the ability to kick off again, not the
+    matches that were already being played. Paying for a whole idle instance
+    all evening to shorten that gap is a trade for whoever runs the workshop to
+    make, not one to bake in here.
+    """
+    instances = int(scalar("autoscaling.knative.dev/maxScale", GROUNDS_SERVICE).strip('"'))
+    each = int(valued("GROUNDS_CAPACITY", GROUNDS_SERVICE)[0].strip('"'))
+    assert instances * each >= 50, (
+        f"{instances} x {each} pitches cannot hold the fifty the spec asks for")
 
 
 def test_the_grounds_are_not_throttled():

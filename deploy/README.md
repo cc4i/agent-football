@@ -73,12 +73,23 @@ Both of these drop every live match, exactly as a deploy does.
 
 ## What it costs to leave up
 
-`minScale: "1"` with `cpu-throttling: false` bills for the whole lifetime of
-the service rather than per request: 4 vCPU and 8 GiB of the arena's container,
-plus the coach's and the captain's 2 and 4 each, plus the grounds' own 4 and 4,
+`minScale` with `cpu-throttling: false` bills for the whole lifetime of the
+service rather than per request: 4 vCPU and 8 GiB of the arena's container,
+plus the coach's and the captain's 2 and 4 each, and then the grounds' 4 and 4
+**three times over**, because `grounds.yaml` runs three instances. All of it
 charged continuously whether anybody is playing or not. The Cloud SQL instance
 never stops either. Neither service scales to zero and neither can be made to
-without giving up the single instance the correctness rests on.
+without giving up what rests on it.
+
+The grounds is the part with a dial on it. Three instances is sixty pitches,
+which is the spec's fifty and ten spare; one instance is twenty, which is what
+a workshop of twenty matches needs and a third of the cost. `GROUNDS_CAPACITY`
+is a promise about a single thread and should not be raised to compensate -
+that is measured in `grounds.yaml` and the number it is measured at is twenty.
+Turning it down between workshops is `minScale` and `maxScale` together, which
+must stay equal: the service takes no requests but its own probes, so a range
+would let Cloud Run decide the venue's capacity on something unrelated to how
+much football is being played.
 
 Left alone it multiplies. Every superseded revision holding its pinned instance
 bills at the same rate as the live one, so an afternoon of deploys costs an

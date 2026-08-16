@@ -22,16 +22,39 @@ spec:
   template:
     metadata:
       annotations:
-        # One instance, for the same reason as the arena's and a different
-        # mechanism. The arena hands a match to a socket; a second instance
-        # behind this revision is a second socket offering the same pitches, and
-        # nothing downstream would tell the two apart. Scaling this out is a
-        # real thing to want at fifty matches and it is not a number to raise
-        # here: it needs the arena to spread rooms across grounds by capacity,
-        # which it does, and it needs each instance addressable, which
-        # `maxScale: "1"` per revision is standing in for today.
-        autoscaling.knative.dev/minScale: "1"
-        autoscaling.knative.dev/maxScale: "1"
+        # Three instances, sixty pitches, which is the spec's fifty and ten
+        # spare. This is the scale-out the note here used to defer, and
+        # unlike the arena's `maxScale: "1"` it is a number rather than a
+        # correctness constraint: nothing in a grounds is shared with another
+        # one. Each launches its own browser, holds its own control socket, and
+        # is told by the arena which matches are its own.
+        #
+        # What made this safe was already here. `Grounds.assign` records one
+        # socket per room in `_where` and hands each new match to the emptiest
+        # instance that has room, so two instances cannot both be given the
+        # same match to run -- `test_the_emptiest_instance_takes_the_next_match`
+        # and `test_an_assignment_goes_to_the_instance_with_room` are that
+        # rule. The old note here worried about a second socket "offering the
+        # same pitches, and nothing downstream would tell the two apart"; the
+        # registry tells them apart by the socket, and nothing else ever needs
+        # to. No instance is addressed by anything: each dials the arena out
+        # over the public URL and is known by the connection it arrives on.
+        #
+        # Why three and not one big one: the measurement below. A page is
+        # single-threaded and the ceiling is a thread rather than the four vCPU
+        # allocated, so fifty matches is past what any single instance can be
+        # bought. Three at twenty is three threads at about 0.55 each.
+        #
+        # An instance that dies takes its own matches with it and the sweep
+        # abandons them -- see `Grounds.left`. At one instance that was the
+        # whole venue; at three it is a third of it, which is the other thing
+        # scaling out buys. It does not buy the venue a spare: three at twenty
+        # holds fifty, and two of them hold forty, so losing one during a full
+        # venue means the matches that were on it are gone and the next kick-off
+        # is refused until something finishes. A fourth instance would close
+        # that and costs a fourth instance all evening; see deploy/README.md.
+        autoscaling.knative.dev/minScale: "3"
+        autoscaling.knative.dev/maxScale: "3"
         # Load-bearing in a way it is not even for the arena. The only requests
         # this service takes are its own health checks, and everything it does
         # happens between them: throttled, it would stop playing football the
