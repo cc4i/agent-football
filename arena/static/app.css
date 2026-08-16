@@ -114,11 +114,29 @@ body.phone{display:flex;justify-content:center}
    them. `svh` is the small viewport: the height with every toolbar out, which
    is the one state a page that never scrolls is ever in. It is the same 15.4
    that brought `dvh`, so this costs no phone anything. */
+/* The bottom padding is not spacing, it is clearance.
+ *
+ * iOS Safari floats its address bar over the page rather than beside it, and
+ * `env(safe-area-inset-bottom)` is the home indicator's strip, which is
+ * shorter than that bar and is nought on a handset that has no indicator. So
+ * on a real iPhone the page's last element - which is a button on every one of
+ * these pages, put at the foot by `.push` - was laid out underneath the URL
+ * bar. Reported from a handset: "SEE THE STANDINGS" with Safari's chrome
+ * across it.
+ *
+ * 44px clears that bar - about 32pt on the handset it was reported from - with
+ * enough left over to read as a margin rather than as a near miss. Added to the
+ * inset rather than replacing it: on a phone with a home indicator both are
+ * real and both have to be cleared. It costs these pages nothing, every one of
+ * which has empty space in the middle of it, and the one shell where space is
+ * tight - the dugout - is the one where the button underneath the bar was a
+ * manager who could not kick off.
+ */
 .pscreen{
   width:100%;max-width:430px;
   min-height:100vh;min-height:-webkit-fill-available;min-height:100svh;
   display:flex;flex-direction:column;
-  padding:calc(14px + env(safe-area-inset-top)) 16px calc(16px + env(safe-area-inset-bottom));
+  padding:calc(14px + env(safe-area-inset-top)) 16px calc(44px + env(safe-area-inset-bottom));
 }
 /* Scoped to the phone by a class on <html> rather than left global: the wall
    is a browser in kiosk mode with no toolbars to subtract, and this is a
