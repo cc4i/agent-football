@@ -185,11 +185,7 @@ SIMULATION_MODEL = """
        is redirected into a pass if any teammate is within 47 degrees of it and
        closer than 480px. So a team with everybody pushed forward cannot shoot -
        the forward's efforts keep turning into square balls.
-    4. The shot beats the keeper. Speed is 420 + 360 x `shotPower`, and how
-       near the open post it is placed is the FORWARD's `finishing`, which
-       ships at 0.5. That is the one attribute that decides whether a chance is
-       taken rather than where somebody stands, and it is the first thing to
-       reach for when the manager wants a goal.
+    4. The shot beats the keeper. Speed is 420 + 360 x `shotPower`.
 
     WHAT THIS MEANS FOR YOU:
 

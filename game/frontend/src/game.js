@@ -590,7 +590,7 @@ export class SoccerGameScene extends Phaser.Scene {
           pressingIntensity: 0.6, formationDiscipline: 0.6, passRiskTolerance: 0.6, dribbleTendency: 0.5, recoverySpeedMultiplier: 1.1, supportRunFrequency: 0.7, widthPreference: 0.5, interceptionRadius: 60, foulProbability: 0.2, counterAttackUrgency: 0.6
         },
         forward: {
-          speed: 200, tackleRadius: 40, tackleCooldown: 1200, passProbability: 0.3, passRange: 380, shotPower: 0.95, shotRange: 700, aggression: 0.9, defensePositioning: 0.2, attackPositioning: 0.9, decisionDelay: 50, finishing: 0.5,
+          speed: 200, tackleRadius: 40, tackleCooldown: 1200, passProbability: 0.3, passRange: 380, shotPower: 0.95, shotRange: 700, aggression: 0.9, defensePositioning: 0.2, attackPositioning: 0.9, decisionDelay: 50,
           pressingIntensity: 0.8, formationDiscipline: 0.3, passRiskTolerance: 0.4, dribbleTendency: 0.85, recoverySpeedMultiplier: 1.0, supportRunFrequency: 0.9, widthPreference: 0.8, interceptionRadius: 30, foulProbability: 0.1, counterAttackUrgency: 0.9
         },
         goalkeeper: {
@@ -876,44 +876,6 @@ export class SoccerGameScene extends Phaser.Scene {
     this.liveShot = null;
   }
 
-  /**
-   * Where in the goal mouth to put a shot, given where the keeper is standing
-   * and how good the shooter is at finishing.
-   *
-   * This used to be `oppGk.y < 380 ? 460 + rand : 300 - rand`, which has two
-   * faults. The first is that the test is against a constant: a keeper with
-   * `attackPositioning: 0` never leaves the centre line, so `oppGk.y < 380` is
-   * false on every shot and every shot goes to the same 25px band. Measured
-   * over 18 recorded matches, that is exactly what blue was doing. The second
-   * is that nothing the manager can write changed the outcome, so no shout
-   * could ever affect whether a chance was taken.
-   *
-   * Now the open side of the keeper is the side to shoot at, a coin decides
-   * when it is standing in the middle, and `finishing` says how near the post
-   * the ball actually goes. The band is inset from the mouth by more than the
-   * post and the ball together, so a well-struck shot cannot clip the frame.
-   */
-  aimAtGoal(oppGk, profile) {
-    const INSET = 20;                       // posts are 12 wide, the ball is 7
-    const top = this.goalMouthTop + INSET;
-    const bottom = this.goalMouthBottom - INSET;
-    const openAbove = oppGk.y - top;
-    const openBelow = bottom - oppGk.y;
-
-    // A keeper on the centre line leaves the same gap either way, and picking
-    // by `>` would send every shot of the match to one corner.
-    const high = Math.abs(openAbove - openBelow) < 20
-      ? this.chance() < 0.5
-      : openAbove > openBelow;
-    const post = high ? top : bottom;
-
-    // 0.0 barely leaves the keeper, 1.0 finds the post. The floor is there so
-    // a forward with nothing written on it still troubles the goal.
-    const finishing = profile.finishing !== undefined ? profile.finishing : 0.5;
-    const reach = 0.25 + 0.75 * finishing;
-    return Phaser.Math.Clamp(oppGk.y + (post - oppGk.y) * reach, top, bottom);
-  }
-
   updateAllPlayersAI(time, delta) {
     const ballX = this.ball.x;
     const ballY = this.ball.y;
@@ -1015,8 +977,12 @@ export class SoccerGameScene extends Phaser.Scene {
             if (distToGoal < this.resolveDistance(profile.shotRange, 700, 500) && ((isBlue && p.x > 700) || (!isBlue && p.x < 700))) {
               if (distToGoal < 220 || !preferDribble) {
                 if (this.chance() > (profile.passProbability || 0.5)) {
+                  // Find opposing goalkeeper
                   const oppGk = isBlue ? this.gk2 : this.gk1;
-                  const shotY = this.aimAtGoal(oppGk, profile);
+                  // Aim at the corner furthest from the keeper
+                  const shotY = oppGk.y < 380
+                    ? 460 + this.chance() * 25
+                    : 300 - this.chance() * 25;
                   this.shots[teamNum - 1]++;
                   p.setData('kickIsShot', true);
 
