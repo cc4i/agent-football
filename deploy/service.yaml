@@ -111,6 +111,21 @@ spec:
           env:
             - name: ARENA_ENV
               value: production
+            # Scoring a shout's intent is one embedding call over REST, so the
+            # arena needs to know where to send it. The instance's service
+            # account is shared by all three containers, so the token comes
+            # from the metadata server and there is nothing to mount.
+            #
+            # `us-central1` rather than `global`: the embedding models are
+            # served regionally, unlike the image model the sprites use.
+            - name: GOOGLE_CLOUD_PROJECT
+              value: __PROJECT__
+            - name: GOOGLE_CLOUD_LOCATION
+              value: us-central1
+            # Off unless a venue asks for it. This changes a match without
+            # saying so, which is not a default.
+            - name: ARENA_SABOTAGE
+              value: "0"
             # What the QR codes are printed with. Unset, the arena works it out
             # per request from the forwarded scheme and the Host header, which
             # is what let the first deploy print a working code before the

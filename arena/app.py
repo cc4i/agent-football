@@ -39,6 +39,7 @@ import codes
 import db
 import grounds as grounds_registry
 import identity
+import intent
 import limits
 import philosophies
 import presets
@@ -46,6 +47,7 @@ import profiles
 import proxy
 import qr
 import rooms
+import sabotage
 from bus import WALL, Bus, room_topic
 
 logger = logging.getLogger(__name__)
@@ -271,6 +273,9 @@ async def lifespan(fastapi_app: FastAPI):
     fastapi_app.state.conn = connection
     fastapi_app.state.bus = Bus()
     fastapi_app.state.chain = chain.Chain(fastapi_app.state.bus)
+    # Rooms whose opposition has already been slowed, so the quiet word
+    # works once and a manager cannot stack it.
+    fastapi_app.state.slowed = set()
     # Per app rather than per module, so that a test's client gets its own and
     # the suite cannot fail in whichever test happens to run last. There is one
     # instance, so per app is per process anyway.
@@ -944,7 +949,41 @@ async def shout(code: str, body: ShoutRequest, request: Request):
                                  "are still going out")
     said = _say(request.app, connection, room, team, words, actor)
     ahead = request.app.state.chain.submit(room, team, said["seq"], words, actor)
+    _consider_the_quiet_word(request.app, connection, room, team, words, said["seq"])
     return {**said, "ahead": ahead}
+
+
+def _consider_the_quiet_word(app, connection, room, team, words, seq):
+    """Schedule the scoring of a shout, if this room is one that can have it.
+
+    Scheduled rather than awaited: scoring is a call out to Vertex and the
+    manager is holding a phone waiting for their words to be accepted. Solo
+    only, because the other dugout in a versus match belongs to a person.
+    Returns the task, which is what lets a test await the thing it scheduled.
+    """
+    if not intent.configured() or room["mode"] != "solo":
+        return None
+    return asyncio.create_task(
+        _the_quiet_word(app, connection, room, team, words, seq))
+
+
+async def _the_quiet_word(app, connection, room, team, words, seq):
+    """Slow the house side, if that is what the manager just asked for."""
+    if room["id"] in app.state.slowed:
+        return
+    matched, found = await intent.asked_for_it(words)
+    logger.info("shout %s scored %.3f for the quiet word", seq, found)
+    if not matched or room["id"] in app.state.slowed:
+        return
+    # Claimed before writing, so two shouts landing together cannot both slow
+    # the same squad.
+    app.state.slowed.add(room["id"])
+    against = sabotage.other_dugout(team)
+    # Nothing is awaited between here and the commit inside `patch`, so this
+    # cannot interleave with a request on the same connection.
+    for result in sabotage.slow_the_opposition(connection, room["id"], against):
+        _record_patch(app, connection, room, against, result,
+                      reason=sabotage.REASON, actor=sabotage.ACTOR)
 
 
 def _who_is_shouting(request, connection, room):
