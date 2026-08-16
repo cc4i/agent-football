@@ -802,10 +802,17 @@ function cutTo(wanted) {
   showing = wanted;
   lobby.hidden = Boolean(wanted);
   court.hidden = !wanted;
-  // What is framed, said out loud in the DOM. Nothing on the page reads it --
-  // it is for the test that drives fifty matches past this screen, and for
-  // anybody with the inspector open wondering which room they are looking at.
+  // What is framed, said out loud in the DOM, for the test that drives fifty
+  // matches past this screen.
   court.dataset.showing = wanted || "";
+  // And the same fact on the screen, for the person standing in front of it.
+  // It used to be here and nowhere else, which meant the one match nobody could
+  // name was the one filling the wall: the strip leaves out whatever is big, so
+  // there is no tile to read its code off either. The only code on offer was
+  // the rail's, and that is a different room -- the empty one this screen is
+  // holding for whoever scans it. Set on the cut, so a pin renames it at once.
+  el("on-air").hidden = !wanted;
+  el("on-air-code").textContent = wanted || "";
   wayIn();
   strip();
 

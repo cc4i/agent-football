@@ -618,6 +618,30 @@ body.big{padding:24px}
 .screen-id{display:flex;align-items:baseline;gap:12px}
 .screen-id h1{font-family:'Outfit',system-ui,sans-serif;font-size:1.5rem;font-weight:800;letter-spacing:-.01em}
 .screen-id .where{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:.72rem;color:var(--faint)}
+/* The code of the match on centre court, in the same gold monospace a tile
+   prints its own in: it is the same thing, at the size of the room.
+
+   Two codes are on a screen showing football, and they mean opposite things.
+   The rail's is an invitation -- an empty room, scan it and you are in -- and
+   this one is a label on a match already being played, which nobody can join.
+   Told apart by the word above each, and by size: the invitation is set to be
+   read from the back of a hall at 1.5rem, and this is for whoever has walked up
+   to the screen wondering which room they are looking at. Loud enough to find,
+   quiet enough that it is never the thing a phone gets pointed at.
+
+   In the bar rather than over the pitch because the game draws manager cards in
+   both top corners and nameplates in both bottom ones, and rather than in a
+   row of its own because a heading over centre court costs the match height a
+   four-character code does not earn. */
+.on-air{display:inline-flex;align-items:baseline;gap:8px}
+.on-air i{
+  font-style:normal;font-size:.66rem;font-weight:700;
+  text-transform:uppercase;letter-spacing:.18em;color:var(--faint);
+}
+.on-air b{
+  font-family:'IBM Plex Mono',ui-monospace,monospace;font-weight:600;
+  font-size:.85rem;letter-spacing:.16em;color:var(--gold);
+}
 .bar-right{display:flex;align-items:center;gap:14px}
 
 /* Solo or head to head, for a room that has not kicked off. Built to the same

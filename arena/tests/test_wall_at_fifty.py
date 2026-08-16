@@ -197,6 +197,56 @@ async def test_clicking_a_tile_pins_it(wall_page, fifty_live_rooms):
     assert "house side" not in chip, chip
 
 
+async def test_the_screen_names_the_room_it_is_showing(wall_page, fifty_live_rooms):
+    """Which match is up, in the one currency the venue shares: its code.
+
+    The page knew this all along and said it only to the inspector. Every other
+    match in the building wears its code on its tile; the one filling the screen
+    wore nothing, and the strip leaves it out by design, so there was no tile to
+    read it off either. What a person did find was a code -- the large gold one
+    in the rail -- and that is a *different room*, the empty one this screen is
+    offering to whoever scans it. The biggest code on the wall named the one
+    match that was not on the wall.
+    """
+    on_court = await wall_page.locator("#court").get_attribute("data-showing")
+    assert await wall_page.locator("#on-air").is_visible()
+    assert await wall_page.locator("#on-air-code").inner_text() == on_court
+
+    # And it follows the cut rather than being printed once at load. A pin is
+    # the sharpest version: the operator asks for one of the oldest matches in
+    # the building, which is the furthest thing from what auto had up.
+    tile = wall_page.locator(".tile[data-code]").first
+    code = await tile.get_attribute("data-code")
+    assert code != on_court
+    await tile.click()
+    await wall_page.wait_for_function(
+        "(code) => document.querySelector('#court').dataset.showing === code", arg=code)
+    assert await wall_page.locator("#on-air-code").inner_text() == code
+
+
+async def test_the_two_codes_on_the_screen_cannot_be_read_as_one(wall_page,
+                                                                 fifty_live_rooms):
+    """A screen showing football carries two codes that mean opposite things.
+
+    The rail's is an invitation -- an empty room, scan it and you are in. The
+    bar's is a label on a match already being played, which nobody can join.
+    Printed alike they would be worse than one code alone, so they are told
+    apart twice over: by the words above them, and by size, the rail's being the
+    one meant to be read from the back of a hall.
+    """
+    rail = wall_page.locator("#code-3")
+    if not await rail.is_visible():
+        pytest.skip("this screen's own room is not open to be walked into")
+
+    assert await rail.inner_text() != await wall_page.locator("#on-air-code").inner_text()
+    assert "on air" in (await wall_page.locator("#on-air").inner_text()).lower()
+
+    tall = lambda box: box["height"]
+    assert tall(await rail.bounding_box()) > tall(
+        await wall_page.locator("#on-air-code").bounding_box()), (
+            "the joinable code must be the louder of the two")
+
+
 async def test_a_pinned_match_holds_the_page_it_was_on(wall_page, fifty_live_rooms):
     """The carousel gets out of the way of a hand, and comes back afterwards.
 

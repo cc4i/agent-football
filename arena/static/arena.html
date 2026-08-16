@@ -19,6 +19,13 @@
            app.css. No whitespace between them: it would set the word apart. -->
       <h1 class="brand"><b>F</b><b>u</b><b>t</b><b>s</b><b>a</b><b>l</b> <b>W</b><b>o</b><b>r</b><b>l</b><b>d</b><b>C</b><b>u</b><b>p</b></h1>
       <span class="where" id="where">Arena</span>
+      <!-- Which match is on centre court. Every other match in the venue wears
+           its code on its tile, and the strip leaves out the one that is big,
+           so without this the match filling the wall is the only one in the
+           building that goes unnamed. Written by `cutTo`, and gone with the
+           football: in the lobby there is no match to name and the join card
+           carries this room's code at ten times the size. -->
+      <span class="on-air" id="on-air" hidden><i>On air</i><b id="on-air-code"></b></span>
     </div>
     <div class="bar-right">
       <!-- The screen guessed a mode when it opened this room, before anybody
