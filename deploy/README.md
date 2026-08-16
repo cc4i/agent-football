@@ -76,16 +76,18 @@ Both of these drop every live match, exactly as a deploy does.
 `minScale` with `cpu-throttling: false` bills for the whole lifetime of the
 service rather than per request: 4 vCPU and 8 GiB of the arena's container,
 plus the coach's and the captain's 2 and 4 each, and then the grounds' 4 and 4
-**three times over**, because `grounds.yaml` runs three instances. All of it
+**five times over**, because `grounds.yaml` runs five instances. All of it
 charged continuously whether anybody is playing or not. The Cloud SQL instance
 never stops either. Neither service scales to zero and neither can be made to
 without giving up what rests on it.
 
-The grounds is the part with a dial on it. Three instances is sixty pitches,
-which is the spec's fifty and ten spare; one instance is twenty, which is what
-a workshop of twenty matches needs and a third of the cost. `GROUNDS_CAPACITY`
-is a promise about a single thread and should not be raised to compensate -
-that is measured in `grounds.yaml` and the number it is measured at is twenty.
+The grounds is the part with a dial on it, and it is the largest line on the
+bill. Five instances is a hundred pitches; three is sixty, which is the spec's
+fifty and ten spare; one is twenty, which is what a workshop of twenty matches
+needs and a fifth of the cost. Set it to the venue you are actually running.
+`GROUNDS_CAPACITY` is a promise about a single thread and should not be raised
+to compensate - it is measured in `grounds.yaml`, and twenty is the number it
+was measured at.
 Turning it down between workshops is `minScale` and `maxScale` together, which
 must stay equal: the service takes no requests but its own probes, so a range
 would let Cloud Run decide the venue's capacity on something unrelated to how

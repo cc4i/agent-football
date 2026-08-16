@@ -22,12 +22,13 @@ spec:
   template:
     metadata:
       annotations:
-        # Three instances, sixty pitches, which is the spec's fifty and ten
-        # spare. This is the scale-out the note here used to defer, and
-        # unlike the arena's `maxScale: "1"` it is a number rather than a
-        # correctness constraint: nothing in a grounds is shared with another
-        # one. Each launches its own browser, holds its own control socket, and
-        # is told by the arena which matches are its own.
+        # Five instances, a hundred pitches. Three and sixty was the first step
+        # past the spec's fifty; a hundred is where the venue was taken next,
+        # and it is the same dial. This is the scale-out the note here used to
+        # defer, and unlike the arena's `maxScale: "1"` it is a number rather
+        # than a correctness constraint: nothing in a grounds is shared with
+        # another one. Each launches its own browser, holds its own control
+        # socket, and is told by the arena which matches are its own.
         #
         # What made this safe was already here. `Grounds.assign` records one
         # socket per room in `_where` and hands each new match to the emptiest
@@ -40,21 +41,24 @@ spec:
         # to. No instance is addressed by anything: each dials the arena out
         # over the public URL and is known by the connection it arrives on.
         #
-        # Why three and not one big one: the measurement below. A page is
+        # Why five and not one big one: the measurement below. A page is
         # single-threaded and the ceiling is a thread rather than the four vCPU
-        # allocated, so fifty matches is past what any single instance can be
-        # bought. Three at twenty is three threads at about 0.55 each.
+        # allocated, so even fifty matches is past what any single instance can
+        # be bought. Five at twenty is five threads at about 0.55 each, and
+        # `GROUNDS_CAPACITY` stays at the twenty that was measured rather than
+        # being raised to save an instance -- that number is a promise about one
+        # thread, and the way to break it is quietly, by slowing every match in
+        # the venue together.
         #
         # An instance that dies takes its own matches with it and the sweep
         # abandons them -- see `Grounds.left`. At one instance that was the
-        # whole venue; at three it is a third of it, which is the other thing
-        # scaling out buys. It does not buy the venue a spare: three at twenty
-        # holds fifty, and two of them hold forty, so losing one during a full
-        # venue means the matches that were on it are gone and the next kick-off
-        # is refused until something finishes. A fourth instance would close
-        # that and costs a fourth instance all evening; see deploy/README.md.
-        autoscaling.knative.dev/minScale: "3"
-        autoscaling.knative.dev/maxScale: "3"
+        # whole venue; at five it is a fifth of it, which is the other thing
+        # scaling out buys. It does not buy the venue a spare: five at twenty
+        # holds a hundred exactly, so a full venue that loses one is twenty
+        # matches gone and every kick-off refused until something finishes.
+        # Slack is a sixth instance, all evening; see deploy/README.md.
+        autoscaling.knative.dev/minScale: "5"
+        autoscaling.knative.dev/maxScale: "5"
         # Load-bearing in a way it is not even for the arena. The only requests
         # this service takes are its own health checks, and everything it does
         # happens between them: throttled, it would stop playing football the
