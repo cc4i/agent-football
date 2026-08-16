@@ -54,7 +54,14 @@ function makeBall(x, y) {
 }
 
 function makePlayer(x, y) {
-  return { x, y };
+  // `releaseKick` asks whether this kick was aimed at goal, so the stub needs
+  // the same `getData`/`setData` surface a Phaser sprite has.
+  const data = {};
+  return {
+    x, y,
+    getData: (key) => data[key],
+    setData: (key, value) => { data[key] = value; },
+  };
 }
 
 // Build a minimal `this` for releaseKick. `teammates` lets us force the
@@ -71,6 +78,13 @@ function makeScene({ player, ballAt, teammates = [] }) {
     redPlayers: teammates,
     cameras: { main: { shake: () => {} } },
     time: { now: 1000 },
+    // Shot bookkeeping: releaseKick closes off whatever was in flight.
+    liveShot: null,
+    shotEnds: [
+      SoccerGameScene.prototype.freshShotEnds(),
+      SoccerGameScene.prototype.freshShotEnds(),
+    ],
+    resolveShot: SoccerGameScene.prototype.resolveShot,
     // use the real helper
     findTeammateInDirection: SoccerGameScene.prototype.findTeammateInDirection,
   };

@@ -131,6 +131,12 @@ export class SoccerGameScene extends Phaser.Scene {
     // reports running have inferred shooting from where players were standing.
     this.shots = [0, 0];
     this.blocked = [0, 0];
+    // How each shot ended. `blocked` above counts every touch between ball and
+    // keeper, including the ball rolling onto one, so it cannot answer "how
+    // many shots were saved". This can: a shot is followed from the boot until
+    // the first thing that happens to it, and nothing else is counted.
+    this.shotEnds = [this.freshShotEnds(), this.freshShotEnds()];
+    this.liveShot = null;
     this.matchTime = GAME_DURATION_SEC;
     this.timerEvent = null;
     this.gameActive = false;
@@ -450,6 +456,7 @@ export class SoccerGameScene extends Phaser.Scene {
 
     this.physics.add.collider(this.ball, this.postsGroup, () => {
       if (this.ballZ < 40) Sound.playBounce();
+      this.resolveShot('frame');
     });
 
     // GK block
@@ -667,6 +674,11 @@ export class SoccerGameScene extends Phaser.Scene {
     }
 
     this.checkGoals();
+
+    // A shot nobody and nothing met. The pitch is 1408 wide and a shot leaves
+    // the boot at 780px/s, so two seconds is longer than any of them can
+    // legitimately still be travelling.
+    if (this.liveShot && time - this.liveShot.at > 2000) this.resolveShot('faded');
     this.checkOutOfBounds(time);
   }
 
@@ -794,6 +806,9 @@ export class SoccerGameScene extends Phaser.Scene {
     });
 
     if (best) {
+      // Somebody reached the ball before it reached anything else. For a shot
+      // in flight that is the end of it, whichever side picked it up.
+      this.resolveShot('taken');
       this.possessor = best;
       this.lastTouchTeam = best.getData('team');
     }
@@ -837,6 +852,28 @@ export class SoccerGameScene extends Phaser.Scene {
   resolveDistance(value, max, fallback) {
     if (value === undefined) return fallback;
     return value <= 2.0 ? max * value : value;
+  }
+
+  freshShotEnds() {
+    return {
+      goal: 0,        // crossed the line
+      saved: 0,       // the keeper got to it
+      frame: 0,       // a post or the netting
+      wide: 0,        // reached the goal line outside the mouth
+      taken: 0,       // somebody picked it up before it arrived
+      stolen: 0,      // a teammate in the lane turned it into a pass
+      faded: 0,       // ran out of pace without reaching anything
+    };
+  }
+
+  /**
+   * The first thing that happened to the shot in flight, and the only thing
+   * counted for it. Called from every place a ball's flight can end.
+   */
+  resolveShot(kind) {
+    if (!this.liveShot) return;
+    this.shotEnds[this.liveShot.team - 1][kind]++;
+    this.liveShot = null;
   }
 
   /**
@@ -981,6 +1018,7 @@ export class SoccerGameScene extends Phaser.Scene {
                   const oppGk = isBlue ? this.gk2 : this.gk1;
                   const shotY = this.aimAtGoal(oppGk, profile);
                   this.shots[teamNum - 1]++;
+                  p.setData('kickIsShot', true);
 
                   p.setData('kickPending', true);
                   p.setData('kickChargeStart', time);
@@ -1351,13 +1389,22 @@ export class SoccerGameScene extends Phaser.Scene {
     // The ball always rolls along the ground (no loft) - players can't jump, and
     // a vertical hop only distorts the apparent travel direction in this top-down
     // view. Keep it grounded so kicks read true in every direction.
+    // Whatever the last shot was doing, this kick ends it.
+    const wasAimedAtGoal = player.getData('kickIsShot');
+    player.setData('kickIsShot', false);
+    this.resolveShot('taken');
+
     if (passTarget) {
       const angleRad = Phaser.Math.Angle.Between(player.x, player.y, passTarget.x, passTarget.y);
       const passSpeed = 300 + 360 * power;
       this.ball.setVelocity(Math.cos(angleRad) * passSpeed, Math.sin(angleRad) * passSpeed);
+      // A shot the shooter meant to take, turned into a square ball by a
+      // teammate standing in the lane. This is the cone the model warns about.
+      if (wasAimedAtGoal) this.shotEnds[teamNum - 1].stolen++;
     } else {
       const shootSpeed = 420 + 360 * power;
       this.ball.setVelocity(kdx * shootSpeed, kdy * shootSpeed);
+      if (wasAimedAtGoal) this.liveShot = { team: teamNum, at: this.time.now };
     }
     this.ballZ = 0;
     this.ballZVelocity = 0;
@@ -1461,6 +1508,7 @@ export class SoccerGameScene extends Phaser.Scene {
       this.cameras.main.shake(80, 0.003);
       // Whose shot was stopped: the keeper at the right-hand goal saves blue's.
       this.blocked[gk.x < 700 ? 1 : 0]++;
+      this.resolveShot('saved');
 
       this.possessor = null;
       this.captureReadyAt = this.time.now + 300;
@@ -1544,6 +1592,8 @@ export class SoccerGameScene extends Phaser.Scene {
 
     if (bounced) {
       Sound.playBounce();
+      // A shot that reaches a boundary reached it instead of the net.
+      this.resolveShot('wide');
     }
   }
 
@@ -1595,6 +1645,7 @@ export class SoccerGameScene extends Phaser.Scene {
   }
 
   scoreGoal(scoringPlayer) {
+    this.resolveShot('goal');
     this.isResetting = true;
     Sound.playGoal();
     this.cameras.main.shake(400, 0.012);
@@ -1752,6 +1803,7 @@ export class SoccerGameScene extends Phaser.Scene {
       // Cumulative, so a reader that misses frames still gets the totals.
       shots: [...this.shots],
       blocked: [...this.blocked],
+      shotEnds: [{ ...this.shotEnds[0] }, { ...this.shotEnds[1] }],
     };
   }
 
@@ -1779,6 +1831,12 @@ export class SoccerGameScene extends Phaser.Scene {
     // reports running have inferred shooting from where players were standing.
     this.shots = [0, 0];
     this.blocked = [0, 0];
+    // How each shot ended. `blocked` above counts every touch between ball and
+    // keeper, including the ball rolling onto one, so it cannot answer "how
+    // many shots were saved". This can: a shot is followed from the boot until
+    // the first thing that happens to it, and nothing else is counted.
+    this.shotEnds = [this.freshShotEnds(), this.freshShotEnds()];
+    this.liveShot = null;
     this.matchTime = GAME_DURATION_SEC;
     // create() may not have run: the wall mounts the canvas and cuts to its
     // first match without waiting for Phaser to boot.
@@ -1973,6 +2031,12 @@ export class SoccerGameScene extends Phaser.Scene {
     // reports running have inferred shooting from where players were standing.
     this.shots = [0, 0];
     this.blocked = [0, 0];
+    // How each shot ended. `blocked` above counts every touch between ball and
+    // keeper, including the ball rolling onto one, so it cannot answer "how
+    // many shots were saved". This can: a shot is followed from the boot until
+    // the first thing that happens to it, and nothing else is counted.
+    this.shotEnds = [this.freshShotEnds(), this.freshShotEnds()];
+    this.liveShot = null;
     this.matchTime = GAME_DURATION_SEC;
     this.scoreText1.setText('0');
     this.scoreText2.setText('0');
