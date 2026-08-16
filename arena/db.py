@@ -11,12 +11,15 @@ survives whoever eventually adds a pool, but the day that happens is the day
 `tests/test_append_event_race.py` earns its keep.
 """
 
+import logging
 import os
 import re
 
 import psycopg
 from psycopg import conninfo, sql
 from psycopg.rows import dict_row
+
+logger = logging.getLogger(__name__)
 
 # Local development over the Unix socket: no password, no port, no host. On
 # Cloud SQL this is a full conninfo string naming /cloudsql/<connection-name>
@@ -283,6 +286,24 @@ def finish(connection):
     constraint leaves the transaction aborted, so every later statement in the
     process fails until somebody restarts it. Rolling back costs nothing after
     a commit and is the difference between one failed request and a dead arena.
+
+    It never raises, because every caller is in a `finally`. A connection the
+    server has hung up on -- an instance restarted, a route changed, an idle
+    reaper -- reports a transaction status that is not IDLE, so this reached
+    for a rollback and psycopg answered `the connection is lost`. Coming out of
+    a `finally` that replaced whatever had gone wrong first, and in the
+    watchdog it ended the loop the surrounding `except` exists to keep alive:
+    one lost connection and no room was ever given up on again, silently, with
+    the arena still answering every probe put to it. Measured against a real
+    Postgres in `tests/test_db.py` by taking the backend away mid-transaction.
+
+    There is nothing to put back on a connection that is already gone, and no
+    caller in a `finally` could do anything about it if there were. What
+    notices instead is the sweep failing to complete, which is what `/health`
+    answers for.
     """
-    if connection.info.transaction_status != psycopg.pq.TransactionStatus.IDLE:
-        connection.rollback()
+    try:
+        if connection.info.transaction_status != psycopg.pq.TransactionStatus.IDLE:
+            connection.rollback()
+    except psycopg.Error as gone:
+        logger.warning("could not put the connection back: %s", gone)

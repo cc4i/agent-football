@@ -180,3 +180,58 @@ def test_a_room_cannot_reuse_a_sequence_number(conn):
         conn.execute("INSERT INTO event (room_id, seq, kind, payload_json, match_ms, wall_ts) "
                      "VALUES (1, 1, 'goal', '{}', 100, 0)")
     db.finish(conn)
+
+
+def hang_up_on(dsn, connection):
+    """Kill this connection's backend from the server side, the way a real one goes.
+
+    Not `connection.close()`: that leaves psycopg knowing the connection is
+    shut. What a Cloud SQL instance restarting, a VPC route changing or an idle
+    reaper does is take the socket away underneath a client that still believes
+    it has one, and the difference is exactly what `finish` has to survive.
+    """
+    with psycopg.connect(dsn, autocommit=True) as server_side:
+        server_side.execute(
+            "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+            "WHERE datname = current_database() AND pid <> pg_backend_pid()")
+
+
+def test_putting_back_a_connection_the_server_hung_up_on_does_not_raise(dsn):
+    """Every caller of `finish` is in a `finally`, so it must not raise.
+
+    A broken connection reports a transaction status that is not IDLE, so
+    `finish` reached for a rollback and psycopg answered `the connection is
+    lost`. Raising from a `finally` replaces whatever went wrong first, and in
+    the watchdog's case it ended the loop that the surrounding `except` exists
+    to keep alive: one lost connection and no room is ever given up on again.
+
+    There is nothing to put back on a connection that is already gone, and
+    nothing a caller in a `finally` could do about it if there were.
+    """
+    connection = db.connect(dsn)
+    connection.execute("SELECT 1")
+    hang_up_on(dsn, connection)
+    assert connection.info.transaction_status != psycopg.pq.TransactionStatus.IDLE
+
+    db.finish(connection)
+    connection.close()
+
+
+def test_putting_back_a_connection_that_was_closed_properly_does_not_raise(dsn):
+    connection = db.connect(dsn)
+    connection.execute("SELECT 1")
+    connection.close()
+    db.finish(connection)
+
+
+def test_a_working_connection_is_still_rolled_back(dsn):
+    # The swallowing above must not have turned `finish` into a no-op.
+    connection = db.connect(dsn)
+    connection.execute("CREATE TEMP TABLE scribble (n INTEGER)")
+    connection.execute("INSERT INTO scribble VALUES (1)")
+    db.finish(connection)
+    assert connection.info.transaction_status == psycopg.pq.TransactionStatus.IDLE
+    # The temp table went with the rolled-back transaction that made it.
+    with pytest.raises(psycopg.errors.UndefinedTable):
+        connection.execute("SELECT * FROM scribble")
+    connection.close()
