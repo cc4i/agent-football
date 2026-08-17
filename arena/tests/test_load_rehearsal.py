@@ -89,7 +89,14 @@ FIXTURE = Path(fake_host.__file__).resolve().parent / "fixtures" / "match-3-1.js
 # with. A fixed string rather than a secret, because both ends of it are this
 # file. Kick-off needs somewhere to play or it answers the honest 503, and the
 # subprocess arena has no grounds unless this one connects to it.
-SERVICE_TOKEN = "rehearsal-service-token"
+#
+# Both ends are this file only while the arena is this file's subprocess. Run
+# against a deployed one with ARENA_LOAD_URL and the far end is holding the
+# venue's real secret, so the stand-in grounds has to be given it too or
+# `/ws/grounds` closes the socket with 4403 before the first room is opened.
+# Exported rather than defaulted: a rehearsal's own arena must never be reached
+# with a string that came from somewhere else.
+SERVICE_TOKEN = os.environ.get("ARENA_SERVICE_TOKEN") or "rehearsal-service-token"
 
 # The frame `arena/README.md` documents and `game.js` builds: a scoreline, a
 # clock and eleven points, at the three decimals the pitch rounds to. Kept here

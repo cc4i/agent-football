@@ -494,8 +494,16 @@ cd arena
 ARENA_LOAD=1 \
 ARENA_LOAD_URL="$(gcloud run services describe arena --region="$REGION" \
     --format='value(status.url)')" \
+ARENA_SERVICE_TOKEN="$(gcloud secrets versions access latest \
+    --secret=arena-service-token)" \
     uv run pytest tests/test_load_rehearsal.py -s
 ```
+
+`ARENA_SERVICE_TOKEN` is only needed up here. The rehearsal's stand-in grounds
+authenticates to `/ws/grounds` like a real one, and against a laptop both ends
+of that are the test file, so it uses a fixed string. Against a deployed arena
+the far end is holding the venue's real secret and the socket closes with
+`4403 the grounds must authenticate` before the first room is opened.
 
 `-s` is not optional: the report is printed and pytest swallows the stdout of a
 test that passed. Do it after "Letting the phones in", because every socket in

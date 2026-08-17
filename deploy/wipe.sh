@@ -64,10 +64,21 @@ fi
 # assigned when the instance is made.
 DB_HOST="$(gcloud sql instances describe arena-pg --project="${PROJECT}" \
     --format='value(ipAddresses[0].ipAddress)')"
-ARENA_DB="postgresql://arena@${DB_HOST}:5432/arena"
+# Which venue is being emptied. Defaulted to the one there has always been, so
+# an unqualified `wipe.sh --apply` does exactly what it always did - and named
+# here at all because a second deployment shares this instance. Wiping is the
+# one operation where reaching the wrong database is unrecoverable, and a
+# hardcoded name gives somebody running it against a variant no way to say so.
+DB_NAME="${DB_NAME:-arena}"
+# And which service is holding that database, for the bounce this prints at the
+# end. Wrong here is merely unhelpful rather than dangerous, but a wipe that
+# finishes by naming somebody else's arena is a poor last thing to say.
+ARENA_NAME="${ARENA_NAME:-arena}"
+ARENA_DB="postgresql://arena@${DB_HOST}:5432/${DB_NAME}"
 
 if [ "$APPLY" = "1" ]; then
     echo "This empties the venue behind ${IMAGE}."
+    echo "Database: ${DB_NAME} on arena-pg."
     echo "Every manager, every match, every result. The standings go with them."
     read -r -p "Type the word empty to go ahead: " answer
     [ "$answer" = "empty" ] || { echo "left alone."; exit 1; }
@@ -114,6 +125,6 @@ if [ "$APPLY" = "1" ]; then
     echo
     echo "Bounce the arena to clear its memory too - the bus, the chain's seats and"
     echo "the rooms its sockets are holding all outlive the database:"
-    echo "  gcloud run services update arena --region=${REGION} --project=${PROJECT} \\"
+    echo "  gcloud run services update ${ARENA_NAME} --region=${REGION} --project=${PROJECT} \\"
     echo "      --update-env-vars=ARENA_BOUNCE=\$(date +%s)"
 fi
