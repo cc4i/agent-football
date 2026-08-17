@@ -133,7 +133,7 @@ The join form asks for three things:
 | field | notes |
 |---|---|
 | Name on the board | One manager per name at the event. A name somebody else holds is refused, worded with their spelling so the difference is visible. |
-| Email | Optional. Only so they keep one place on the board if they play again on another phone. Shown masked (`a***x@example.com`) and deleted after the event. |
+| Email | Optional. Only so they keep one place on the board if they play again on another phone. Never published; deleted after the event. |
 | Where do you start | One of four opening stances. |
 
 The four stances, applied to all four players **at kick-off**, not on joining:

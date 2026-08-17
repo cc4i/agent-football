@@ -41,10 +41,9 @@ SAMPLE_BYTES = 2
 def spoken(solo_rows, versus_rows):
     """The two podiums, trimmed to what somebody could read off a screen.
 
-    A trim rather than the rows as they come. A board row carries a player id
-    and a masked address, and neither belongs in a prompt: the id says nothing
-    out loud and the address is not ours to hand to a model. What is left is
-    the numbers a commentator would actually reach for.
+    A trim rather than the rows as they come. A board row carries a player id,
+    and it says nothing out loud. What is left is the numbers a commentator
+    would actually reach for.
     """
     return {
         "score_attack": [

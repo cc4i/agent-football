@@ -32,10 +32,11 @@ def test_a_podium_carries_only_what_could_be_said_out_loud():
 
 
 def test_an_address_never_reaches_the_prompt():
-    # The rows carry a masked address for the board to print under a name.
-    # Nothing is gained by sending it to a model, so nothing does.
+    # Board rows no longer carry addresses. This asserts the trim drops the
+    # player id, which says nothing out loud.
     said = announcer.spoken(SOLO, VERSUS)
     assert "email" not in said["score_attack"][0]
+    assert "player_id" not in said["score_attack"][0]
     assert "@" not in str(said)
 
 
