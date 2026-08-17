@@ -320,6 +320,40 @@ async def test_a_clip_still_being_made_is_never_played_into_a_match(lobby_and_ve
 
 
 @pytest.mark.e2e
+async def test_a_cut_while_the_element_is_starting_says_nothing_on_the_wall(
+        lobby_and_venue):
+    """The narrow half of the same window, and the one that leaves a mark.
+
+    `play` awaits `speaker.play()`, which stays pending while the element
+    fetches and decodes the wav. A cut landing in there pauses it, Chromium
+    rejects that play with "the play() request was interrupted by a call to
+    pause()", and reporting it puts a browser's own words in `#problem` - the
+    one line on this page that nothing ever clears, which is the whole reason
+    the chip is kept off an empty board in the first place.
+    """
+    page, venue = lobby_and_venue
+
+    async def unhurried(route):
+        # Held open, so the element is still starting when the cut lands.
+        await asyncio.sleep(5)
+        await route.continue_()
+
+    await page.route("**/api/board/announcement/*.wav", unhurried)
+    said = await page.text_content("#problem")
+
+    await page.click("#announce")
+    # The caption is set on the line before the await this test is about.
+    await page.wait_for_selector("#caption:not([hidden])", timeout=15_000)
+    code = await venue.a_match_kicks_off()
+    await page.click(f'.tile[data-code="{code}"]', timeout=15_000)
+    await page.wait_for_selector("#lobby[hidden]", state="attached", timeout=15_000)
+
+    # Long enough for the rejection to have been delivered and answered.
+    await page.wait_for_timeout(1_000)
+    assert await page.text_content("#problem") == said
+
+
+@pytest.mark.e2e
 async def test_the_chip_stays_on_air_while_the_clip_is_being_made(lobby_and_venue):
     """Warming up is most of the minute this feature costs, and the whole of
     what an unattended screen has to show for the press.

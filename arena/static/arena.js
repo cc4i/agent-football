@@ -1168,6 +1168,12 @@ async function readTheBoard() {
     if (mine !== press) return;
     await play(clip);
   } catch (failure) {
+    // The same check again, because `play` has an await of its own and the
+    // cut can land inside it. A media element that is paused while it is
+    // still fetching rejects the play it was given with "the play() request
+    // was interrupted by a call to pause()", and reporting that would put a
+    // browser's own words on the wall in the one line nothing ever clears.
+    if (mine !== press) return;
     quiet();
     say(failure.message);
   }
