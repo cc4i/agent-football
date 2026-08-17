@@ -491,6 +491,51 @@ gcloud logging read \
     --limit=40 --format='value(textPayload)' --freshness=20m
 ```
 
+### Emptying it completely
+
+When the venue wants to be new rather than tidied - a fresh workshop, or a week
+of testing that left a standings board with nothing human on the first page:
+
+```bash
+deploy/wipe.sh                  # counts it and changes nothing
+deploy/wipe.sh --apply          # and this means it
+```
+
+Every manager, every match, every event log, every result. It creates or
+updates the `wipe-venue` job from the image the arena is *currently running*,
+runs it, and reads the counts back out of Cloud Logging, because a job's stdout
+does not come back through `execute`.
+
+Dry by default, the same contract `tidy-rehearsals` has, so there is one habit
+rather than two. `--apply` also asks you to type the word `empty` first.
+
+Three things it does that a hand-typed `TRUNCATE` would not:
+
+- It empties `db.TABLES` rather than a list in the script, which is already
+  what the suite truncates between tests. A table added to the schema and not
+  to that tuple would survive a wipe and leak between tests, and
+  `test_wiping_the_venue.py` fails when the two disagree.
+- It restarts the identities, so the next manager through the door is player 1.
+  Emptied but still counting from 813 is a venue that remembers the last one.
+- It puts the workshop room back, because `app.lifespan` only creates that on a
+  boot. Without it the dugout's five stages have nowhere to run until somebody
+  restarts the arena, and nothing says so.
+
+It refuses while any match is live - the grounds is simulating those, and
+`_handle_from_host` asks the row it reads for a token, so deleting it is a
+crashed socket per match. `--live` overrides that.
+
+What it cannot empty is the arena's memory: the match bus, the chain's seats,
+the rooms its sockets are holding. The script prints the command to bounce the
+arena afterwards for a genuinely clean slate.
+
+On a laptop none of the job machinery is needed. The script only reads
+`ARENA_DB`:
+
+```bash
+cd arena && ARENA_DB=postgresql:///arena uv run python ../deploy/wipe_the_venue.py
+```
+
 ## If the first revision never goes ready
 
 The coach and the captain bound `127.0.0.1` once, on the argument that the
