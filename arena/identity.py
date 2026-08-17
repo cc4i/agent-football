@@ -11,6 +11,14 @@ on. Nothing here can recover the address it was handed.
 import base64
 import hashlib
 import hmac
+import secrets
+
+import codes
+
+# A recovery code proves an address is yours. Six characters from the same
+# alphabet room codes use, shown on /home and typed on a phone when claiming a
+# row from another device.
+RECOVERY_LENGTH = 6
 
 
 def normalise_name(name):
@@ -69,3 +77,8 @@ def verify_token(token, secret):
 def _mac(body, secret):
     digest = hmac.new(secret.encode(), body.encode(), hashlib.sha256).digest()
     return base64.urlsafe_b64encode(digest).decode().rstrip("=")
+
+
+def new_recovery_code():
+    """Six characters that prove an address is yours. Read across a room, typed on a phone."""
+    return "".join(secrets.choice(codes.ALPHABET) for _ in range(RECOVERY_LENGTH))

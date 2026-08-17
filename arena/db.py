@@ -150,6 +150,7 @@ ALTER TABLE player ALTER COLUMN email_hash DROP NOT NULL;
 ALTER TABLE player ALTER COLUMN email_masked DROP NOT NULL;
 ALTER TABLE room ADD COLUMN IF NOT EXISTS started_at DOUBLE PRECISION;
 ALTER TABLE room ADD COLUMN IF NOT EXISTS screen_client_id TEXT;
+ALTER TABLE player ADD COLUMN IF NOT EXISTS recovery_code TEXT;
 """
 
 # What makes a name a manager's own. Compared case-insensitively, over names
@@ -245,6 +246,7 @@ def init_db(connection):
     connection.execute(SCHEMA)
     connection.execute(MIGRATIONS)
     _pull_apart_shared_names(connection)
+    _backfill_recovery_codes(connection)
     connection.execute(ONE_NAME_EACH)
     connection.commit()
 
@@ -274,6 +276,30 @@ def _pull_apart_shared_names(connection):
         ).rowcount
         if not renamed:
             return
+
+
+def _backfill_recovery_codes(connection):
+    """Give every address-bearing row a code, once.
+
+    Only rows with an address, because a row that no address resolves to can
+    never be claimed and needs no code. Run on every boot like
+    _pull_apart_shared_names, because there is nowhere to record that it has
+    run before. Idempotent: a row with a code is left alone.
+
+    The code is stored in the clear deliberately. It has to be displayed to its
+    owner on /home, so it cannot be hashed. It is not a password and must never
+    grow into one.
+    """
+    import identity
+
+    needing = connection.execute(
+        "SELECT id FROM player WHERE recovery_code IS NULL AND email_hash IS NOT NULL"
+    ).fetchall()
+    for row in needing:
+        connection.execute(
+            "UPDATE player SET recovery_code = %s WHERE id = %s",
+            (identity.new_recovery_code(), row["id"])
+        )
 
 
 def finish(connection):
