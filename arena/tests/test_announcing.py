@@ -190,9 +190,6 @@ async def test_a_screen_reads_the_board_out_loud(lobby_page):
 
 @pytest.mark.e2e
 async def test_the_frame_turns_over_and_then_gives_up_the_pin(lobby_page):
-    # Screenshot the lobby before pressing to check if the mic chip obscures anything
-    await lobby_page.screenshot(path="/tmp/lobby-with-button.png")
-
     await lobby_page.click("#announce")
     # Halfway through, the second half of the script is on screen and the
     # frame is holding the head to head board up.

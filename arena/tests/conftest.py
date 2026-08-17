@@ -485,16 +485,80 @@ async def wall_page(wall_server, fifty_live_rooms):
     assert not complaints, f"the wall logged errors: {complaints}"
 
 
-@pytest.fixture
-async def lobby_page(dsn, monkeypatch):
-    """A browser in front of an arena that has a lobby and a stocked board.
+async def _a_clip(podiums):
+    """What the announcer's two model calls would have come back with.
 
-    Not `wall_page`: that one fills the venue with fifty live matches, and a
-    screen showing football has no lobby and so no button.
+    Four seconds of silence, so a real element really plays and really ends,
+    without a test spending forty seconds listening to it.
+
+    The two halves are the length a shoutcaster's are and are not the same
+    length as each other, because that is what the caption has to sit still
+    through: the first wraps to two lines on a big screen and the second does
+    not. A four-word stand-in is one line either way and proves nothing about a
+    caption that reflows the standings under it.
     """
+    return b"\x00\x00" * 96_000, {
+        "solo": "one two three four and ALEX RIVERA is TOP of the score "
+                "attack board tonight with FORTY-ONE points, five goals "
+                "for and one against, a strike inside the first minute, "
+                "and three shouts from the touchline the squad actually "
+                "did something with",
+        "versus": "five six seven eight and SAM OKAFOR is UNBEATEN, five "
+                  "wins from five, eleven goals of difference"}
+
+
+class _Venue:
+    """A running arena, and the things a test does to it from behind the page.
+
+    The page under test is a browser. It cannot open a room, take a seat or
+    blow a whistle, and what these tests are about is what it does when
+    somebody else in the building does. Everything here goes through the door a
+    phone and a grounds go through, because that is the only door there is.
+    """
+
+    def __init__(self, app_module, url):
+        self._app = app_module
+        self._url = url
+        self._managers = 0
+
+    async def a_match_kicks_off(self):
+        """A room seated, readied and started. Returns its code."""
+        self._managers += 1
+        name = f"Manager {self._managers}"
+        async with httpx.AsyncClient(base_url=self._url, timeout=30) as phone:
+            await phone.post("/api/players",
+                             json={"display_name": name,
+                                   "email": f"manager{self._managers}@example.com"})
+            opened = await phone.post("/api/rooms", json={"mode": "solo"})
+            code = opened.json()["code"]
+            await phone.post(f"/api/rooms/{code}/seats/blue",
+                             json={"philosophy": "high press"})
+            await phone.post(f"/api/rooms/{code}/seats/blue/ready", json={"ready": True})
+            await phone.post(f"/api/rooms/{code}/start")
+        return code
+
+    async def somebody_wins(self):
+        """One match played out to a 1-0 win and scored, so the board is not
+        empty. `a_win()` is the event sequence, over the host's own socket."""
+        import rooms
+
+        code = await self.a_match_kicks_off()
+        physics = rooms.by_code(self._app.app.state.conn, code)["host_client_id"]
+        wire_url = self._url.replace("http://", "ws://", 1)
+        async with websockets.connect(
+                f"{wire_url}/ws/rooms/{code}?client_id={physics}") as wire:
+            await wire.recv()
+            for kind, match_ms, payload in a_win():
+                await wire.send(json.dumps({"type": "host.event", "kind": kind,
+                                            "match_ms": match_ms, "payload": payload}))
+                await wire.recv()
+        return code
+
+
+@contextlib.asynccontextmanager
+async def _an_arena_that_can_talk(dsn, monkeypatch):
+    """The arena on a socket a browser can reach, announcer on and free."""
     import importlib
-    import rooms
-    from playwright.async_api import async_playwright
 
     monkeypatch.setenv("ARENA_DB", dsn)
     import app as app_module
@@ -504,53 +568,69 @@ async def lobby_page(dsn, monkeypatch):
     # Monkeypatch after the reload, otherwise the reload resets the module state
     monkeypatch.setattr(announcer, "ENABLED", True)
     monkeypatch.setattr(announcer, "API_KEY", "a-key")
+    monkeypatch.setattr(announcer, "_generate", _a_clip)
 
-    async def generate(podiums):
-        # Two seconds of silence, so a real element really plays and really
-        # ends, without a test spending forty seconds listening to it.
-        return b"\x00\x00" * 48_000, {"solo": "one two three four",
-                                      "versus": "five six seven eight"}
+    try:
+        with _serving(app_module.app) as url:
+            connect_grounds(app_module.app)
+            yield app_module, url
+    finally:
+        importlib.reload(app_module)
 
-    monkeypatch.setattr(announcer, "_generate", generate)
 
-    with _serving(app_module.app) as url:
-        connect_grounds(app_module.app)
+@contextlib.asynccontextmanager
+async def _a_big_screen_at(url, ready):
+    """A browser in front of /arena, held until `ready` is on the page."""
+    from playwright.async_api import async_playwright
 
-        # Create a ranked match via HTTP and WebSocket, reusing `a_win()` for
-        # the event sequence.
-        async with httpx.AsyncClient(base_url=url, timeout=30) as phone:
-            await phone.post("/api/players",
-                            json={"display_name": "Alex Rivera", "email": "alex@example.com"})
-            opened = await phone.post("/api/rooms", json={"mode": "solo"})
-            code = opened.json()["code"]
-            await phone.post(f"/api/rooms/{code}/seats/blue",
-                            json={"philosophy": "high press"})
-            await phone.post(f"/api/rooms/{code}/seats/blue/ready", json={"ready": True})
-            await phone.post(f"/api/rooms/{code}/start")
-
-        physics = rooms.by_code(app_module.app.state.conn, code)["host_client_id"]
-        socket_url = url.replace("http://", "ws://", 1)
-        async with websockets.connect(f"{socket_url}/ws/rooms/{code}?client_id={physics}") as wire:
-            await wire.recv()
-            for kind, match_ms, payload in a_win():
-                await wire.send(json.dumps({"type": "host.event", "kind": kind,
-                                           "match_ms": match_ms, "payload": payload}))
-                await wire.recv()
-
-        async with async_playwright() as driving:
-            browser = await driving.chromium.launch(
-                args=["--autoplay-policy=no-user-gesture-required"])
-            page = await browser.new_page(viewport={"width": 1920, "height": 1080})
-            complaints = []
-            page.on("console", lambda note: _worth_complaining_about(note, complaints))
-            page.on("pageerror", lambda blew_up: complaints.append(str(blew_up)))
-            await page.goto(f"{url}/arena")
-            await page.wait_for_selector("#announce:not([hidden])", timeout=30_000)
+    complaints = []
+    async with async_playwright() as driving:
+        browser = await driving.chromium.launch(
+            args=["--autoplay-policy=no-user-gesture-required"])
+        page = await browser.new_page(viewport={"width": 1920, "height": 1080})
+        page.on("console", lambda note: _worth_complaining_about(note, complaints))
+        page.on("pageerror", lambda blew_up: complaints.append(str(blew_up)))
+        await page.goto(f"{url}/arena")
+        await page.wait_for_selector(ready, timeout=30_000)
+        try:
             yield page
+        finally:
             await browser.close()
-
-    importlib.reload(app_module)
     # The lobby tries to load centre court, which needs a built pitch. That
     # error is not what the button tests, so filter it out.
     real_complaints = [c for c in complaints if "viewer.js" not in c]
     assert not real_complaints, f"the lobby logged errors: {real_complaints}"
+
+
+@pytest.fixture
+async def lobby_and_venue(dsn, monkeypatch):
+    """A browser in front of an arena that has a lobby and a stocked board,
+    and the venue behind it, for the tests that need something to happen in the
+    building while the screen is up.
+
+    Not `wall_page`: that one fills the venue with fifty live matches, and a
+    screen showing football has no lobby and so no button.
+    """
+    async with _an_arena_that_can_talk(dsn, monkeypatch) as (app_module, url):
+        venue = _Venue(app_module, url)
+        await venue.somebody_wins()
+        async with _a_big_screen_at(url, "#announce:not([hidden])") as page:
+            yield page, venue
+
+
+@pytest.fixture
+def lobby_page(lobby_and_venue):
+    """The same screen, for the tests that only press the button."""
+    page, _ = lobby_and_venue
+    return page
+
+
+@pytest.fixture
+async def early_lobby_and_venue(dsn, monkeypatch):
+    """The state a venue opens in: a big screen up, nobody on the board yet.
+
+    The longest state of the evening, and the one the button must stay out of.
+    """
+    async with _an_arena_that_can_talk(dsn, monkeypatch) as (app_module, url):
+        async with _a_big_screen_at(url, "#lobby:not([hidden])") as page:
+            yield page, _Venue(app_module, url)
