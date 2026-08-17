@@ -18,7 +18,6 @@ carrying a button that cannot work is worse than one carrying no button.
 import hashlib
 import io
 import json
-import os
 import wave
 
 # Bumped by hand whenever a prompt below changes. It is inside the
