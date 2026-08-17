@@ -353,9 +353,9 @@ two, and names the unused `GEMINI_FLASH` constant as the reason. This design
 uses that model and a TTS model, so the venue now needs three buckets. That
 section has to be updated as part of the work, with the announcer's own
 arithmetic, which is small and worth writing down rather than leaving somebody
-to discover: two requests per generation, at most one generation at a time
-venue-wide, so at most two requests in flight no matter how many screens are
-pressing.
+to discover: two requests per generation, awaited one after the other rather
+than together, and at most one generation at a time venue-wide - so one request
+in flight and two per clip, no matter how many screens are pressing.
 
 ## Testing
 
