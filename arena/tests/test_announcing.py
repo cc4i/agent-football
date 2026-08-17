@@ -156,3 +156,18 @@ def test_a_pinned_board_stops_sliding_away_mid_sentence(client):
 def test_the_board_starts_cycling_again_when_the_announcer_stops(client):
     assert "unpin" in client.get("/static/board.js").text
     assert '"board.show"' in client.get("/static/arena.js").text
+
+
+def test_a_clip_that_errors_mid_playback_hands_everything_back(client):
+    """An unattended wall screen is the worst place for a stuck state.
+
+    A clip that fails during playback (network error, decoder failure) must
+    clean up exactly as a clip that finishes does: caption hidden, frame
+    unpinned and cycling again, button idle. Without this, the board stays
+    pinned to one half of the standings for the rest of the evening.
+    """
+    js = client.get("/static/arena.js").text
+    assert 'speaker.addEventListener("error"' in js
+    # The listener is an arrow function calling quiet(), like the ended listener.
+    error_handler = js.split('addEventListener("error"')[1].split(";")[0]
+    assert "quiet()" in error_handler

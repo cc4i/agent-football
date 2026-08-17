@@ -1083,6 +1083,7 @@ for (const mode of ["solo", "versus"]) {
 
 el("announce").addEventListener("click", readTheBoard);
 speaker.addEventListener("ended", () => quiet());
+speaker.addEventListener("error", () => quiet());
 
 /**
  * Read the standings to the room.
