@@ -17,7 +17,11 @@
 apiVersion: serving.knative.dev/v1
 kind: Service
 metadata:
-  name: arena
+  # Rendered, so that a second deployment of the same code can stand beside the
+  # first. deploy.sh defaults it to `arena`, which is what it has always been;
+  # `ARENA_NAME=arena-v2 ... deploy/deploy.sh` puts a whole second venue in the
+  # same project without touching this one. See deploy/README.md.
+  name: __ARENA_NAME__
   annotations:
     run.googleapis.com/launch-stage: GA
 spec:
@@ -161,7 +165,12 @@ spec:
             # --ssl-mode=ENCRYPTED_ONLY on the instance is the pair that
             # changes that, and neither works alone.
             - name: ARENA_DB
-              value: postgresql://arena@__DB_HOST__:5432/arena
+              # The role stays `arena` and the instance stays the one address
+              # read above; only the database is rendered. A second deployment
+              # shares the instance and the password and keeps its own rooms,
+              # players and results, because two arenas sweeping one database
+              # would each decide the other's matches were over.
+              value: postgresql://arena@__DB_HOST__:5432/__DB_NAME__
             - name: ARENA_COACH_URL
               value: http://127.0.0.1:8000
             - name: PGPASSWORD

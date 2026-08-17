@@ -363,7 +363,11 @@ def test_the_grounds_are_deployed_after_the_arena_they_play_for():
     order = DEPLOY.index("deploy/service.yaml"), DEPLOY.index("deploy/grounds.yaml")
     assert order[0] < order[1], "the grounds are deployed before the arena exists"
     read = DEPLOY[:order[1]]
-    assert 'ARENA_URL="$(gcloud run services describe arena' in read
+    # The service is named by variable rather than spelled out, so that a second
+    # deployment can stand beside the first, and the URL is still read off
+    # whichever arena this run just replaced rather than off a literal `arena`
+    # that a variant deploy would have pointed its grounds at by mistake.
+    assert 'ARENA_URL="$(gcloud run services describe "${ARENA_NAME}"' in read
 
 
 def test_the_grounds_image_is_built_by_the_same_pipeline():

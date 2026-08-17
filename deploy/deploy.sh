@@ -26,6 +26,20 @@ set -euo pipefail
 NETWORK="${NETWORK:-default}"
 SUBNET="${SUBNET:-default}"
 TAG="${TAG:-$(git rev-parse --short HEAD)}"
+# What this deployment is called and which database it keeps its venue in.
+# The defaults are what a single deployment has always used, so an ordinary run
+# of this script is exactly what it was before these three lines existed.
+#
+# Set them and you get a second venue beside the first: its own two services,
+# its own database on the same instance, the same service account and the same
+# secrets. Two arenas must never share a database - each one sweeps for matches
+# whose screen has gone and would abandon the other's - so the name moves with
+# the services rather than being something you can forget.
+#
+#   ARENA_NAME=arena-v2 GROUNDS_NAME=grounds-v2 DB_NAME=arena_v2 deploy/deploy.sh
+ARENA_NAME="${ARENA_NAME:-arena}"
+GROUNDS_NAME="${GROUNDS_NAME:-grounds}"
+DB_NAME="${DB_NAME:-arena}"
 REPO="${REGION}-docker.pkg.dev/${PROJECT}/futsal"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
@@ -69,12 +83,33 @@ if [ "$DB_IP_TYPE" != "PRIVATE" ] || [ -z "$DB_HOST" ]; then
 fi
 echo "    ${DB_HOST}"
 
+# The arena creates its own database when it can, which is what makes a laptop
+# `brew services start postgresql@18` and nothing else. It cannot here: the
+# `arena` role is not a superuser and has no CREATEDB, so on Cloud SQL the
+# database is made from outside. README.md does it by hand for the first
+# deployment; doing it here as well is what lets DB_NAME name one that does not
+# exist yet without a second page of instructions.
+#
+# Idempotent on purpose: an ordinary deploy re-runs this against a database that
+# has been there since the first one, and `already exists` is the expected
+# answer rather than a failure.
+echo "--> Making sure the ${DB_NAME} database exists..."
+if gcloud sql databases describe "${DB_NAME}" --instance=arena-pg \
+        --project="${PROJECT}" >/dev/null 2>&1; then
+    echo "    ${DB_NAME} is already there"
+else
+    gcloud sql databases create "${DB_NAME}" --instance=arena-pg --project="${PROJECT}"
+    echo "    made ${DB_NAME}"
+fi
+
 echo "--> Replacing the service..."
 sed -e "s|__PROJECT__|${PROJECT}|g" \
     -e "s|__REGION__|${REGION}|g" \
     -e "s|__NETWORK__|${NETWORK}|g" \
     -e "s|__SUBNET__|${SUBNET}|g" \
     -e "s|__DB_HOST__|${DB_HOST}|g" \
+    -e "s|__ARENA_NAME__|${ARENA_NAME}|g" \
+    -e "s|__DB_NAME__|${DB_NAME}|g" \
     -e "s|__TAG__|${TAG}|g" \
     deploy/service.yaml > /tmp/arena-service.yaml
 gcloud run services replace /tmp/arena-service.yaml --region="${REGION}" --project="${PROJECT}"
@@ -88,8 +123,8 @@ gcloud run services replace /tmp/arena-service.yaml --region="${REGION}" --proje
 # It connects, offers its pitches, and plays nothing - while the arena the venue
 # is actually using has no grounds and answers every kick-off with a 503.
 echo "--> Reading the arena's URL for the grounds to play for..."
-ARENA_URL="$(gcloud run services describe arena --region="${REGION}" --project="${PROJECT}" \
-    --format='value(status.url)')"
+ARENA_URL="$(gcloud run services describe "${ARENA_NAME}" --region="${REGION}" \
+    --project="${PROJECT}" --format='value(status.url)')"
 if [ -z "$ARENA_URL" ]; then
     echo "the arena has no URL, so there is nothing for the grounds to play for." >&2
     exit 1
@@ -100,6 +135,7 @@ echo "--> Replacing the grounds..."
 sed -e "s|__PROJECT__|${PROJECT}|g" \
     -e "s|__REGION__|${REGION}|g" \
     -e "s|__ARENA_URL__|${ARENA_URL}|g" \
+    -e "s|__GROUNDS_NAME__|${GROUNDS_NAME}|g" \
     -e "s|__TAG__|${TAG}|g" \
     deploy/grounds.yaml > /tmp/grounds-service.yaml
 gcloud run services replace /tmp/grounds-service.yaml --region="${REGION}" --project="${PROJECT}"
@@ -160,7 +196,7 @@ stand_down() {
     done
 }
 
-stand_down arena
-stand_down grounds
+stand_down "${ARENA_NAME}"
+stand_down "${GROUNDS_NAME}"
 
 echo "${ARENA_URL}"

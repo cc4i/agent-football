@@ -396,6 +396,49 @@ at all, and the ADK resolves them lazily at the first model call. A missing
 chain. So open the deployed arena, take a seat, kick off and shout once. It is
 the only check that covers the half of the service the probes cannot see.
 
+## A second venue beside the first
+
+Sometimes you want the new code running somewhere real without taking the
+running venue down to get it - a soak test, a demo of something unmerged, or a
+week of two versions side by side. `deploy.sh` takes three variables for that,
+and their defaults are what a single deployment has always used, so an ordinary
+run is unchanged by their existence:
+
+```bash
+ARENA_NAME=arena-v2 GROUNDS_NAME=grounds-v2 DB_NAME=arena_v2 deploy/deploy.sh
+```
+
+What is shared and what is not, and why:
+
+| Shared | Not shared |
+|---|---|
+| The Cloud SQL instance `arena-pg` | The database on it |
+| The service account, every IAM binding, all four secrets | The two Cloud Run services |
+| Artifact Registry, and the images if the tag matches | The public URL, so the QR codes differ |
+
+**The database is the one thing that must not be shared**, and it is why
+`DB_NAME` exists rather than being assumed. Both arenas run a watchdog that
+sweeps for matches whose screen has stopped reporting and abandons them. Pointed
+at one database, each would find the other's live matches unattended and end
+them, and the symptom is matches dying mid-play with nothing in either log that
+mentions the other service. `deploy.sh` creates the database if it is not there,
+so the name is all you have to supply.
+
+The service account is shared deliberately: it already holds `aiplatform`, the
+four secrets and the VPC connector, and a second identity would be four more
+bindings to keep in step for no isolation anybody wanted.
+
+**Standing one down.** Both are ordinary services, so the variant goes away with
+
+```bash
+gcloud run services delete arena-v2 --region="${REGION}"
+gcloud run services delete grounds-v2 --region="${REGION}"
+gcloud sql databases delete arena_v2 --instance=arena-pg
+```
+
+and the original is untouched throughout, because nothing in this file was
+edited to make the variant possible - only rendered differently.
+
 ## Rehearsing the load before the room does
 
 `arena/tests/test_load_rehearsal.py` drives fifty rooms at ten frames a second

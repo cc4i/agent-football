@@ -15,7 +15,9 @@
 apiVersion: serving.knative.dev/v1
 kind: Service
 metadata:
-  name: grounds
+  # Rendered for the same reason the arena's is: a second deployment needs its
+  # own grounds, pointed at its own arena. deploy.sh defaults it to `grounds`.
+  name: __GROUNDS_NAME__
   annotations:
     run.googleapis.com/launch-stage: GA
 spec:
