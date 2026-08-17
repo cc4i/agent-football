@@ -124,3 +124,35 @@ def test_the_element_is_unlocked_inside_the_gesture(client):
     js = client.get("/static/arena.js").text
     press = js.split("async function readTheBoard")[1].split("\n}")[0]
     assert press.index("unlock()") < press.index("await")
+
+
+def test_the_frame_is_turned_over_on_the_media_clock(client):
+    """`switch_at` is a position in the file, not a wall-clock delay.
+
+    `currentTime` reports the media clock whatever the playback rate is, so
+    the two are directly comparable and dividing by the rate would turn the
+    board over a quarter of the way early.
+    """
+    js = client.get("/static/arena.js").text
+    turning = js.split("switch_at")[1]
+    assert "/ RATE" not in turning.split("\n")[0]
+    assert "currentTime" in js
+
+
+def test_the_board_page_takes_direction_only_from_its_own_origin(client):
+    js = client.get("/static/board.js").text
+    assert "location.origin" in js
+    assert "board.show" in js
+
+
+def test_a_pinned_board_stops_sliding_away_mid_sentence(client):
+    # The frame cycles every twelve seconds on its own, which is most of the
+    # way through one half of an announcement.
+    js = client.get("/static/board.js").text
+    handler = js.split("board.show")[1]
+    assert "clearTimeout" in handler
+
+
+def test_the_board_starts_cycling_again_when_the_announcer_stops(client):
+    assert "unpin" in client.get("/static/board.js").text
+    assert '"board.show"' in client.get("/static/arena.js").text

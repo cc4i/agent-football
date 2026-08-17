@@ -44,6 +44,30 @@ for (const [which, tab] of Object.entries(tabs)) {
   });
 }
 
+/**
+ * The big screen framing this page, telling it which board to hold up.
+ *
+ * Only ever from the page that framed it, and only ever the one message. The
+ * announcer talks over this frame for forty seconds, and the twelve-second
+ * cycle would otherwise slide the board away in the middle of a sentence
+ * about it.
+ */
+window.addEventListener("message", (note) => {
+  if (note.origin !== location.origin) return;
+  if (!note.data || note.data.type !== "board.show") return;
+  if (note.data.pinned === false) return unpin();
+  pinned = true;
+  el("tick").hidden = true;
+  clearTimeout(cycle);
+  show(note.data.board === "versus" ? "versus" : "solo");
+});
+
+function unpin() {
+  pinned = false;
+  el("tick").hidden = false;
+  turn();
+}
+
 load();
 listen();
 

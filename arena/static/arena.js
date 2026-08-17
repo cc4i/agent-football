@@ -1115,22 +1115,55 @@ function unlock() {
 
 async function play(clip) {
   speaker.src = clip.audio;
-  // Set after the src, because a browser that reloads the element on a source
-  // change takes the default rate with it.
   speaker.playbackRate = RATE;
   live("On air");
+  caption(clip.script.solo);
+  steer("solo", true);
+  // `switch_at` and `currentTime` are both on the media clock, which is the
+  // clock a media element counts in whatever the playback rate is. No
+  // conversion: dividing by RATE here would turn the board over a quarter of
+  // the way early.
+  let turned = false;
+  speaker.ontimeupdate = () => {
+    if (turned || speaker.currentTime < clip.switch_at) return;
+    turned = true;
+    caption(clip.script.versus);
+    steer("versus", true);
+  };
   await speaker.play();
+}
+
+function quiet() {
+  talking = false;
+  speaker.ontimeupdate = null;
+  el("announce").classList.remove("live");
+  el("announce-say").textContent = "Read the board";
+  el("caption").hidden = true;
+  // Hand the frame back its own twelve-second cycle.
+  steer("solo", false);
+}
+
+function caption(words) {
+  // The tags are direction for the voice, not words anybody says out loud.
+  el("caption").textContent = words.replace(/\[[^\]]*\]/g, "").trim();
+  el("caption").hidden = false;
+}
+
+/**
+ * Ask the frame to show a board, and to hold it there while we talk over it.
+ *
+ * Same-origin, so this is a postMessage and not a src change: reloading the
+ * iframe would throw away the socket it has open and blank the standings for
+ * a second in the middle of a sentence about them.
+ */
+function steer(which, hold) {
+  el("board").contentWindow?.postMessage(
+    { type: "board.show", board: which, pinned: hold }, location.origin);
 }
 
 function live(what) {
   el("announce").classList.add("live");
   el("announce-say").textContent = what;
-}
-
-function quiet() {
-  talking = false;
-  el("announce").classList.remove("live");
-  el("announce-say").textContent = "Read the board";
 }
 
 // A thirteenth match is a real venue, and the twelve on the strip must not be
