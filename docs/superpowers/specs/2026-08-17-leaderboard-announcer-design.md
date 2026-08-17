@@ -317,7 +317,13 @@ rate, and that is the point: one unit on the wire, one place that converts.
 
 Rate limiting reuses the token bucket in `arena/limits.py:25`, keyed by client
 IP, for the same reason the two other unauthenticated creating endpoints use
-it: on a public URL, a POST that costs money is an invitation.
+it: on a public URL, a POST that costs money is an invitation. Two things
+follow from the key being an address. The burst is a venue's worth of screens
+rather than a screen's worth of presses, because every big screen in a hall is
+behind one address and the twenty screens above must not be four presses and
+sixteen refusals. And the token is taken *after* the cache lookup, because a
+press the cache answers spends nothing worth rationing. The GET is behind the
+same bucket: it is the only unauthenticated megabytes the arena serves.
 
 `/api/venue` (`arena/app.py:706`) gains `"announcer": true|false` and
 `"managers": <count>`, the two halves of whether the chip belongs on the

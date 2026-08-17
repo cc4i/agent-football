@@ -8,6 +8,7 @@ import pytest
 
 import announcer
 import app
+import limits
 
 
 @pytest.fixture
@@ -103,9 +104,48 @@ def test_a_model_that_fails_leaves_the_lobby_working(client, phones, finished, s
 
 
 def test_a_button_held_down_is_refused_before_it_reaches_a_model(
-        client, phones, finished, switched_on):
-    codes = [client.post("/api/board/announcement").status_code for _ in range(app.ANNOUNCE_BURST + 2)]
+        client, phones, finished, switched_on, monkeypatch):
+    """What a flood costs is generations, and only those spend a token.
+
+    A generation that keeps failing is the shape a flood can still take, since
+    nothing it produces is cached for the next press to be answered from.
+    """
+    async def broken(podiums):
+        raise announcer.Silent("the announcer lost its voice")
+
+    monkeypatch.setattr(announcer, "_generate", broken)
+    client.app.state.announcements = limits.Bucket(app.ANNOUNCE_RATE, 2)
+    codes = [client.post("/api/board/announcement").status_code for _ in range(4)]
     assert 429 in codes
+
+
+def test_a_press_the_cache_can_answer_costs_a_venue_nothing(
+        client, phones, finished, switched_on):
+    """Twenty screens want the identical clip, because a clip is a function of
+    the podiums. Charging the nineteenth for a memcpy refuses it for nothing.
+    """
+    client.app.state.announcements = limits.Bucket(app.ANNOUNCE_RATE, 1)
+    # The one token there is goes on the one generation there is.
+    assert client.post("/api/board/announcement").status_code == 200
+    codes = [client.post("/api/board/announcement").status_code for _ in range(5)]
+    assert codes == [200] * 5
+
+
+def test_the_bytes_are_not_an_open_tap(client, phones, finished, switched_on):
+    """Two and a half megabytes a call, unauthenticated, off a `maxScale: 1`
+    instance that is also carrying the match bus and every screen's socket.
+    """
+    made = client.post("/api/board/announcement").json()
+    client.app.state.announcements = limits.Bucket(app.ANNOUNCE_RATE, 1)
+    assert client.get(made["audio"]).status_code == 200
+    assert client.get(made["audio"]).status_code == 429
+
+
+def test_the_burst_is_sized_for_a_hall_of_screens_not_a_hand(client):
+    # Every big screen at a venue shares one address, so this bucket counts
+    # screens rather than people: sized for four, the fifth screen in the room
+    # was refused for pressing once.
+    assert app.ANNOUNCE_BURST >= app.MAX_WALL_SOCKETS
 
 
 def test_the_button_is_not_rendered_before_the_venue_has_answered(client):

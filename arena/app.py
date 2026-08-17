@@ -235,8 +235,25 @@ MAX_BOARD_ROWS = 100
 # Two model calls a press, so this is not sized for a flood, it is sized for
 # a person. A screen legitimately presses this once and then not again until
 # somebody has finished a match.
+#
+# The burst is a venue's worth of screens rather than a screen's worth of
+# presses. `limits.client_ip` keys on the address and every big screen in a
+# hall is behind one of them, so this bucket counts screens: at four, the
+# design's "twenty screens pressing at once produce one generation and twenty
+# awaits on the same future" was sixteen screens refused. `MAX_WALL_SOCKETS` is
+# how many screens the arena admits at all, so it is the honest unit.
+#
+# Four of them each, because a clip costs a screen more than one call: the
+# press, the fetch of the bytes, and a media element that opens the file and
+# comes back for the rest of it with a Range. Times the two clips the cache
+# holds at once. A press the cache can answer costs nothing - see
+# `announce_the_board`, which takes the token only when there is work.
+#
+# The rate does not rise with it, and that is the split: a burst is a room
+# reacting to one whistle, and a rate is somebody pulling two and a half
+# megabytes over and over from a public URL.
 ANNOUNCE_RATE = 0.1
-ANNOUNCE_BURST = 4
+ANNOUNCE_BURST = MAX_WALL_SOCKETS * 4
 
 # How long a room may go without a word from the screen holding it before the
 # arena gives up on it. Backgrounding a tab stops its frames, so this is also
@@ -988,16 +1005,22 @@ async def announce_the_board(request: Request):
     """
     if not announcer.configured():
         raise HTTPException(503, "the announcer is not switched on at this venue")
-    if not request.app.state.announcements.take(limits.client_ip(request)):
-        raise HTTPException(429, "that has been pressed a lot; give it a moment")
     connection = request.app.state.conn
     podiums = announcer.spoken(board.top(connection, "solo"),
                                board.top(connection, "versus"))
     if not podiums["score_attack"] and not podiums["head_to_head"]:
         raise HTTPException(409, "nobody is on the board yet, so there is "
                                  "nothing to announce")
+    talking = request.app.state.announcer
+    # After the cache lookup, not before it. The bucket is there to stop one
+    # address from spending money, and handing back a clip that has already
+    # been made spends none: a screen refused for asking a question that was
+    # answered ten seconds ago is a wall screen showing an error for nothing.
+    unmade = talking.ready(announcer.fingerprint(podiums)) is None
+    if unmade and not request.app.state.announcements.take(limits.client_ip(request)):
+        raise HTTPException(429, "that has been pressed a lot; give it a moment")
     try:
-        clip = await request.app.state.announcer.clip(podiums)
+        clip = await talking.clip(podiums)
     except announcer.Silent as quiet:
         raise HTTPException(503, str(quiet)) from quiet
     return {"state": clip.state, "seconds": clip.seconds,
@@ -1007,7 +1030,17 @@ async def announce_the_board(request: Request):
 
 @app.get("/api/board/announcement/{state}.wav")
 async def read_announcement(state: str, request: Request):
-    """One clip's bytes. Cacheable forever, because the name is the content."""
+    """One clip's bytes. Cacheable forever, because the name is the content.
+
+    Behind the same bucket as the press that made it, because this is the only
+    unauthenticated thing the arena serves that is measured in megabytes rather
+    than kilobytes - about two and a half of them a call, off an instance held
+    at `maxScale: 1` that is also carrying the match bus and every screen's
+    socket. The burst covers a venue's screens fetching both cached clips, so
+    nothing a hall full of big screens does legitimately reaches it.
+    """
+    if not request.app.state.announcements.take(limits.client_ip(request)):
+        raise HTTPException(429, "that has been asked for a lot; give it a moment")
     clip = request.app.state.announcer.ready(state)
     if clip is None:
         raise HTTPException(404, "that announcement has been replaced by a newer one")
