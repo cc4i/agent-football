@@ -304,10 +304,11 @@ The POST answers:
  "audio": "/api/board/announcement/9f3c....wav"}
 ```
 
-`seconds` and `switch_at` are generated-clock, not played-clock; the page
-divides by the 1.25 playback rate. Keeping the server in one unit and doing the
-conversion in the one place that knows the rate is what stops the two drifting
-apart.
+`seconds` and `switch_at` are on the media clock, which is the clock
+`HTMLMediaElement.currentTime` reports whatever the playback rate is. So the
+page compares `currentTime` against `switch_at` directly and divides by 1.25
+only where it wants a figure in wall-clock seconds. The server never knows the
+rate, and that is the point: one unit on the wire, one place that converts.
 
 Rate limiting reuses the token bucket in `arena/limits.py:25`, keyed by client
 IP, for the same reason the two other unauthenticated creating endpoints use
