@@ -23,6 +23,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response, StreamingResponse
 
 import coach
+import codes
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +55,15 @@ _USER_PATTERN = re.compile(r'^[A-Za-z0-9_-]+$')
 # is the honest unit, and this is how a bucket says so.
 _COACH_KEY = "instance"
 
+# The lab's sessions land in a different bucket from the arena's own coach
+# chains. The arena uses coach.COACH_USER = "arena"; the lab gets its own.
+LAB_USER = "lab"
+
+# At most 8 text parts, each capped at 2000 characters. The lab sends one;
+# the cap stops a caller forging an unbounded body.
+MAX_TEXT_PARTS = 8
+MAX_PART_LENGTH = 2000
+
 
 def _make_client(base_url, timeout):
     """Build an httpx client. Exists so tests can replace it with a fake."""
@@ -81,23 +91,112 @@ async def _body(request):
     return raw
 
 
+def _allowlist_session_body(caller_body):
+    """Rebuild the create-session body from an allowlist.
+
+    Stops four vectors: state, events[].actions.state_delta, and two that do not
+    exist yet but a version bump could add. The allowlist goes all the way down
+    rather than patching one level, because the ADK's shape today is not forever.
+
+    Returns only {"state": {"room_code": WRKS, "team": "red" | "blue"}}.
+    Everything else dropped, including session_id (the ADK generates one) and
+    every other state key including __session_metadata__.
+    """
+    team = "blue"
+    if isinstance(caller_body, dict):
+        state = caller_body.get("state")
+        if isinstance(state, dict):
+            caller_team = state.get("team")
+            if caller_team == "red":
+                team = "red"
+            # Warn if the caller sent a non-null state-writing field.
+            for key in state:
+                if key not in ("room_code", "team") and state[key] is not None:
+                    logger.warning("dropped non-null state key %s from session create", key)
+        # Warn if events array was sent.
+        if "events" in caller_body and caller_body["events"]:
+            logger.warning("dropped events array from session create")
+    return {"state": {"room_code": codes.WORKSHOP, "team": team}}
+
+
+def _allowlist_run_body(caller_body):
+    """Rebuild the /run_sse body from an allowlist.
+
+    Stops stateDelta (vector 3) and non-text parts in newMessage (vector 4).
+    A Part has fourteen kinds; fileData.fileUri is fetched by the service account
+    and functionResponse forges a tool result. Neither is needed to shout at a
+    squad, and neither is stopped by pinning the room.
+
+    Returns appName (pinned), userId (pinned), sessionId (passed through),
+    newMessage (rebuilt keeping only text parts, capped), and streaming (coerced).
+    """
+    session_id = ""
+    parts = []
+    streaming = False
+
+    if isinstance(caller_body, dict):
+        session_id = caller_body.get("sessionId", "")
+        streaming = bool(caller_body.get("streaming"))
+
+        # Warn if stateDelta was sent with a non-null value.
+        if "stateDelta" in caller_body and caller_body["stateDelta"] is not None:
+            logger.warning("dropped non-null stateDelta from /run_sse")
+
+        # Warn if other state-writing fields sent.
+        if "functionCallEventId" in caller_body:
+            logger.warning("dropped functionCallEventId from /run_sse")
+        if "invocationId" in caller_body:
+            logger.warning("dropped invocationId from /run_sse")
+
+        # Rebuild newMessage keeping only text parts.
+        new_message = caller_body.get("newMessage")
+        if isinstance(new_message, dict):
+            caller_parts = new_message.get("parts", [])
+            if isinstance(caller_parts, list):
+                for part in caller_parts[:MAX_TEXT_PARTS]:
+                    if isinstance(part, dict) and "text" in part:
+                        text = part["text"]
+                        if isinstance(text, str) and text:
+                            parts.append({"text": text[:MAX_PART_LENGTH]})
+                    elif isinstance(part, dict) and any(k in part for k in ["fileData", "functionResponse", "functionCall", "toolCall", "toolResponse", "codeExecutionResult", "executableCode", "inlineData", "mediaResolution", "thought", "thoughtSignature", "videoMetadata"]):
+                        logger.warning("dropped non-text part from newMessage: %s", list(part.keys()))
+
+    return {
+        "appName": coach.COACH_APP,
+        "userId": LAB_USER,
+        "sessionId": session_id,
+        "newMessage": {"role": "user", "parts": parts},
+        "streaming": streaming
+    }
+
+
 @router.post("/api-apps/agents/users/{user}/sessions")
 async def open_session(user: str, request: Request):
     """Open an ADK session. The same rewrite Vite's dev proxy does.
 
     The path segment is the browser's spelling (agents), and COACH_APP is the
     server's. They are allowed to differ.
+
+    The caller's body is rebuilt from an allowlist, not forwarded. This stops
+    a stranger naming any room and rewriting it with the service token. All
+    sessions land on WRKS, which is created unranked and unreachable from both
+    boards.
     """
     if not _USER_PATTERN.match(user):
         raise HTTPException(400, "invalid user segment")
     if not request.app.state.coach.take(_COACH_KEY):
         raise HTTPException(429, "slow down a moment and try that again")
     raw = await _body(request)
+    try:
+        caller_body = await request.json()
+    except Exception:
+        caller_body = {}
+    allowlisted = _allowlist_session_body(caller_body)
     async with _make_client(coach.COACH_URL, QUICK) as http:
         try:
             reply = await http.post(
-                coach.session_path(user),
-                content=raw, headers={"Content-Type": "application/json"})
+                coach.session_path(LAB_USER),
+                json=allowlisted, headers={"Content-Type": "application/json"})
         except httpx.InvalidURL as malformed:
             raise HTTPException(400, "malformed user segment") from malformed
         except httpx.HTTPError as silence:
@@ -114,14 +213,25 @@ async def run(request: Request):
     pitch as each agent answers, and a chain takes tens of seconds. Holding
     them until the last one arrived would turn the whole spectacle into a
     spinner.
+
+    The caller's body is rebuilt from an allowlist. This stops stateDelta
+    (vector 3) and non-text parts in newMessage (vector 4). A Part has fourteen
+    kinds; fileData.fileUri is fetched using the service account, and
+    functionResponse forges a tool result. Neither is stopped by pinning the
+    room.
     """
     if not request.app.state.coach.take(_COACH_KEY):
         raise HTTPException(429, "slow down a moment and try that again")
     raw = await _body(request)
+    try:
+        caller_body = await request.json()
+    except Exception:
+        caller_body = {}
+    allowlisted = _allowlist_run_body(caller_body)
     http = _make_client(coach.COACH_URL, PATIENT)
     try:
         upstream = await http.send(
-            http.build_request("POST", "/run_sse", content=raw,
+            http.build_request("POST", "/run_sse", json=allowlisted,
                                headers={"Content-Type": "application/json"}),
             stream=True)
     except httpx.HTTPError as silence:

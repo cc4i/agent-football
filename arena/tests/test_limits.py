@@ -199,12 +199,14 @@ def test_the_two_coach_routes_spend_the_one_bucket(client, coach_calls):
     # A shout is two requests, because the pitch opens a fresh session for each
     # one, so both charge points have to be real. Exhaust the budget through the
     # session route and /run_sse must already be refused.
+    # The proxy now pins the userId to LAB_USER for all sessions.
     client.app.state.coach = limits.Bucket(rate=0.0, burst=1)
     opened = client.post("/api-apps/agents/users/arena/sessions", json={"state": {}})
     assert opened.status_code == 200
     refused = client.post("/run_sse", json=SHOUT)
     assert refused.status_code == 429
-    assert coach_calls == ["/apps/agents/users/arena/sessions"]
+    # Sessions now go to LAB_USER, not the caller's segment.
+    assert coach_calls == ["/apps/agents/users/lab/sessions"]
 
 
 def test_the_shipped_coach_burst_carries_a_venue_opening_shouts():
@@ -230,13 +232,15 @@ def test_user_segment_must_match_pattern(client):
 
 
 def test_valid_user_segments_are_allowed(client, coach_calls):
-    # arena, user, alphanumerics, underscores and hyphens are all fine, and each
-    # of them reaches the coach at the path it names.
+    # arena, user, alphanumerics, underscores and hyphens are all fine.
+    # The proxy now pins the userId to LAB_USER instead of forwarding the
+    # caller's segment, so all calls land on the same user path.
     for user in ["arena", "user", "test_user", "test-user", "user123"]:
         coach_calls.clear()
         reply = client.post(f"/api-apps/agents/users/{user}/sessions", json={})
         assert reply.status_code == 200, f"user={user} should be allowed"
-        assert coach_calls == [f"/apps/agents/users/{user}/sessions"]
+        # All sessions now go to LAB_USER, not the caller's segment.
+        assert coach_calls == ["/apps/agents/users/lab/sessions"]
 
 
 def test_a_full_venue_can_keep_opening_rooms_back_to_back():

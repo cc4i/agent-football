@@ -95,7 +95,13 @@ def test_the_session_path_encodes_the_user_segment(user, path):
 
 
 def test_open_session_carries_body_and_returns_session_id(client, monkeypatch):
-    """The session body arrives unaltered and the coach's id comes back."""
+    """The vulnerability written down: a hostile state is replaced with WRKS.
+
+    Used to assert the body arrived unaltered. That was the cheat - a stranger
+    naming any room through this proxy and rewriting it with the service token.
+    Now asserts the opposite: the room is pinned, the user is pinned, and the
+    body is rebuilt from an allowlist.
+    """
     received = []
 
     async def fake_transport(request):
@@ -111,18 +117,24 @@ def test_open_session_carries_body_and_returns_session_id(client, monkeypatch):
 
     monkeypatch.setattr("proxy._make_client", fake_client)
 
-    body = {"state": {"room_code": "ABC123", "team": "blue"}}
+    body = {"state": {"room_code": "ABC123", "team": "blue", "extra": "dropped"}}
     reply = client.post("/api-apps/agents/users/testuser/sessions", json=body)
 
     assert reply.status_code == 200
     assert reply.json()["id"] == "test-session-123"
     assert len(received) == 1
-    assert received[0]["path"] == "/apps/agents/users/testuser/sessions"
-    assert json.loads(received[0]["content"]) == body
+    # User pinned to LAB_USER, not the caller's segment.
+    assert received[0]["path"] == "/apps/agents/users/lab/sessions"
+    forwarded = json.loads(received[0]["content"])
+    assert forwarded == {"state": {"room_code": "WRKS", "team": "blue"}}
+    assert "extra" not in forwarded["state"]
 
 
 def test_run_sse_carries_body_and_frames_come_back(client, monkeypatch):
-    """The shout body reaches the coach and SSE frames come back."""
+    """The shout body reaches the coach and SSE frames come back.
+
+    The body is rebuilt from an allowlist, not forwarded verbatim.
+    """
     received = []
 
     async def fake_transport(request):
@@ -144,7 +156,8 @@ def test_run_sse_carries_body_and_frames_come_back(client, monkeypatch):
 
     monkeypatch.setattr("proxy._make_client", fake_client)
 
-    body = {"appName": "agents", "newMessage": {"role": "user", "parts": [{"text": "attack"}]}}
+    body = {"appName": "agents", "sessionId": "abc",
+            "newMessage": {"role": "user", "parts": [{"text": "attack"}]}}
     response = client.post("/run_sse", json=body)
     assert response.status_code == 200
     assert b"first" in response.content
@@ -152,7 +165,12 @@ def test_run_sse_carries_body_and_frames_come_back(client, monkeypatch):
     assert len(received) == 1
     assert received[0]["method"] == "POST"
     assert received[0]["url"] == f"{coach.COACH_URL}/run_sse"
-    assert json.loads(received[0]["content"]) == body
+    forwarded = json.loads(received[0]["content"])
+    assert forwarded["appName"] == "agents"
+    assert forwarded["userId"] == "lab"
+    assert forwarded["sessionId"] == "abc"
+    assert forwarded["newMessage"]["parts"][0]["text"] == "attack"
+    assert forwarded["streaming"] is False
 
 
 def test_coach_error_status_passes_through_not_502(client, monkeypatch):
@@ -314,3 +332,279 @@ def test_oversized_chunked_body_refused_without_calling_coach(client, monkeypatc
     assert response.status_code == 413
     assert "too much to say" in response.json()["detail"]
     assert not coach_called
+
+
+# C1 security tests: allowlist enforcement
+
+
+def test_hostile_state_replaced_with_workshop(client, monkeypatch):
+    """A caller naming any room gets WRKS instead."""
+    received = []
+
+    async def fake_transport(request):
+        received.append(json.loads(request.content))
+        return httpx.Response(status_code=200, content=b'{"id": "session-id"}',
+                            headers={"content-type": "application/json"})
+
+    def fake_client(base_url, timeout):
+        return httpx.AsyncClient(transport=httpx.MockTransport(fake_transport), base_url=base_url)
+
+    monkeypatch.setattr("proxy._make_client", fake_client)
+
+    body = {"state": {"room_code": "REAL", "team": "blue", "extra": "gone"}}
+    reply = client.post("/api-apps/agents/users/user/sessions", json=body)
+    assert reply.status_code == 200
+    assert received[0]["state"]["room_code"] == "WRKS"
+    assert received[0]["state"]["team"] == "blue"
+    assert "extra" not in received[0]["state"]
+
+
+def test_team_red_survives_in_workshop(client, monkeypatch):
+    """team: red is the vulnerability's lever, but both dugouts are unranked."""
+    received = []
+
+    async def fake_transport(request):
+        received.append(json.loads(request.content))
+        return httpx.Response(status_code=200, content=b'{"id": "session-id"}',
+                            headers={"content-type": "application/json"})
+
+    def fake_client(base_url, timeout):
+        return httpx.AsyncClient(transport=httpx.MockTransport(fake_transport), base_url=base_url)
+
+    monkeypatch.setattr("proxy._make_client", fake_client)
+
+    body = {"state": {"team": "red"}}
+    reply = client.post("/api-apps/agents/users/user/sessions", json=body)
+    assert reply.status_code == 200
+    assert received[0]["state"]["team"] == "red"
+    assert received[0]["state"]["room_code"] == "WRKS"
+
+
+def test_events_array_dropped_on_create_session(client, monkeypatch):
+    """Vector 2: events[].actions.state_delta names the room."""
+    received = []
+
+    async def fake_transport(request):
+        received.append(json.loads(request.content))
+        return httpx.Response(status_code=200, content=b'{"id": "session-id"}',
+                            headers={"content-type": "application/json"})
+
+    def fake_client(base_url, timeout):
+        return httpx.AsyncClient(transport=httpx.MockTransport(fake_transport), base_url=base_url)
+
+    monkeypatch.setattr("proxy._make_client", fake_client)
+
+    body = {"events": [{"actions": {"state_delta": {"room_code": "REAL"}}}],
+            "state": {"team": "blue"}}
+    reply = client.post("/api-apps/agents/users/user/sessions", json=body)
+    assert reply.status_code == 200
+    assert "events" not in received[0]
+
+
+def test_state_delta_dropped_on_run_sse(client, monkeypatch):
+    """Vector 3: stateDelta on /run_sse names the room. main.js sends null."""
+    received = []
+
+    async def fake_transport(request):
+        received.append(json.loads(request.content))
+        from httpx._content import AsyncIteratorByteStream
+
+        async def stream_body():
+            yield b'data: {"event": "test"}\n\n'
+
+        return httpx.Response(
+            status_code=200,
+            headers={"content-type": "text/event-stream"},
+            stream=AsyncIteratorByteStream(stream_body()),
+        )
+
+    def fake_client(base_url, timeout):
+        return httpx.AsyncClient(transport=httpx.MockTransport(fake_transport), base_url=base_url)
+
+    monkeypatch.setattr("proxy._make_client", fake_client)
+
+    body = {"stateDelta": {"room_code": "REAL"}, "sessionId": "abc",
+            "newMessage": {"role": "user", "parts": [{"text": "attack"}]}}
+    response = client.post("/run_sse", json=body)
+    assert response.status_code == 200
+    assert "stateDelta" not in received[0]
+
+
+def test_non_text_parts_dropped(client, monkeypatch):
+    """Vector 4: fileData.fileUri is fetched by the service account."""
+    received = []
+
+    async def fake_transport(request):
+        received.append(json.loads(request.content))
+        from httpx._content import AsyncIteratorByteStream
+
+        async def stream_body():
+            yield b'data: {"event": "test"}\n\n'
+
+        return httpx.Response(
+            status_code=200,
+            headers={"content-type": "text/event-stream"},
+            stream=AsyncIteratorByteStream(stream_body()),
+        )
+
+    def fake_client(base_url, timeout):
+        return httpx.AsyncClient(transport=httpx.MockTransport(fake_transport), base_url=base_url)
+
+    monkeypatch.setattr("proxy._make_client", fake_client)
+
+    body = {
+        "sessionId": "abc",
+        "newMessage": {
+            "role": "user",
+            "parts": [
+                {"text": "kept"},
+                {"fileData": {"fileUri": "gs://bucket/object"}},
+                {"functionResponse": {"name": "tool", "response": {}}},
+                {"text": "also kept"}
+            ]
+        }
+    }
+    response = client.post("/run_sse", json=body)
+    assert response.status_code == 200
+    forwarded = received[0]["newMessage"]["parts"]
+    assert len(forwarded) == 2
+    assert forwarded[0] == {"text": "kept"}
+    assert forwarded[1] == {"text": "also kept"}
+
+
+def test_part_count_and_length_capped(client, monkeypatch):
+    """At most 8 parts, each capped at 2000 characters."""
+    received = []
+
+    async def fake_transport(request):
+        received.append(json.loads(request.content))
+        from httpx._content import AsyncIteratorByteStream
+
+        async def stream_body():
+            yield b'data: {"event": "test"}\n\n'
+
+        return httpx.Response(
+            status_code=200,
+            headers={"content-type": "text/event-stream"},
+            stream=AsyncIteratorByteStream(stream_body()),
+        )
+
+    def fake_client(base_url, timeout):
+        return httpx.AsyncClient(transport=httpx.MockTransport(fake_transport), base_url=base_url)
+
+    monkeypatch.setattr("proxy._make_client", fake_client)
+
+    # Send 10 parts (only 8 should survive) and one oversized part.
+    body = {
+        "sessionId": "abc",
+        "newMessage": {
+            "role": "user",
+            "parts": [{"text": f"part {i}"} for i in range(10)]
+        }
+    }
+    response = client.post("/run_sse", json=body)
+    assert response.status_code == 200
+    forwarded = received[0]["newMessage"]["parts"]
+    assert len(forwarded) == 8
+    assert forwarded[0]["text"] == "part 0"
+    assert forwarded[7]["text"] == "part 7"
+
+    # Test length capping separately.
+    received.clear()
+    body2 = {
+        "sessionId": "abc",
+        "newMessage": {
+            "role": "user",
+            "parts": [{"text": "x" * 3000}]
+        }
+    }
+    response2 = client.post("/run_sse", json=body2)
+    assert response2.status_code == 200
+    forwarded2 = received[0]["newMessage"]["parts"]
+    assert len(forwarded2) == 1
+    assert len(forwarded2[0]["text"]) == 2000
+    assert forwarded2[0]["text"] == "x" * 2000
+
+
+def test_app_name_and_user_id_pinned(client, monkeypatch):
+    """appName and userId are pinned whatever the caller sends."""
+    received = []
+
+    async def fake_transport(request):
+        received.append(json.loads(request.content))
+        from httpx._content import AsyncIteratorByteStream
+
+        async def stream_body():
+            yield b'data: {"event": "test"}\n\n'
+
+        return httpx.Response(
+            status_code=200,
+            headers={"content-type": "text/event-stream"},
+            stream=AsyncIteratorByteStream(stream_body()),
+        )
+
+    def fake_client(base_url, timeout):
+        return httpx.AsyncClient(transport=httpx.MockTransport(fake_transport), base_url=base_url)
+
+    monkeypatch.setattr("proxy._make_client", fake_client)
+
+    body = {
+        "appName": "malicious",
+        "userId": "victim",
+        "sessionId": "abc",
+        "newMessage": {"role": "user", "parts": [{"text": "attack"}]}
+    }
+    response = client.post("/run_sse", json=body)
+    assert response.status_code == 200
+    assert received[0]["appName"] == "agents"
+    assert received[0]["userId"] == "lab"
+
+
+def test_lab_current_body_works_end_to_end(client, monkeypatch):
+    """main.js sends stateDelta: null, one text part, streaming: true."""
+    received = []
+
+    async def fake_transport(request):
+        received.append(json.loads(request.content))
+        if str(request.url.path).endswith("/sessions"):
+            return httpx.Response(status_code=200, content=b'{"id": "session-id"}',
+                                headers={"content-type": "application/json"})
+        else:
+            from httpx._content import AsyncIteratorByteStream
+
+            async def stream_body():
+                yield b'data: {"event": "test"}\n\n'
+
+            return httpx.Response(
+                status_code=200,
+                headers={"content-type": "text/event-stream"},
+                stream=AsyncIteratorByteStream(stream_body()),
+            )
+
+    def fake_client(base_url, timeout):
+        return httpx.AsyncClient(transport=httpx.MockTransport(fake_transport), base_url=base_url)
+
+    monkeypatch.setattr("proxy._make_client", fake_client)
+
+    # Create session.
+    session_body = {"state": {"room_code": "WRKS", "team": "blue"}}
+    session_reply = client.post("/api-apps/agents/users/user/sessions", json=session_body)
+    assert session_reply.status_code == 200
+    session_id = session_reply.json()["id"]
+
+    # Shout.
+    run_body = {
+        "appName": "agents",
+        "userId": "user",
+        "sessionId": session_id,
+        "stateDelta": None,
+        "newMessage": {"role": "user", "parts": [{"text": "make them fast"}]},
+        "streaming": True
+    }
+    run_reply = client.post("/run_sse", json=run_body)
+    assert run_reply.status_code == 200
+    # stateDelta dropped silently when null.
+    forwarded = received[-1]
+    assert "stateDelta" not in forwarded
+    assert forwarded["newMessage"]["parts"][0]["text"] == "make them fast"
+    assert forwarded["streaming"] is True
