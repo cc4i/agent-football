@@ -40,6 +40,14 @@ TAG="${TAG:-$(git rev-parse --short HEAD)}"
 ARENA_NAME="${ARENA_NAME:-arena}"
 GROUNDS_NAME="${GROUNDS_NAME:-grounds}"
 DB_NAME="${DB_NAME:-arena}"
+# What the QR codes encode. It has to move with ARENA_NAME, and it is the one
+# of these four that fails quietly if it does not: a variant left on the first
+# deployment's address prints codes that scan, join, and put every phone in the
+# other venue. Cloud Run's URL is not known until the service exists, so a
+# first deploy of a new name renders this, reads the real URL from the replace,
+# and is re-run with it - which is what the second-venue section of README.md
+# walks through.
+PUBLIC_URL="${PUBLIC_URL:-https://arena-yowyyj7gkq-as.a.run.app}"
 REPO="${REGION}-docker.pkg.dev/${PROJECT}/futsal"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
@@ -110,6 +118,7 @@ sed -e "s|__PROJECT__|${PROJECT}|g" \
     -e "s|__DB_HOST__|${DB_HOST}|g" \
     -e "s|__ARENA_NAME__|${ARENA_NAME}|g" \
     -e "s|__DB_NAME__|${DB_NAME}|g" \
+    -e "s|__PUBLIC_URL__|${PUBLIC_URL}|g" \
     -e "s|__TAG__|${TAG}|g" \
     deploy/service.yaml > /tmp/arena-service.yaml
 gcloud run services replace /tmp/arena-service.yaml --region="${REGION}" --project="${PROJECT}"
@@ -130,6 +139,25 @@ if [ -z "$ARENA_URL" ]; then
     exit 1
 fi
 echo "    ${ARENA_URL}"
+
+# The grounds dials that URL from outside, with a static header and no OIDC
+# token, so an arena that is not invokable by allUsers is an arena the grounds
+# cannot reach. Its /healthz answers 503 with `running: 0` until it connects,
+# the startup probe fails forty times, and the deploy stops with a timeout that
+# says nothing about permissions. Checked here rather than fixed here: making a
+# service public is a deliberate act and not something a deploy script should
+# do behind somebody's back. The first deployment gets this from the `Once per
+# project` section of README.md; a new ARENA_NAME needs it again.
+if ! gcloud run services get-iam-policy "${ARENA_NAME}" --region="${REGION}" \
+        --project="${PROJECT}" --format='value(bindings.members)' 2>/dev/null \
+        | grep -q "allUsers"; then
+    echo "${ARENA_NAME} is not invokable by allUsers, so the grounds cannot reach it." >&2
+    echo "Phones could not reach it either. Bind it and re-run:" >&2
+    echo "  gcloud run services add-iam-policy-binding ${ARENA_NAME} \\" >&2
+    echo "      --region=${REGION} --project=${PROJECT} \\" >&2
+    echo "      --member=allUsers --role=roles/run.invoker" >&2
+    exit 1
+fi
 
 echo "--> Replacing the grounds..."
 sed -e "s|__PROJECT__|${PROJECT}|g" \

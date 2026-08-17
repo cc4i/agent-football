@@ -157,8 +157,13 @@ spec:
             # service by the other of its two names. Ten characters shorter,
             # and every one of them is a module more in a code somebody is
             # scanning across a sports hall.
+            # Rendered, and it must move with __ARENA_NAME__: this is what the
+            # QR codes encode, so a second deployment left on the first one's
+            # address prints codes that walk every phone into the wrong venue.
+            # Nothing fails when that is wrong - the codes scan, the phones
+            # join, and they join somebody else's arena.
             - name: ARENA_PUBLIC_URL
-              value: https://arena-yowyyj7gkq-as.a.run.app
+              value: __PUBLIC_URL__
             # A private address and a port, rather than the socket path this
             # used to name. No `sslmode`, so the connection is unencrypted and
             # both ends stay inside the VPC. `?sslmode=require` here and

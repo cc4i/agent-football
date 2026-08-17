@@ -408,6 +408,37 @@ run is unchanged by their existence:
 ARENA_NAME=arena-v2 GROUNDS_NAME=grounds-v2 DB_NAME=arena_v2 deploy/deploy.sh
 ```
 
+**A brand new name takes two runs, and the reason is worth knowing.** Cloud Run
+does not tell a service its own URL before it exists, and the QR codes need it.
+So the first run of a name renders `PUBLIC_URL` as whatever it defaults to,
+which is the *original* arena's address - codes that scan, join, and put every
+phone in the other venue, with nothing failing anywhere. Read the real URL off
+the service the first run created and run it again with it:
+
+```bash
+PUBLIC_URL="$(gcloud run services describe arena-v2 --region="${REGION}" \
+    --format='value(status.url)')"
+ARENA_NAME=arena-v2 GROUNDS_NAME=grounds-v2 DB_NAME=arena_v2 \
+    PUBLIC_URL="${PUBLIC_URL}" deploy/deploy.sh
+```
+
+**And a new name is not public until you say so.** The `allUsers` binding in
+`Once per project` is per service, so a new arena has none: phones get 403, and
+so does the grounds, which dials the arena from outside with a static header
+and no OIDC token. Its `/healthz` then answers `503 {"ok":false,"running":0}`
+until it connects, the startup probe fails forty times, and the deploy stops
+with a two-minute timeout that mentions nothing about permissions. `deploy.sh`
+checks for the binding after replacing the arena and stops with the command to
+run, rather than binding for you - making a service reachable by the whole
+internet is a decision, not a step:
+
+```bash
+gcloud run services add-iam-policy-binding arena-v2 \
+    --region="${REGION}" --member=allUsers --role=roles/run.invoker
+```
+
+The grounds needs no binding of its own. It only dials out.
+
 What is shared and what is not, and why:
 
 | Shared | Not shared |
