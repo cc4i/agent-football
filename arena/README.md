@@ -66,11 +66,13 @@ script with `GEMINI_FLASH` and speaks it with a TTS model, and each is its own
 quota bucket. That separation is the reason the announcer uses a different
 model from the chain rather than the same one.
 
-The announcer's own arithmetic is short. Two requests make one clip, and
-`Announcer` holds the venue to one clip in flight at a time however many
-screens are pressing, so its ceiling is two requests in flight - against the
-chain's 80 to 112 a minute. A clip is then cached against a fingerprint of the
-podiums, so a board nobody has changed is never generated twice.
+The announcer's own arithmetic is short. Two requests make one clip - the
+script, then the speech - and `_generate` awaits them in that order, so they
+are never both open at once. `Announcer` holds the venue to one clip in flight
+at a time however many screens are pressing, so the ceiling is **one request in
+flight**, two per clip, against the chain's 80 to 112 a minute. A clip is then
+cached against a fingerprint of the podiums, so a board nobody has changed is
+never generated twice.
 
 **One shout is ten Gemini calls, not one.** Counted from `arena/chain.py` and
 `game/agents/`, all of them on `GEMINI_FLASH_LITE`:
