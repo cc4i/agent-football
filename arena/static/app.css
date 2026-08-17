@@ -622,6 +622,13 @@ a.btn{display:block;text-align:center;text-decoration:none;line-height:1.2}
 #onward{display:flex;flex-direction:column;gap:12px;flex:1}
 .onward-rest{display:grid;gap:8px;margin-top:auto;padding-top:14px}
 
+/* The standings' own way out, which only a phone ever sees - `board.js` leaves
+   it hidden inside the big screen's iframe. Capped and centred rather than
+   full-bleed: the board is a wall layout, and a Back to home button a metre
+   wide on a laptop reads as the page's main event. */
+.board-back{margin-top:18px;display:flex;justify-content:center}
+.board-back .btn{width:100%;max-width:420px}
+
 /* The card and the one thing you can do to it that is not joining it. Stacked
    rather than beside, because the ask is the secondary move and a thumb going
    for the room must not find it by accident. */

@@ -78,9 +78,6 @@ async def play_it_out(arena, code):
     somebody else's UI.
     """
     import httpx
-    import websockets
-
-    from tests.conftest import physics_token
 
     async with httpx.AsyncClient(base_url=arena, timeout=15) as manager:
         await manager.post("/api/players",
@@ -91,6 +88,19 @@ async def play_it_out(arena, code):
         await manager.post(f"/api/rooms/{code}/seats/blue/ready", json={"ready": True})
         started = await manager.post(f"/api/rooms/{code}/start")
     assert started.status_code == 200, f"could not kick off: {started.text}"
+    await whistle(arena, code)
+
+
+async def whistle(arena, code):
+    """Full time on a room that is already live, as the grounds would call it.
+
+    Its own function because the tests below need the whistle without the
+    seating: their manager is a browser that has already sat down, and seating
+    a second one over HTTP would be a different match.
+    """
+    import websockets
+
+    from tests.conftest import physics_token
 
     physics = physics_token(the_app().state.conn, code)
     socket_url = arena.replace("http://", "ws://")
@@ -264,3 +274,144 @@ async def test_a_manager_already_in_a_match_is_sent_back_to_it(browser, real_are
         "the way back points at the wrong room"
     assert await phone.is_hidden("#onward-own"), \
         "they were offered a second room while already holding one"
+
+
+# ── The manager who just played, on their own phone ───────────────────────
+
+
+async def fill_the_other_dugout(arena, code):
+    """A second manager in red, over HTTP.
+
+    A head to head room does not kick off on one dugout. The manager under test
+    is the one holding the phone; this one is scenery, and driving a second
+    browser through the join form to provide it would be three minutes spent on
+    a page these tests are not about.
+    """
+    import httpx
+
+    async with httpx.AsyncClient(base_url=arena, timeout=15) as other:
+        await other.post("/api/players", json={"display_name": "Jordan Blake",
+                                               "email": "jordan@example.com"})
+        await other.post(f"/api/rooms/{code}/seats/red", json={"philosophy": "low block"})
+        await other.post(f"/api/rooms/{code}/seats/red/ready", json={"ready": True})
+
+
+async def a_phone_that_has_played(browser, arena, mode="solo"):
+    """Register, open a room, sit down, kick off, and take the whistle.
+
+    Through the pages rather than around them, because the page under test is
+    the one this manager is left holding at the end of it.
+    """
+    phone = await a_page(browser, HANDSET)
+    await phone.goto(f"{arena}/register")
+    await phone.fill("#name", "Chuan C")
+    await phone.click("#done")
+    await phone.wait_for_url(f"{arena}/home", timeout=15_000)
+    await phone.click(f"#open-room [data-mode='{mode}']")
+    await phone.wait_for_url(lambda url: "/join/" in url, timeout=15_000)
+    code = phone.url.rstrip("/").split("/")[-1].upper()
+    await phone.wait_for_selector("#pills .pill", timeout=15_000)
+    await phone.click("#pills .pill")
+    await phone.wait_for_selector("#take:not([disabled])", timeout=15_000)
+    await phone.click("#take")
+    await phone.wait_for_url(lambda url: "/play" in url, timeout=15_000)
+    if mode == "versus":
+        await fill_the_other_dugout(arena, code)
+    await phone.wait_for_selector("#go[data-does='ready']", timeout=15_000)
+    await phone.click("#go")
+    await phone.wait_for_selector("#go[data-does='start']", timeout=15_000)
+    await phone.click("#go")
+
+    await whistle(arena, code)
+    await phone.wait_for_selector("#result:not([hidden])", timeout=20_000)
+    return phone, code
+
+
+@pytest.mark.timeout(120)
+async def test_full_time_is_not_the_end_of_the_evening(browser, real_arena_server,
+                                                       grounds_for_the_page):
+    """The screenshot that started this one.
+
+    The result sheet had exactly one control on it -- "See the full board" --
+    and the board has none at all. A manager who had just played, whose phone
+    the venue already knows, whose next match is one POST away, was left with
+    the browser's back button.
+    """
+    phone, code = await a_phone_that_has_played(browser, real_arena_server)
+
+    # Scoped to the result sheet: the lobby above has its own way home, for the
+    # room that shut before it started, and it is hidden at full time.
+    assert await phone.is_visible("#again"), "no way to play again at full time"
+    assert await phone.is_visible("#result a[href='/home']"), "no way home at full time"
+    assert await phone.is_visible("#result a[href='/board']"), "the board link went missing"
+    assert not phone.complaints, f"the phone logged errors: {phone.complaints}"
+
+
+@pytest.mark.timeout(120)
+async def test_full_time_stops_sending_them_to_the_camera(browser, real_arena_server,
+                                                          grounds_for_the_page):
+    """"Scan the code on the screen for another go" is wrong twice over.
+
+    The screen hands over twenty seconds after the whistle, so by the time this
+    is read the code on it is a different room -- and the manager reading it is
+    usually nowhere near the screen anyway.
+    """
+    phone, code = await a_phone_that_has_played(browser, real_arena_server)
+
+    hint = await phone.text_content("#r-hint")
+    assert "scan the code" not in (hint or "").lower(), \
+        f"full time still points at the camera: {hint!r}"
+
+
+@pytest.mark.timeout(120)
+async def test_playing_again_opens_the_mode_just_played(browser, real_arena_server,
+                                                        grounds_for_the_page):
+    """One tap from a result to picking a philosophy, in the same mode.
+
+    A manager who just played head to head and got a solo room would have
+    brought somebody with them for nothing.
+    """
+    phone, code = await a_phone_that_has_played(browser, real_arena_server, mode="versus")
+    await phone.click("#again")
+    await phone.wait_for_url(lambda url: "/join/" in url and code not in url.upper(),
+                             timeout=20_000)
+
+    import rooms
+
+    fresh = phone.url.rstrip("/").split("/")[-1].upper()
+    assert rooms.by_code(the_app().state.conn, fresh)["mode"] == "versus", \
+        "played head to head, got given something else"
+
+
+# ── The standings, which are two pages wearing one file ───────────────────
+
+
+@pytest.mark.timeout(90)
+async def test_the_standings_let_a_phone_back_out(browser, real_arena_server):
+    """Every phone route into the board was a route with no way out of it.
+
+    Home, the join form and full time all link here, and the page itself has
+    not one link on it.
+    """
+    phone = await a_page(browser, HANDSET)
+    await phone.goto(f"{real_arena_server}/board")
+    await phone.wait_for_selector("#board-home", timeout=15_000)
+    assert await phone.is_visible("#board-home"), "the board is still a leaf"
+    assert not phone.complaints, f"the board logged errors: {phone.complaints}"
+
+
+@pytest.mark.timeout(90)
+async def test_the_wall_keeps_the_board_it_had(browser, real_arena_server):
+    """The same file is the iframe under the big screen's lobby.
+
+    Which is the whole reason it never had chrome, and the reason this is
+    decided by whether the page is framed rather than by who linked to it. A
+    wall screen has nowhere to go home to.
+    """
+    screen, _ = await a_screen_holding_a_room(browser, real_arena_server)
+    frame = screen.frame_locator("#board")
+    await frame.locator("#view-solo").wait_for(timeout=20_000)
+    # Present in the markup and never shown, which is the point: it is left
+    # hidden rather than not rendered so the wall cannot flash it on the way in.
+    assert not await frame.locator("#board-home").is_visible(), \
+        "the wall's board is showing a Back to home button"

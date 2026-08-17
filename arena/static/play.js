@@ -9,7 +9,7 @@
 import { get, post, Refused } from "/static/api.js";
 import { icon } from "/static/dom.js";
 import { relayFeed } from "/static/relay.js";
-import { openRoom, screenToken } from "/static/socket.js";
+import { keepScreenToken, openRoom, screenToken } from "/static/socket.js";
 import { figure, ordinal } from "/static/words.js";
 
 const CODE = (new URLSearchParams(location.search).get("room") || "").toUpperCase();
@@ -38,6 +38,7 @@ let earned = null;    // the arena's word on what this match was worth
 let asking = false;   // that word is on its way
 let painted = false;  // a frame from the host has been on this screen
 let read = false;     // the log has been read since the match ended
+let playedMode = null; // what this match was, for the match after it
 const dots = [];
 // Both dugouts in the one feed: a manager wants to see what they are up
 // against, and on a handset there is no room for a second column of it. Opened
@@ -418,10 +419,40 @@ function drawResult(result, yours) {
     ...result.top.map((row, place) => leader(row, place, result.mode, yours.player_id)));
   el("r-top").hidden = result.top.length === 0;
   el("r-hint").textContent = aside(result, yours);
+  playedMode = result.mode;
 
   live.hidden = true;
   sheet.hidden = false;
 }
+
+/**
+ * Another match, in the mode this one was, without going back to the front door.
+ *
+ * The same `POST /api/rooms` the home page and the join form use, and the token
+ * it hands back is kept for the same reason: whoever opened a room is the only
+ * one holding it, and the sweep gives up on a lobby nobody vouches for in
+ * HOST_GONE_SECONDS -- which is less time than picking a philosophy takes.
+ *
+ * The mode comes off the result rather than the room this page is still
+ * pointed at, because those are the same thing here and the result is the one
+ * that survives a reload of a finished room.
+ */
+el("again").addEventListener("click", async () => {
+  const button = el("again");
+  button.disabled = true;
+  problem.hidden = true;
+  try {
+    const opened = await post("/api/rooms", { mode: playedMode || "solo" });
+    keepScreenToken(opened.code, opened.screen_token);
+    location.assign(`/join/${encodeURIComponent(opened.code)}`);
+  } catch (failure) {
+    // A venue at MAX_LIVE_ROOMS, or too many rooms too fast from one address.
+    // Both say so in words a manager can act on, and both are worth showing
+    // rather than leaving a button that appears to do nothing.
+    complain(failure);
+    button.disabled = false;
+  }
+});
 
 function standing(result, yours) {
   // The workshop and anything the host ran fast still earn a breakdown, because
@@ -460,8 +491,13 @@ function leader(row, place, mode, you) {
 }
 
 function aside(result, yours) {
+  // Not "scan the code on the screen for another go" any more. That was wrong
+  // twice: the screen opens its next lobby twenty seconds after this whistle,
+  // so the code on it is a different room by the time anybody reads this, and
+  // the manager reading it is usually nowhere near the screen. Play again is
+  // underneath, and it is one tap.
   const rule = result.mode === "solo"
-    ? "Only your best run counts - scan the code on the screen for another go."
+    ? "Only your best run counts, so another go can only improve it."
     : "Rating is shown but does not sort the board: one match is not a rating.";
   return `${rule} ${shoutsAside(yours)}`;
 }

@@ -29,6 +29,12 @@ let showing = "solo";
 let pinned = false;      // somebody clicked a tab, so the page stopped cycling
 let cycle = null;
 
+// On a wall or in a hand, decided by the one thing that cannot be got wrong by
+// whoever linked here. The big screen frames this page under its lobby, and a
+// wall has nowhere to go home to; a phone arrived from home, the join form or
+// the result sheet, and every one of those was a one-way trip.
+if (window.self === window.top) el("board-home").hidden = false;
+
 for (const [which, tab] of Object.entries(tabs)) {
   tab.addEventListener("click", () => {
     pinned = true;

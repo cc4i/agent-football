@@ -45,6 +45,19 @@
     <div class="podium" id="podium-versus"></div>
     <div id="table-versus"></div>
   </section>
+
+  <!-- The way back, for the hand rather than the wall.
+
+       Every phone route into this page - home, the join form, the result sheet
+       - was a route with no way out of it, because this file is also the iframe
+       under the big screen's lobby and so was never given any chrome at all.
+
+       Hidden by default and revealed by `board.js` rather than the other way
+       round: the surface that must not have this is the one that must not flash
+       it either, and the rest of the page is drawn by that script anyway. -->
+  <div class="board-back" id="board-home" hidden>
+    <a class="btn ghost" href="/home">Back to home</a>
+  </div>
 </main>
 <script type="module" src="/static/board.js"></script>
 </body>
