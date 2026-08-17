@@ -173,9 +173,9 @@ cannot tell a measured 8 from another guess.
 |---|---|---|
 | GET | `/health` | anyone - 200 while the watchdog is still turning, 503 once its last completed sweep is older than `HEALTH_STALE_SECONDS`. A sweep only completes if the event loop reached it and the database answered, so one reading covers both. This is what Cloud Run's liveness probe restarts the instance on; it asks the database nothing of its own, because a probe that can hang is worse than no probe |
 | GET | `/api/venue` | anyone - where the pitch and the public address are |
-| POST | `/api/players` | anyone - name and email in, session cookie out |
+| POST | `/api/players` | anyone - name, email and recovery_code in, session cookie and recovery_code out |
 | GET | `/api/players/available` | anyone - is this name free, and if not, whose spelling of it |
-| GET | `/api/players/me` | a phone with a session - who it is, and any seat it left |
+| GET | `/api/players/me` | a phone with a session - who it is, their recovery_code, and any seat it left |
 | GET | `/api/rooms/open` | anyone - the rooms still waiting for a manager |
 | GET | `/qr.svg` | anyone - the venue's code, the one on the printed sheet |
 | POST | `/api/rooms` | anyone; the response is the only place the host token appears |

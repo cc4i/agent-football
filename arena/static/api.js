@@ -62,13 +62,17 @@ function reason(payload, status) {
 /**
  * Which fields the refusal was about, in the order it named them.
  *
- * Only pydantic locates its complaints, and it locates each one as a path from
- * the request down: `["body", "email"]`, or `["query", "name"]`. The last step
- * is the field, which is what a form knows its boxes by. A refusal about the
- * body as a whole names no field, and neither does one the arena raised itself.
+ * Pydantic locates each complaint as a path from the request down:
+ * `["body", "email"]`, or `["query", "name"]`. The last step is the field,
+ * which is what a form knows its boxes by. The arena's own refusals locate
+ * themselves with `detail.field` when they are about one field in particular,
+ * and name no field when they are about the request as a whole.
  */
 function blamed(payload) {
   const detail = payload && payload.detail;
+  // Arena's own located refusals: {detail: {problems: [...], field: "..."}}
+  if (detail && typeof detail.field === "string") return [detail.field];
+  // Pydantic's validation errors: [{loc: [...], msg: "..."}, ...]
   if (!Array.isArray(detail)) return [];
   const named = detail
     .map((entry) => (Array.isArray(entry.loc) && entry.loc.length > 1 ? entry.loc.at(-1) : null))

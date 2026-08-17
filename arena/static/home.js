@@ -96,6 +96,10 @@ async function look() {
   }
 
   who.textContent = me.display_name;
+  if (me.recovery_code) {
+    document.getElementById("code-value").textContent = me.recovery_code;
+    document.getElementById("recovery-code").hidden = false;
+  }
   showTheMatchTheyLeft(me.room);
 
   try {

@@ -46,13 +46,21 @@
     <div class="field">
       <label for="email">Email <span class="optional">optional</span></label>
       <input id="email" class="input" name="email" type="email" inputmode="email"
-             autocomplete="email" enterkeyhint="done" maxlength="254"
+             autocomplete="email" enterkeyhint="next" maxlength="254"
              placeholder="alex@example.com" aria-describedby="email-hint email-note">
       <p class="hint bad" id="email-hint" role="alert" hidden></p>
-      <p class="hint" id="email-note">Only so you keep one place on the board if you play again
-        on another phone. Leave it empty and nothing is lost but that. Never shown
-        whole - the board shows <span class="mono">a***x@example.com</span> - and
-        deleted after the event.</p>
+      <p class="hint" id="email-note">Keeps one place on the board across phones.
+        Deleted after the event.</p>
+    </div>
+
+    <div class="field">
+      <label for="recovery-code">Recovery code <span class="optional">if returning</span></label>
+      <input id="recovery-code" class="input mono" name="recovery-code" enterkeyhint="done"
+             maxlength="6" placeholder="AB34KP" aria-describedby="recovery-hint recovery-note"
+             autocomplete="off" autocorrect="off" autocapitalize="characters">
+      <p class="hint bad" id="recovery-hint" role="alert" hidden></p>
+      <p class="hint" id="recovery-note">Coming back on another phone? Enter the code you got
+        when you first joined.</p>
     </div>
   </div>
 

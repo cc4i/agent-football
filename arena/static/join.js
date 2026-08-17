@@ -60,6 +60,8 @@ const who = signup({
   nameHint: document.getElementById("name-hint"),
   email: document.getElementById("email"),
   emailHint: document.getElementById("email-hint"),
+  recoveryCode: document.getElementById("recovery-code"),
+  recoveryHint: document.getElementById("recovery-hint"),
   changed: ready,
 });
 

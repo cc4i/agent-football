@@ -23,13 +23,16 @@ import { get, post, Refused } from "/static/api.js";
 const TYPING_PAUSE = 400;
 
 /**
- * Wire up a page's name and address boxes.
+ * Wire up a page's name and address boxes, and the recovery code if present.
  *
  * `changed` is called whenever something happened that could move the button
  * between enabled and disabled, because only the page knows what else it is
  * waiting for: a free seat, a stance, a request already in flight.
+ *
+ * `recoveryCode` and `recoveryHint` are optional: /register does not show the
+ * box because nobody joining for the first time has one to enter.
  */
-export function signup({ name, nameHint, email, emailHint, changed = () => {} }) {
+export function signup({ name, nameHint, email, emailHint, recoveryCode, recoveryHint, changed = () => {} }) {
   // Only a name the arena has actually refused blocks the button. Somewhere
   // between a keystroke and an answer it is unknown, and a form that will not
   // be submitted until a network call comes back is a form a bad wifi locks.
@@ -45,6 +48,10 @@ export function signup({ name, nameHint, email, emailHint, changed = () => {} })
   });
 
   email.addEventListener("input", () => aboutTheAddress(null));
+
+  if (recoveryCode) {
+    recoveryCode.addEventListener("input", () => aboutTheCode(null));
+  }
 
   async function askAboutTheName() {
     const typed = name.value.trim();
@@ -78,6 +85,12 @@ export function signup({ name, nameHint, email, emailHint, changed = () => {} })
     mark(email, emailHint, trouble);
   }
 
+  function aboutTheCode(trouble) {
+    if (recoveryCode && recoveryHint) {
+      mark(recoveryCode, recoveryHint, trouble);
+    }
+  }
+
   function mark(box, hint, trouble) {
     hint.textContent = trouble || "";
     hint.hidden = !trouble;
@@ -87,18 +100,23 @@ export function signup({ name, nameHint, email, emailHint, changed = () => {} })
   /**
    * A refusal, said under the box that has to change if there is one.
    *
-   * A 409 is the name every time: it is the only thing on either form that
-   * somebody else can be holding. A 422 names its own fields, and the arena's
-   * two are both boxes here - but only a refusal about exactly one of them can
-   * go under a box, because the sentence covers every problem it found and
-   * half of it under each would be two wrong sentences. The rest is thrown for
-   * the page's banner: a phone off the wifi is about neither box.
+   * A 409 can be the name (somebody else holds it) or the recovery code (a claim
+   * without the right code). A 422 names its own fields, and the arena's three
+   * are all boxes here - but only a refusal about exactly one of them can go
+   * under a box, because the sentence covers every problem it found and half of
+   * it under each would be two wrong sentences. The rest is thrown for the
+   * page's banner: a phone off the wifi is about no box in particular.
    */
-  const BOXES = { display_name: aboutTheName, email: aboutTheAddress };
+  const BOXES = { display_name: aboutTheName, email: aboutTheAddress, recovery_code: aboutTheCode };
 
   function sayWhereItBelongs(failure) {
     if (!(failure instanceof Refused)) throw failure;
-    if (failure.status === 409) return aboutTheName(failure.message);
+    // A 409 with a located field goes to that box; one without is the name.
+    if (failure.status === 409) {
+      const boxes = failure.fields.map((field) => BOXES[field]).filter(Boolean);
+      if (boxes.length === 1) return boxes[0](failure.message);
+      return aboutTheName(failure.message);
+    }
     const boxes = failure.fields.map((field) => BOXES[field]).filter(Boolean);
     if (boxes.length === 1 && boxes.length === failure.fields.length) {
       return boxes[0](failure.message);
@@ -123,12 +141,14 @@ export function signup({ name, nameHint, email, emailHint, changed = () => {} })
       // Everything the last tap was told is about to be answered again.
       aboutTheName(null);
       aboutTheAddress(null);
+      aboutTheCode(null);
       // Nothing is going to answer about a name that is already being sent.
       clearTimeout(pause);
       try {
         return await post("/api/players", {
           display_name: name.value.trim(),
           email: email.value.trim(),
+          recovery_code: recoveryCode ? recoveryCode.value.trim() : "",
         });
       } catch (failure) {
         sayWhereItBelongs(failure);

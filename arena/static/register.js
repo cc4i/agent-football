@@ -79,5 +79,9 @@ form.addEventListener("submit", async (event) => {
     sending = false;
     return ready();
   }
+  // Show the recovery code if they got one, before sending them on.
+  if (player.recovery_code) {
+    alert(`Your recovery code is ${player.recovery_code}. You'll need it to come back on another phone. You can see it any time on /home.`);
+  }
   location.assign("/home");
 });
