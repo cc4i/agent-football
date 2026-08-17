@@ -1260,3 +1260,10 @@ body.paper{display:flex;flex-direction:column;align-items:center;padding:26px 16
 }
 
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+
+/* Recovery code display on /register after signup */
+.recovery-code-display{margin:2rem 0;padding:2rem;background:rgba(255,255,255,0.05);border-radius:12px;text-align:center}
+.code-large{font-size:2rem;font-weight:600;letter-spacing:0.15em;color:#fff}
+
+/* Recovery code on /home */
+.recovery-code-home{margin-top:0.5rem;font-size:0.95rem;color:rgba(255,255,255,0.9)}

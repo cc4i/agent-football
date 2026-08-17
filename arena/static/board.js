@@ -272,7 +272,6 @@ function who(one) {
   return box;
 }
 
-
 function cell(className, text) {
   const box = document.createElement("td");
   if (className) box.className = className;
