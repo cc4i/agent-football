@@ -15,6 +15,7 @@ match it is not drawing. These two are for the pitch's own calls: the shout
 box, the periodic status check, and the profile reset.
 """
 
+import json
 import logging
 import re
 
@@ -90,6 +91,26 @@ async def _body(request):
     if len(raw) > MAX_BODY_BYTES:
         raise HTTPException(413, "that is too much to say to a coach")
     return raw
+
+
+def _parsed(raw):
+    """The caller's body as a dict, or an empty one if unparseable.
+
+    The allowlists read fields by name, so anything that is not a JSON object -
+    a bare array, a string, truncated bytes, nothing at all - is treated as if
+    the caller sent no fields. An unparseable body is not refused with a 400
+    because that would only tell somebody probing this which shapes are worth
+    trying.
+    """
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+        if isinstance(parsed, dict):
+            return parsed
+        return {}
+    except Exception:
+        return {}
 
 
 def _allowlist_session_body(caller_body):
@@ -192,10 +213,7 @@ async def open_session(user: str, request: Request):
     if not request.app.state.coach.take(_COACH_KEY):
         raise HTTPException(429, "slow down a moment and try that again")
     raw = await _body(request)
-    try:
-        caller_body = raw and len(raw) > 0 and __import__("json").loads(raw) or {}
-    except Exception:
-        caller_body = {}
+    caller_body = _parsed(raw)
     allowlisted = _allowlist_session_body(caller_body)
     async with _make_client(coach.COACH_URL, QUICK) as http:
         try:
@@ -228,10 +246,7 @@ async def run(request: Request):
     if not request.app.state.coach.take(_COACH_KEY):
         raise HTTPException(429, "slow down a moment and try that again")
     raw = await _body(request)
-    try:
-        caller_body = raw and len(raw) > 0 and __import__("json").loads(raw) or {}
-    except Exception:
-        caller_body = {}
+    caller_body = _parsed(raw)
     allowlisted = _allowlist_run_body(caller_body)
     http = _make_client(coach.COACH_URL, PATIENT)
     try:
