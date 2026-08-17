@@ -317,9 +317,10 @@ class Announcer:
             return self._clips[state]
         if state not in self._making:
             task = asyncio.ensure_future(self._make(state, podiums))
-            # Swallow the result to prevent "Task exception was never retrieved"
-            # if every waiter gives up before the generation completes.
-            task.add_done_callback(lambda _: None)
+            # Retrieve the exception to prevent asyncio logging "Task exception was
+            # never retrieved" if every waiter gives up before the generation completes.
+            # Calling .exception() clears asyncio's internal _log_traceback flag.
+            task.add_done_callback(lambda done: done.cancelled() or done.exception())
             self._making[state] = task
         # Two deadlines, bounding different things. The outer one here stops a
         # screen from waiting forever if three different podiums are pressed in
