@@ -15,7 +15,9 @@ reaches Vertex, and off unless configured for the same reason. A wall screen
 carrying a button that cannot work is worse than one carrying no button.
 """
 
+import asyncio
 import base64
+import dataclasses
 import hashlib
 import io
 import json
@@ -266,3 +268,102 @@ async def _post(model, body):
     except httpx.HTTPError as problem:
         logger.warning("the announcer could not reach %s: %s", model, problem)
         raise Silent("the announcer could not be reached") from problem
+
+
+# The current clip and the one before it. Two rather than one so that a podium
+# changing while a screen is mid-download does not 404 the file it is already
+# fetching. About five megabytes at the top end, against eight gigabytes.
+KEEP = 2
+
+# Both calls together. A press that has not made a sound in half a minute has
+# failed whatever the model eventually says.
+SECONDS = 30.0
+
+
+@dataclasses.dataclass(frozen=True)
+class Clip:
+    """One announcement: the file, its two halves, and where they meet."""
+
+    state: str
+    wav: bytes
+    seconds: float
+    switch_at: float
+    script: dict
+
+
+class Announcer:
+    """One generation at a time, and the last two kept.
+
+    Every screen pressing the button wants the identical clip, because a clip
+    is a pure function of the podiums. So a second press while the first is
+    still being made joins it rather than starting another: the guard is the
+    correct semantics here, not a throttle bolted onto them.
+    """
+
+    def __init__(self, generate=None):
+        self._generate = generate
+        self._clips = {}        # fingerprint -> Clip, oldest first
+        self._making = {}       # fingerprint -> Task
+        self._slot = asyncio.Semaphore(1)
+
+    def ready(self, state):
+        """The clip with this name, if it is still one of the two kept."""
+        return self._clips.get(state)
+
+    async def clip(self, podiums):
+        """The clip for these podiums, made or remembered."""
+        state = fingerprint(podiums)
+        if state in self._clips:
+            return self._clips[state]
+        if state not in self._making:
+            self._making[state] = asyncio.ensure_future(self._make(state, podiums))
+        # Shielded, so a screen that navigates away mid-generation cancels its
+        # own wait and not everybody else's clip.
+        return await asyncio.shield(self._making[state])
+
+    async def _make(self, state, podiums):
+        try:
+            async with self._slot:
+                # Checked again inside the slot: a press that queued behind
+                # another may have been for a podium that has since been made.
+                if state in self._clips:
+                    return self._clips[state]
+                async with asyncio.timeout(SECONDS):
+                    make = self._generate or _generate
+                    pcm, words = await make(podiums)
+                whole = seconds(pcm)
+                clip = Clip(state=state, wav=as_wav(pcm), seconds=round(whole, 2),
+                            switch_at=_switch(whole, words), script=words)
+                self._keep(clip)
+                return clip
+        except TimeoutError as slow:
+            raise Silent("the announcer took too long and was cut off") from slow
+        finally:
+            # Failures included, so the next press is allowed to try again.
+            self._making.pop(state, None)
+
+    def _keep(self, clip):
+        self._clips[clip.state] = clip
+        while len(self._clips) > KEEP:
+            # Insertion-ordered, so the first key is the oldest clip.
+            self._clips.pop(next(iter(self._clips)))
+
+
+async def _generate(podiums):
+    """The two calls, in the only order they can happen in."""
+    words = await script(podiums)
+    return await speak(f"{words['solo']} {words['versus']}"), words
+
+
+def _switch(whole, words):
+    """When the second board's half begins, near enough to turn a board over.
+
+    Apportioned by word count against the clip's real length. That is accurate
+    to a second or so, which is the tolerance for swapping a board and is not
+    the tolerance for lighting up a word -- so nothing here lights up a word.
+    The model returns no timings and an estimate fine enough to look precise
+    would look broken the moment it drifted.
+    """
+    solo = len(words["solo"].split())
+    both = solo + len(words["versus"].split())
+    return round(whole * solo / both, 2) if both else round(whole, 2)

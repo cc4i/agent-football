@@ -1,5 +1,6 @@
 """The standings turned into something worth listening to."""
 
+import asyncio
 import base64
 import io
 import json
@@ -216,3 +217,123 @@ async def test_a_laptop_calls_the_api_with_its_key(monkeypatch):
     assert url == ("https://generativelanguage.googleapis.com/v1beta/models/"
                    "a-model:generateContent")
     assert headers["x-goog-api-key"] == "a-key"
+
+
+def a_clip(pcm=b"\x00\x01" * 24_000, words=None):
+    """A generator stand-in that counts how often it was asked."""
+    made = {"times": 0}
+
+    async def generate(podiums):
+        made["times"] += 1
+        await asyncio.sleep(0)
+        return pcm, words or {"solo": "one two three four", "versus": "five six"}
+
+    return generate, made
+
+
+async def test_the_same_podiums_are_only_ever_made_once():
+    generate, made = a_clip()
+    talking = announcer.Announcer(generate=generate)
+    await talking.clip(PODIUMS)
+    await talking.clip(PODIUMS)
+    assert made["times"] == 1
+
+
+async def test_twenty_screens_pressing_at_once_cost_one_generation():
+    # The whole guard, in one test. Every screen wants the identical clip,
+    # because a clip is a pure function of the podiums.
+    started = asyncio.Event()
+    holding = asyncio.Event()
+    made = {"times": 0}
+
+    async def slow(podiums):
+        made["times"] += 1
+        started.set()
+        await holding.wait()
+        return b"\x00\x01" * 24_000, {"solo": "one two", "versus": "three"}
+
+    talking = announcer.Announcer(generate=slow)
+    pressing = [asyncio.create_task(talking.clip(PODIUMS)) for _ in range(20)]
+    await started.wait()
+    holding.set()
+    clips = await asyncio.gather(*pressing)
+    assert made["times"] == 1
+    assert len({clip.state for clip in clips}) == 1
+
+
+async def test_a_screen_that_gives_up_does_not_take_the_clip_with_it():
+    # A wall screen navigating away mid-generation used to cancel the task
+    # every other screen was awaiting.
+    started = asyncio.Event()
+    holding = asyncio.Event()
+    generate, made = a_clip()
+
+    async def slow(podiums):
+        started.set()
+        await holding.wait()
+        return await generate(podiums)
+
+    talking = announcer.Announcer(generate=slow)
+    gone = asyncio.create_task(talking.clip(PODIUMS))
+    staying = asyncio.create_task(talking.clip(PODIUMS))
+    await started.wait()
+    gone.cancel()
+    holding.set()
+    assert (await staying).seconds == 1.0
+    assert made["times"] == 1
+
+
+async def test_the_last_two_clips_are_kept_and_the_third_is_not():
+    # Two, so that a podium changing while a screen is mid-download does not
+    # 404 the file it is already fetching.
+    generate, _ = a_clip()
+    talking = announcer.Announcer(generate=generate)
+    first = await talking.clip(PODIUMS)
+    second = await talking.clip({**PODIUMS, "score_attack": [{"name": "Jo"}]})
+    third = await talking.clip({**PODIUMS, "score_attack": [{"name": "Kim"}]})
+    assert talking.ready(first.state) is None
+    assert talking.ready(second.state) is second
+    assert talking.ready(third.state) is third
+
+
+async def test_a_clip_knows_when_the_second_board_starts():
+    # Apportioned by words against the clip's real length. Four words then
+    # two, over one second, puts the turn two thirds of the way in.
+    generate, _ = a_clip(words={"solo": "one two three four", "versus": "five six"})
+    clip = await announcer.Announcer(generate=generate).clip(PODIUMS)
+    assert clip.seconds == 1.0
+    assert clip.switch_at == 0.67
+
+
+async def test_a_clip_carries_a_file_and_its_two_halves():
+    generate, _ = a_clip()
+    clip = await announcer.Announcer(generate=generate).clip(PODIUMS)
+    assert clip.wav.startswith(b"RIFF")
+    assert clip.script["solo"] == "one two three four"
+    assert clip.state == announcer.fingerprint(PODIUMS)
+
+
+async def test_a_generation_that_hangs_is_given_up_on(monkeypatch):
+    monkeypatch.setattr(announcer, "SECONDS", 0.01)
+
+    async def forever(podiums):
+        await asyncio.sleep(5)
+
+    with pytest.raises(announcer.Silent):
+        await announcer.Announcer(generate=forever).clip(PODIUMS)
+
+
+async def test_a_failed_generation_is_not_remembered_as_a_clip():
+    tries = {"times": 0}
+
+    async def flaky(podiums):
+        tries["times"] += 1
+        if tries["times"] == 1:
+            raise announcer.Silent("no")
+        return b"\x00\x01" * 24_000, {"solo": "one", "versus": "two"}
+
+    talking = announcer.Announcer(generate=flaky)
+    with pytest.raises(announcer.Silent):
+        await talking.clip(PODIUMS)
+    # The second press must be allowed to try again.
+    assert (await talking.clip(PODIUMS)).seconds == 1.0
