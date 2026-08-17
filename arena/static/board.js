@@ -215,7 +215,7 @@ function podium(into, rows, describe) {
     score.append(told.score,
                  Object.assign(document.createElement("small"), { textContent: told.unit }));
 
-    pod.append(medal, name, ...masked("div", "em", row.email), state, score);
+    pod.append(medal, name, state, score);
     return pod;
   }));
 }
@@ -268,25 +268,10 @@ function who(one) {
   const box = cell("who-cell", "");
   const name = document.createElement("b");
   name.textContent = one.name;
-  box.append(name, ...masked("span", "", one.email));
+  box.append(name);
   return box;
 }
 
-/**
- * The masked address under a manager's name, as nothing or as one element.
- *
- * An address is optional, so a great many rows have none, and an empty element
- * is not the same as no element: on the podium it is a margin and a line box
- * where the managers either side have a line of text, which reads as a
- * rendering fault rather than as somebody who kept their address to themselves.
- */
-function masked(tag, className, address) {
-  if (!address) return [];
-  const line = document.createElement(tag);
-  if (className) line.className = className;
-  line.textContent = address;
-  return [line];
-}
 
 function cell(className, text) {
   const box = document.createElement("td");

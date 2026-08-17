@@ -88,7 +88,7 @@ def read(conn, room_id):
     """
     return {row["team"]: {**_run(row), "breakdown": json.loads(row["breakdown_json"])}
             for row in conn.execute(
-                "SELECT r.*, p.display_name, p.email_masked, s.philosophy, room.code "
+                "SELECT r.*, p.display_name, s.philosophy, room.code "
                 "FROM result r "
                 "JOIN room ON room.id = r.room_id "
                 "JOIN player p ON p.id = r.player_id "
@@ -107,7 +107,7 @@ def solo(conn):
     """
     best = {}
     for row in conn.execute(
-        "SELECT r.*, p.display_name, p.email_masked, s.philosophy, room.code "
+        "SELECT r.*, p.display_name, s.philosophy, room.code "
         "FROM result r "
         "JOIN room ON room.id = r.room_id "
         "JOIN player p ON p.id = r.player_id "
@@ -129,7 +129,7 @@ def versus(conn):
     """
     played = {}
     for row in conn.execute(
-        "SELECT r.*, p.display_name, p.email_masked, room.code,"
+        "SELECT r.*, p.display_name, room.code,"
         "       (SELECT p2.display_name FROM result r2"
         "          JOIN player p2 ON p2.id = r2.player_id"
         "         WHERE r2.room_id = r.room_id AND r2.player_id != r.player_id) AS against "
@@ -207,7 +207,6 @@ def _run(row):
     return {
         "player_id": row["player_id"],
         "name": row["display_name"],
-        "email": row["email_masked"],
         "team": row["team"],
         "philosophy": row["philosophy"],
         "room": row["code"],
@@ -224,7 +223,6 @@ def _run(row):
 
 def _standing(row):
     return {"player_id": row["player_id"], "name": row["display_name"],
-            "email": row["email_masked"], "played": 0,
-            "won": 0, "drew": 0, "lost": 0,
+            "played": 0, "won": 0, "drew": 0, "lost": 0,
             "goals_for": 0, "goals_against": 0, "difference": 0,
             "rating": row["rating"], "last": None}

@@ -157,8 +157,11 @@ def test_the_solo_board_names_the_shape_a_manager_opened_with(conn, alex):
 
 
 def test_the_solo_board_never_shows_an_unmasked_address(conn, alex):
+    """The board carries no address, masked or otherwise. Under E1, addresses
+    stopped being published on any unauthenticated endpoint; before that, this
+    asserted the masked form was present."""
     played(conn, "solo", {"blue": alex}, [(10, "blue")])
-    assert board.solo(conn)[0]["email"] == "a***x@example.com"
+    assert "email" not in board.solo(conn)[0]
 
 
 def test_a_duel_is_not_on_the_solo_board(conn, alex, sam):

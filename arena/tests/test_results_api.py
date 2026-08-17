@@ -53,9 +53,10 @@ def test_the_result_of_a_room_that_does_not_exist_is_a_404(client):
 
 
 def test_a_result_never_carries_an_unmasked_address(client, finished, phones):
+    """Changed under E1: results no longer carry addresses at all."""
     body = client.get(f"/api/rooms/{finished}/result").text
     assert "alex@example.com" not in body
-    assert "a***x@example.com" in body
+    assert "a***x@example.com" not in body
 
 
 # ── Both boards ───────────────────────────────────────────────────────────
