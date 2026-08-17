@@ -362,6 +362,43 @@ async def test_two_waiters_on_a_failing_generation_both_receive_silent():
         await second
 
 
+def test_the_deadlines_are_longer_than_a_clip_takes_to_make():
+    """Fifty-seven seconds, measured against the real models, TTS the long pole.
+
+    Shipped at thirty, every press at a venue ran the script call, started the
+    speech call and was cancelled halfway through it: half a minute of "Warming
+    up", then a failure, nothing cached, and a TTS generation billed and thrown
+    away. `test_a_real_clip_lands_in_the_forty_second_window` is where the
+    number came from and is what would correct it.
+    """
+    assert announcer.TIMEOUT.read >= 60
+    assert announcer.SECONDS >= 60
+
+
+async def test_a_press_queued_behind_another_podium_still_gets_its_clip(monkeypatch):
+    """The two deadlines bound different things and cannot be the same number.
+
+    The inner one starts when a generation takes the slot; the outer one starts
+    when somebody presses. A second podium spends the first clip's whole
+    generation queueing, so an outer deadline the size of the inner one refuses
+    it before its own work has begun.
+    """
+    monkeypatch.setattr(announcer, "SECONDS", 0.9)
+    monkeypatch.setattr(announcer, "WAITING_SECONDS", 10.0)
+
+    async def unhurried(podiums):
+        # Comfortably inside one generation's budget, and two of them in
+        # series are not: which is the whole of the difference being tested.
+        await asyncio.sleep(0.5)
+        return b"\x00\x01" * 24_000, {"solo": "one two", "versus": "three"}
+
+    talking = announcer.Announcer(generate=unhurried)
+    first = asyncio.create_task(talking.clip(PODIUMS))
+    behind = asyncio.create_task(talking.clip({**PODIUMS, "score_attack": [{"name": "Jo"}]}))
+    assert (await first).seconds == 1.0
+    assert (await behind).seconds == 1.0
+
+
 async def test_the_semaphore_is_released_after_a_timeout(monkeypatch):
     # A timeout that wedges the slot would starve every subsequent press.
     monkeypatch.setattr(announcer, "SECONDS", 0.01)
@@ -402,9 +439,10 @@ async def test_a_real_clip_lands_in_the_forty_second_window(monkeypatch):
     # Ensure LOCATION is set to global for the corrected endpoint.
     monkeypatch.setattr(announcer, "LOCATION", "global")
 
-    # TTS generation can take longer than the default 30s timeout.
-    import httpx
-    monkeypatch.setattr(announcer, "TIMEOUT", httpx.Timeout(90.0))
+    # Nothing patches `TIMEOUT` here. This run is what sized it: production
+    # already waits long enough for the clip this test is about to ask for, and
+    # a test that quietly widened the budget would be measuring a venue that
+    # does not exist.
 
     # Mint a token from ADC. This is a test-only path; production uses the
     # metadata server or GEMINI_API_KEY.

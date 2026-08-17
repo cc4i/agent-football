@@ -112,9 +112,14 @@ editing the prompt retires every clip made by the old one.
 rest. The previous one is kept so that a podium changing while a screen is
 mid-fetch does not 404 the file it is already downloading. Ceiling about 5 MB.
 
-**A timeout.** Thirty seconds for the pair of calls, then a failure written for
-somebody to read. `intent.py` uses five, which is right for an embedding on the
-shout path and far too short for speech synthesis.
+**Two timeouts, then a failure written for somebody to read.** Ninety seconds
+for each call and for the pair of them together, and a hundred and twenty for
+what the person at the screen waits - queue time as well as generation, so a
+second podium pressed while the first is being made is not refused before its
+own work starts. The numbers come from the measurement test below: a real clip
+took about fifty-seven seconds against the live models, nearly all of it speech
+synthesis. `intent.py` uses five, which is right for an embedding on the shout
+path and would cut every press here off mid-generation.
 
 ### Credentials
 

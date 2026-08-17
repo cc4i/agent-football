@@ -120,10 +120,12 @@ SCRIPT_MODEL = os.environ.get("ARENA_ANNOUNCER_MODEL", "gemini-3.6-flash")
 TTS_MODEL = os.environ.get("ARENA_TTS_MODEL", "gemini-3.1-flash-tts-preview")
 VOICE = os.environ.get("ARENA_TTS_VOICE", "Puck")
 
-# Speech synthesis of forty seconds of audio, and the script call before it.
-# `intent.py` waits five for an embedding, which is right there and far too
-# short here.
-TIMEOUT = httpx.Timeout(30.0)
+# One call's budget. Measured against the real models: a whole clip takes
+# about fifty-seven seconds, and speech synthesis is nearly all of it - the
+# script comes back in a couple. Ninety is that measurement with headroom for a
+# slow afternoon, not a guess. `intent.py` waits five for an embedding, which is
+# right there and would cut every press here off mid-generation.
+TIMEOUT = httpx.Timeout(90.0)
 
 
 class Silent(Exception):
@@ -279,9 +281,17 @@ async def _post(model, body):
 # fetching. About five megabytes at the top end, against eight gigabytes.
 KEEP = 2
 
-# Both calls together. A press that has not made a sound in half a minute has
-# failed whatever the model eventually says.
-SECONDS = 30.0
+# Both calls together, held while the semaphore is held. Sized off the same
+# measurement as TIMEOUT: fifty-seven seconds for a real clip, with speech
+# synthesis the long pole. Anything under that cancels healthy generations and
+# bills for audio nobody hears.
+SECONDS = 90.0
+
+# Queue plus generation, which is what the person at the screen experiences.
+# Strictly larger than SECONDS, or a second podium queued behind the first
+# could never succeed however fast its own generation was: it would spend the
+# whole budget waiting for the slot. One clip's ninety and half of one again.
+WAITING_SECONDS = 120.0
 
 
 @dataclasses.dataclass(frozen=True)
@@ -334,7 +344,7 @@ class Announcer:
         # Shielded, so a screen that navigates away mid-generation cancels its
         # own wait and not everybody else's clip.
         try:
-            async with asyncio.timeout(SECONDS):
+            async with asyncio.timeout(WAITING_SECONDS):
                 return await asyncio.shield(self._making[state])
         except TimeoutError as slow:
             raise Silent("the announcer took too long and was cut off") from slow
