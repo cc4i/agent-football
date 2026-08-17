@@ -271,7 +271,13 @@ async def _post(model, body):
             reply = await http.post(url, headers=headers, json=body)
             reply.raise_for_status()
             return reply.json()
-    except httpx.HTTPError as problem:
+    except Exception as problem:
+        # Everything, the way `intent.py` does, and for the same reason: this is
+        # a party trick and nothing it can go wrong at is worth a stack trace on
+        # a wall screen. A 2xx with a body that is not JSON is the case that
+        # taught this - `reply.json()` raises ValueError, which is not an
+        # `httpx.HTTPError`, and it went all the way out to the endpoint as a
+        # 500 rather than a sentence somebody could read.
         logger.warning("the announcer could not reach %s: %s", model, problem)
         raise Silent("the announcer could not be reached") from problem
 

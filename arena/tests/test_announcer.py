@@ -220,6 +220,40 @@ async def test_a_laptop_calls_the_api_with_its_key(monkeypatch):
     assert headers["x-goog-api-key"] == "a-key"
 
 
+async def test_a_two_hundred_that_is_not_json_is_a_silence_not_a_crash(monkeypatch):
+    """A 2xx carrying something no parser will touch: a proxy's HTML, a
+    truncated read, a gateway apologising in the body.
+
+    `reply.json()` raises `ValueError`, which is not an `httpx.HTTPError`.
+    Caught narrowly it walked out through `script`'s try - which wraps the
+    parse, not the call - out through `_make`, which catches `TimeoutError`,
+    and out through the endpoint, which catches `Silent`: a 500 and a stack
+    trace where the venue should have had a sentence.
+    """
+    monkeypatch.setattr(announcer, "API_KEY", "a-key")
+
+    class Reply:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            raise ValueError("Expecting value: line 1 column 1 (char 0)")
+
+    class Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *over):
+            return False
+
+        async def post(self, url, headers=None, json=None):
+            return Reply()
+
+    monkeypatch.setattr(announcer.httpx, "AsyncClient", lambda **anything: Client())
+    with pytest.raises(announcer.Silent):
+        await announcer._post("a-model", {})
+
+
 def a_clip(pcm=b"\x00\x01" * 24_000, words=None):
     """A generator stand-in that counts how often it was asked."""
     made = {"times": 0}
