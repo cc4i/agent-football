@@ -172,6 +172,8 @@ cannot tell a measured 8 from another guess.
 | POST | `/api/rooms/{code}/start` | anyone seated in the match |
 | GET | `/api/philosophies`, `/api/presets` | anyone |
 | GET | `/api/attributes` | anyone - every role's shipped values and the band each may move in |
+| POST | `/api/board/announcement` | anyone, rate-limited - makes or hands back the spoken standings; 503 when the announcer is off, 409 when nobody is ranked yet |
+| GET | `/api/board/announcement/{state}.wav` | anyone - one clip's bytes, cacheable forever because the name is a fingerprint of what it says |
 | GET | `/api/rooms/{code}/teams/{team}/profiles` | anyone |
 | GET | `/api/rooms/{code}/teams/{team}/profiles/{role}` | anyone |
 | PATCH | `/api/rooms/{code}/teams/{team}/profiles/{role}` | that dugout's manager, or a caller with `X-Arena-Service` |

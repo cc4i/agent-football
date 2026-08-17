@@ -236,6 +236,36 @@ def live_room(client, conn, phones, grounds_connected):
     return _live_room
 
 
+def whistle(client, code, physics, events, speeds=()):
+    """Play out a match over the host socket and hang up. Returns nothing.
+
+    `events` is (kind, match_ms, payload) triples in the order the host sends
+    them, which is the only order anything downstream ever sees them in.
+    """
+    with client.websocket_connect(f"/ws/rooms/{code}?client_id={physics}") as host:
+        host.receive_json()
+        for speed in speeds:
+            host.send_json({"type": "host.state", "payload": {"clock": 90, "speed": speed}})
+        for kind, match_ms, payload in events:
+            host.send_json({"type": "host.event", "kind": kind,
+                            "match_ms": match_ms, "payload": payload})
+            host.receive_json()
+
+
+def a_win(scorer="blue"):
+    return [("kickoff", 0, {}),
+            ("goal", 27_400, {"team": scorer, "scorer": "forward"}),
+            ("full_time", 180_000, {"score": [1, 0]})]
+
+
+@pytest.fixture
+def finished(client, live_room):
+    """A solo room played to a 1-0 win and scored. Returns the code."""
+    code, physics = live_room()
+    whistle(client, code, physics, a_win())
+    return code
+
+
 # ── A venue, and somebody standing in front of the big screen ──────────
 
 # The number in the spec, and the number the wall was rebuilt for.

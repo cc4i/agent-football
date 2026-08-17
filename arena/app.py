@@ -32,6 +32,7 @@ from uvicorn.protocols.utils import ClientDisconnected
 # which is what lets one `ARENA_SERVICE_TOKEN` cover all three processes.
 load_dotenv()
 
+import announcer
 import attributes
 import board
 import chain
@@ -231,6 +232,12 @@ MAX_REPLAY_EVENTS = 500
 # into a several-megabyte download.
 MAX_BOARD_ROWS = 100
 
+# Two model calls a press, so this is not sized for a flood, it is sized for
+# a person. A screen legitimately presses this once and then not again until
+# somebody has finished a match.
+ANNOUNCE_RATE = 0.1
+ANNOUNCE_BURST = 4
+
 # How long a room may go without a word from the screen holding it before the
 # arena gives up on it. Backgrounding a tab stops its frames, so this is also
 # the grace a host gets to come back: long enough to answer the door, short
@@ -317,6 +324,11 @@ async def lifespan(fastapi_app: FastAPI):
     fastapi_app.state.rooms_opened = limits.Bucket(ROOM_RATE, ROOM_BURST)
     fastapi_app.state.coach = limits.Bucket(COACH_RATE, COACH_BURST)
     fastapi_app.state.asks = limits.Bucket(ASK_RATE, ASK_BURST)
+    fastapi_app.state.announcements = limits.Bucket(ANNOUNCE_RATE, ANNOUNCE_BURST)
+    # Per app rather than per module, for the same reason the buckets above
+    # are: one instance means per app is per process anyway, and a test's
+    # client gets a cache of its own.
+    fastapi_app.state.announcer = announcer.Announcer()
     # How many screens are on the wall right now, here for the same reason as
     # the buckets above: a module-level counter is shared by every test in the
     # session, and one leaked socket would then fail an unrelated test later on.
@@ -706,7 +718,10 @@ async def board_page():
 @app.get("/api/venue")
 async def read_venue(request: Request):
     """Where the other halves of the venue live, for the pages to link to."""
-    return {"pitch_url": PITCH_URL, "public_url": _origin(request)}
+    return {"pitch_url": PITCH_URL, "public_url": _origin(request),
+            # So the big screen can leave the button out entirely rather than
+            # render a control that answers 503.
+            "announcer": announcer.configured()}
 
 
 @app.post("/api/players")
@@ -957,6 +972,43 @@ async def read_board(request: Request):
     return {"solo": board.solo(connection)[:MAX_BOARD_ROWS],
             "versus": board.versus(connection)[:MAX_BOARD_ROWS],
             "managers": board.managers(connection)}
+
+
+@app.post("/api/board/announcement")
+async def announce_the_board(request: Request):
+    """Make, or hand back, the clip for the standings as they are right now.
+
+    The work is two awaited model calls and a memcpy, and `Announcer` holds it
+    to one generation at a time across the whole venue, so this sits in the
+    arena rather than in a service of its own. See the design note.
+    """
+    if not announcer.configured():
+        raise HTTPException(503, "the announcer is not switched on at this venue")
+    if not request.app.state.announcements.take(limits.client_ip(request)):
+        raise HTTPException(429, "that has been pressed a lot; give it a moment")
+    connection = request.app.state.conn
+    podiums = announcer.spoken(board.top(connection, "solo"),
+                               board.top(connection, "versus"))
+    if not podiums["score_attack"] and not podiums["head_to_head"]:
+        raise HTTPException(409, "nobody is on the board yet, so there is "
+                                 "nothing to announce")
+    try:
+        clip = await request.app.state.announcer.clip(podiums)
+    except announcer.Silent as quiet:
+        raise HTTPException(503, str(quiet)) from quiet
+    return {"state": clip.state, "seconds": clip.seconds,
+            "switch_at": clip.switch_at, "script": clip.script,
+            "audio": f"/api/board/announcement/{clip.state}.wav"}
+
+
+@app.get("/api/board/announcement/{state}.wav")
+async def read_announcement(state: str, request: Request):
+    """One clip's bytes. Cacheable forever, because the name is the content."""
+    clip = request.app.state.announcer.ready(state)
+    if clip is None:
+        raise HTTPException(404, "that announcement has been replaced by a newer one")
+    return Response(clip.wav, media_type="audio/wav",
+                    headers={"Cache-Control": "public, max-age=31536000, immutable"})
 
 
 @app.get("/api/rooms/{code}/qr.svg")
