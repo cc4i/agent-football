@@ -211,9 +211,9 @@ Four facts about this API that the implementation has to respect:
 - Vertex concatenates the prompt and the text into one `contents` field, so
   the style direction is prefixed to the script rather than sent beside it.
 - The model ignores `temperature`, `top_k` and `top_p`. Sending them is noise.
-- It is served regionally, so the endpoint is `{region}-aiplatform` and not
-  `global` - the same trap `deploy/service.yaml` already documents for the
-  embedding model.
+- Measured against multi-gke-ops: the TTS model answers from both `global` and
+  regional endpoints. The script model is global-only. Both work from `global`,
+  which matches the chain's `GOOGLE_CLOUD_LOCATION=global`.
 
 The style prefix follows Google's documented structure for this model - audio
 profile, scene, director's notes:
@@ -326,7 +326,7 @@ trip.
 | `ARENA_ANNOUNCER_MODEL` | `gemini-3.6-flash` | Writes the script. A different base model from the chain's on purpose. |
 | `ARENA_TTS_MODEL` | `gemini-3.1-flash-tts-preview` | Speaks it. |
 | `ARENA_TTS_VOICE` | `Puck` | One of the thirty prebuilt voices. |
-| `ARENA_ANNOUNCER_LOCATION` | `us-central1` | TTS is served regionally, not `global`. |
+| `ARENA_ANNOUNCER_LOCATION` | `global` | Both models answer here (script model is global-only, TTS answers in both). Matches the chain's location. |
 
 `deploy/service.yaml` sets the first and takes the defaults for the rest. The
 instance's service account already holds `aiplatform` access for the embedding

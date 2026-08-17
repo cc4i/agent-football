@@ -108,9 +108,10 @@ ENABLED = os.environ.get("ARENA_ANNOUNCER") == "1"
 PROJECT = os.environ.get("GOOGLE_CLOUD_PROJECT", "")
 API_KEY = os.environ.get("GEMINI_API_KEY", "")
 
-# Regional, not global. Speech models are served from a region the way the
-# embedding model is and unlike the image model, and `global` answers 404.
-LOCATION = os.environ.get("ARENA_ANNOUNCER_LOCATION", "us-central1")
+# Both models answer from `global`, measured against multi-gke-ops: the script
+# model is global-only, the TTS model answers in both global and regional
+# endpoints. This matches the chain's GOOGLE_CLOUD_LOCATION=global.
+LOCATION = os.environ.get("ARENA_ANNOUNCER_LOCATION", "global")
 
 # Deliberately not the chain's `gemini-3.5-flash-lite`. A different base model
 # is a different quota bucket, so a room enjoying the announcer cannot take
@@ -240,7 +241,10 @@ async def _reach(model, token=None):
                 f"{model}:generateContent",
                 {"x-goog-api-key": API_KEY})
     fetched = await (token or _token)()
-    return (f"https://{LOCATION}-aiplatform.googleapis.com/v1/projects/{PROJECT}"
+    # For global, use aiplatform.googleapis.com; for regions, prefix the domain.
+    host = ("aiplatform.googleapis.com" if LOCATION == "global"
+            else f"{LOCATION}-aiplatform.googleapis.com")
+    return (f"https://{host}/v1/projects/{PROJECT}"
             f"/locations/{LOCATION}/publishers/google/models/{model}"
             f":generateContent",
             {"Authorization": f"Bearer {fetched}"})

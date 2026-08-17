@@ -4,6 +4,7 @@ import asyncio
 import base64
 import io
 import json
+import os
 import wave
 
 import pytest
@@ -374,3 +375,75 @@ async def test_the_semaphore_is_released_after_a_timeout(monkeypatch):
     # The second press must not be starved by the first.
     with pytest.raises(announcer.Silent):
         await talking.clip({**PODIUMS, "score_attack": [{"name": "Jo"}]})
+
+
+@pytest.mark.e2e
+@pytest.mark.timeout(90)
+async def test_a_real_clip_lands_in_the_forty_second_window(monkeypatch):
+    """The one test here that spends money. Run it when the prompt changes.
+
+    The design budgets 120 to 135 words on the arithmetic that the model
+    speaks at about 150 to 165 wpm and the room hears it at 1.25x. Nobody has
+    measured this model. This is where that estimate is either confirmed or
+    corrected - and if it is wrong, the fix is the word budget in
+    SHOUTCASTER, not the window below.
+    """
+    import subprocess
+
+    if not announcer.configured():
+        # Set the values directly if the module did not pick them up from .env.
+        env_enabled = os.environ.get("ARENA_ANNOUNCER") == "1"
+        env_project = os.environ.get("GOOGLE_CLOUD_PROJECT", "")
+        if not env_enabled or not env_project:
+            pytest.skip("set ARENA_ANNOUNCER=1 and GOOGLE_CLOUD_PROJECT")
+        monkeypatch.setattr(announcer, "ENABLED", True)
+        monkeypatch.setattr(announcer, "PROJECT", env_project)
+
+    # Ensure LOCATION is set to global for the corrected endpoint.
+    monkeypatch.setattr(announcer, "LOCATION", "global")
+
+    # TTS generation can take longer than the default 30s timeout.
+    import httpx
+    monkeypatch.setattr(announcer, "TIMEOUT", httpx.Timeout(90.0))
+
+    # Mint a token from ADC. This is a test-only path; production uses the
+    # metadata server or GEMINI_API_KEY.
+    try:
+        token_result = subprocess.run(
+            ["gcloud", "auth", "application-default", "print-access-token"],
+            capture_output=True, text=True, check=True, timeout=10)
+        token = token_result.stdout.strip()
+    except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
+        pytest.skip("install gcloud and run: gcloud auth application-default login")
+
+    async def adc_token():
+        return token
+
+    monkeypatch.setattr(announcer, "_token", adc_token)
+
+    full = {"score_attack": [
+                {"name": "Alex Rivera", "points": 41, "goals_for": 5,
+                 "goals_against": 1, "first_goal_seconds": 42, "shouts": 3,
+                 "shouts_that_worked": 2},
+                {"name": "Sam Okafor", "points": 38, "goals_for": 4,
+                 "goals_against": 2, "first_goal_seconds": 88, "shouts": 1,
+                 "shouts_that_worked": 0},
+                {"name": "Priya Raman", "points": 31, "goals_for": 3,
+                 "goals_against": 3, "first_goal_seconds": None, "shouts": 0,
+                 "shouts_that_worked": 0}],
+            "head_to_head": [
+                {"name": "Kim Park", "played": 5, "won": 5, "drew": 0,
+                 "lost": 0, "goal_difference": 11},
+                {"name": "Jo Meyer", "played": 5, "won": 4, "drew": 0,
+                 "lost": 1, "goal_difference": 6},
+                {"name": "Lee Novak", "played": 4, "won": 2, "drew": 1,
+                 "lost": 1, "goal_difference": 2}]}
+
+    words = await announcer.script(full)
+    said = f"{words['solo']} {words['versus']}"
+    counted = len(said.split())
+    played = announcer.seconds(await announcer.speak(said)) / 1.25
+
+    print(f"\n{counted} words, {played:.1f}s played\n\n{said}\n")
+    assert 110 <= counted <= 150, f"the model wrote {counted} words"
+    assert 32 <= played <= 48, f"the room would hear {played:.1f} seconds"

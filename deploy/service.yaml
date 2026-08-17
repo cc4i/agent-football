@@ -131,6 +131,17 @@ spec:
             # a restart afterwards or every kick-off answers 503.
             - name: ARENA_SABOTAGE
               value: "1"
+            # Reading the standings out loud on the big screen. Two model
+            # calls a press, held to one generation at a time across the
+            # venue, so this costs the arena two awaited HTTPS calls and a
+            # memcpy. The models are named in `arena/announcer.py`; the
+            # defaults are right and are left to it.
+            #
+            # No key here: the instance's service account carries this the
+            # same way it carries the embedding call, and GEMINI_API_KEY is
+            # for a laptop that has no metadata server to ask.
+            - name: ARENA_ANNOUNCER
+              value: "1"
             # What the QR codes are printed with. Unset, the arena works it out
             # per request from the forwarded scheme and the Host header, which
             # is what let the first deploy print a working code before the

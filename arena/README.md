@@ -43,6 +43,11 @@ shell wins where both say something, which is what lets one exported
 | `ARENA_COACH_IDLE_SECONDS` | `90` | How long one hop of the chain may go quiet. The slowest specialist sets it. |
 | `ARENA_CHAIN_LIMIT` | `4` | How many shouts may be talking to Gemini at once, across every room. The quota belongs to the venue, not to a room. Sizing it is arithmetic - see below. |
 | `ARENA_CHAIN_SECONDS` | `150` | The whole chain, slot to huddle. A match is three minutes long. |
+| `ARENA_ANNOUNCER` | unset | `1` puts a button on the big screen's lobby that reads the top three of both boards out loud. Off everywhere it has not been asked for: it costs two model calls a press and makes a noise in the room. Needs `GOOGLE_CLOUD_PROJECT` or `GEMINI_API_KEY` as well, and is simply off without one. |
+| `ARENA_ANNOUNCER_MODEL` | `gemini-3.6-flash` | Writes the script. Not the chain's model, on purpose - see below. |
+| `ARENA_TTS_MODEL` | `gemini-3.1-flash-tts-preview` | Speaks it. Returns headerless PCM at 24 kHz, which the arena wraps in a WAV header before serving. |
+| `ARENA_TTS_VOICE` | `Puck` | One of the thirty prebuilt voices. |
+| `ARENA_ANNOUNCER_LOCATION` | `global` | Both models answer here. The script model is global-only; the TTS model answers in both global and regional endpoints. Matches the chain's location. |
 | `ARENA_MAX_LIVE_ROOMS` | `120` | How many matches may be live at once. When reached, opening another room is a 503 saying the venue is full - wait for a match to finish. |
 | `ARENA_WALL_HZ` | `2` | How often one room's tile may redraw on the wall. A host reports at 10 Hz because its match needs it; fifty thumbnails at that rate is five hundred messages a second down every wall socket. Whoever is watching one match still gets every frame, on the room socket. Zero or less turns the thinning off rather than the wall. |
 | `ARENA_MAX_WALL_SOCKETS` | `60` | How many big screens may watch the wall at once. Sized above the spec's 50 rooms, because `/arena` opens a wall socket on every screen that hosts one, and below `ARENA_MAX_LIVE_ROOMS`, because the cost is rooms x `ARENA_WALL_HZ` x screens. One beyond the cap is accepted and then closed with code 4429 and the reason `too many screens are watching the wall`: it loses its filmstrip and keeps its match. |
@@ -54,10 +59,21 @@ number: it is small enough to sit inside any Vertex quota this venue is likely
 to be given, and nobody has yet read a real one. Once you have a project, the
 limit is arithmetic and the whole of it is below.
 
+**Three models, not one.** The chain is all `GEMINI_FLASH_LITE`, so the
+arithmetic below is about that model's quota alone. The venue draws on two
+others as well and neither competes with a shout: the announcer writes its
+script with `GEMINI_FLASH` and speaks it with a TTS model, and each is its own
+quota bucket. That separation is the reason the announcer uses a different
+model from the chain rather than the same one.
+
+The announcer's own arithmetic is short. Two requests make one clip, and
+`Announcer` holds the venue to one clip in flight at a time however many
+screens are pressing, so its ceiling is two requests in flight - against the
+chain's 80 to 112 a minute. A clip is then cached against a fingerprint of the
+podiums, so a board nobody has changed is never generated twice.
+
 **One shout is ten Gemini calls, not one.** Counted from `arena/chain.py` and
-`game/agents/`, all of them on `GEMINI_FLASH_LITE` - `GEMINI_FLASH` is defined
-in `game/agents/constants.py` and used nowhere, so this needs one model's quota
-and not two:
+`game/agents/`, all of them on `GEMINI_FLASH_LITE`:
 
 | Where | Calls | Why |
 |---|---|---|
@@ -141,7 +157,7 @@ cannot tell a measured 8 from another guess.
 
 | Path | What it is |
 |---|---|
-| `/arena` | The big screen: a room to scan into, then the match at the size of the room |
+| `/arena` | The big screen: a room to scan into, then the match at the size of the room. The lobby's standings have a button that reads the top three of both boards out loud, when `ARENA_ANNOUNCER` is on |
 | `/join/{code}` | Where a room's QR lands - name, email, dugout, opening stance |
 | `/play?room={code}` | The phone's dugout: the relay, the score, and the shout chips |
 | `/poster` | The sheet for the wall. Open it on any screen and print it: one code, printed once, that is not about any one room |
