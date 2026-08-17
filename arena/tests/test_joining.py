@@ -16,9 +16,9 @@ import rooms
 TAKEN = "somebody at this event is already managing as Alex Rivera - pick another name"
 
 
-def player(client, name, email=None):
-    """One join, as a phone makes it. Omitting the email omits the field."""
-    body = {"display_name": name}
+def player(client, name, email=None, code=""):
+    """One join, as a phone makes it. Under E1, claims need the recovery code."""
+    body = {"display_name": name, "recovery_code": code}
     if email is not None:
         body["email"] = email
     return client.post("/api/players", json=body)
@@ -134,24 +134,34 @@ def test_a_name_given_up_by_its_holder_is_free_for_somebody_else(client, phones)
     assert player(client, "Alex Rivera").status_code == 200
 
 
-def test_an_address_brings_a_manager_back_on_a_phone_with_no_cookie(client, phones):
-    alex = player(client, "Alex Rivera", "alex@example.com").json()["id"]
+def test_an_address_brings_a_manager_back_on_a_phone_with_no_cookie(client, phones, conn):
+    """An address still brings a manager back across phones, now with the recovery
+    code. Before E1, the address alone was sufficient; after E1, a claim without
+    the cookie needs the code."""
+    alex_resp = player(client, "Alex Rivera", "alex@example.com").json()
+    alex = alex_resp["id"]
+    code = alex_resp["recovery_code"]
     phones.fresh()
-    again = player(client, "Alex Rivera", "ALEX@example.com")
+    again = player(client, "Alex Rivera", "ALEX@example.com", code)
     assert again.status_code == 200
     assert again.json()["id"] == alex
 
 
 def test_an_address_outranks_a_cookie_somebody_else_left_on_the_phone(client, phones):
+    """An address still outranks a cookie, now with the recovery code. Before E1,
+    the address alone overrode the cookie; after E1, the recovery code is required
+    to prove the address is yours."""
     # Alex plays on their own phone, then borrows Sam's, which still holds
     # Sam's session. Typing their own address has to hand Alex their own place
     # on the board rather than quietly adding the match to Sam's.
-    alex = player(client, "Alex Rivera", "alex@example.com").json()["id"]
+    alex_resp = player(client, "Alex Rivera", "alex@example.com").json()
+    alex = alex_resp["id"]
+    alex_code = alex_resp["recovery_code"]
     phones.fresh()
     sam = player(client, "Sam Okafor", "sam@example.com").json()["id"]
     assert sam != alex
 
-    borrowed = player(client, "Alex Rivera", "alex@example.com")
+    borrowed = player(client, "Alex Rivera", "alex@example.com", alex_code)
     assert borrowed.status_code == 200
     assert borrowed.json()["id"] == alex
 

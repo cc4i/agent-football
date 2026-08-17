@@ -5,6 +5,7 @@ should be able to read in one sitting: who may sit down, when a match may kick
 off, and which status may follow which. Nothing in this file knows about HTTP.
 """
 
+import hmac
 import json
 import secrets
 import time
@@ -28,12 +29,16 @@ class RoomError(Exception):
     """A move the rules do not allow. The text is fit to show a player as-is."""
 
 
+class NeedsRecoveryCode(Exception):
+    """A claim without the code. Located on recovery_code, not display_name."""
+
+
 def required_teams(mode):
     """The dugouts that must be filled before this mode can kick off."""
     return ("blue",) if mode == "solo" else TEAMS
 
 
-def upsert_player(conn, display_name, email, salt, player_id=None):
+def upsert_player(conn, display_name, email, salt, recovery_code="", player_id=None):
     """Insert or find a player, and give them the name they just typed.
 
     Which player this is, in order: the address if it names one, then the
@@ -43,6 +48,11 @@ def upsert_player(conn, display_name, email, salt, player_id=None):
     borrowed phone is asking for their own place on the board back, and a
     cookie its owner left behind must not take it from them.
 
+    A recovery code is required whenever the address resolves to a row the
+    caller's cookie does not already name. That one sentence is the whole of E1,
+    and it leaves the common paths untouched: same phone playing again needs no
+    code, first registration needs no code.
+
     A name belongs to one manager, so a name another player already holds is a
     RoomError worded for a phone rather than a second row on the board that
     nobody can tell from the first. `player_id` is a session the caller has
@@ -50,9 +60,12 @@ def upsert_player(conn, display_name, email, salt, player_id=None):
     """
     display_name = identity.normalise_name(display_name)
     email_hash = identity.hash_email(email, salt) if email else None
-    mine = _player_by_email(conn, email_hash)
-    if mine is None:
-        mine = player_id
+    by_address = _player_by_email(conn, email_hash)
+    if by_address is not None and by_address != player_id:
+        # A claim: the address names a row this phone's cookie does not.
+        if not _code_matches(conn, by_address, recovery_code):
+            raise NeedsRecoveryCode()
+    mine = by_address if by_address is not None else player_id
 
     holder = name_holder(conn, display_name)
     if holder is not None and holder["id"] != mine:
@@ -85,11 +98,14 @@ def _already_managing(display_name):
 def _write_player(conn, player_id, display_name, email, email_hash):
     """Insert this manager, or move the row they already have. Returns the id."""
     if player_id is None:
+        # A fresh player with an address gets a code. One without an address gets
+        # none, because a row that no address resolves to can never be claimed.
+        code = identity.new_recovery_code() if email_hash else None
         row = conn.execute(
-            "INSERT INTO player (display_name, email_hash, email_masked, created_at) "
-            "VALUES (%s, %s, %s, %s) RETURNING id",
+            "INSERT INTO player (display_name, email_hash, email_masked, recovery_code, created_at) "
+            "VALUES (%s, %s, %s, %s, %s) RETURNING id",
             (display_name, email_hash, identity.mask_email(email) if email else None,
-             time.time()),
+             code, time.time()),
         ).fetchone()
         conn.commit()
         return row["id"]
@@ -101,10 +117,13 @@ def _write_player(conn, player_id, display_name, email, email_hash):
         conn.execute("UPDATE player SET display_name = %s WHERE id = %s",
                      (display_name, player_id))
     else:
+        # Adding an address for the first time, or changing it. Either way, mint
+        # a new code if they do not have one.
         conn.execute(
-            "UPDATE player SET display_name = %s, email_hash = %s, email_masked = %s "
-            "WHERE id = %s",
-            (display_name, email_hash, identity.mask_email(email), player_id))
+            "UPDATE player SET display_name = %s, email_hash = %s, email_masked = %s, "
+            "recovery_code = COALESCE(recovery_code, %s) WHERE id = %s",
+            (display_name, email_hash, identity.mask_email(email),
+             identity.new_recovery_code(), player_id))
     conn.commit()
     return player_id
 
@@ -116,6 +135,22 @@ def _player_by_email(conn, email_hash):
     row = conn.execute("SELECT id FROM player WHERE email_hash = %s",
                        (email_hash,)).fetchone()
     return row["id"] if row else None
+
+
+def _code_matches(conn, player_id, submitted):
+    """True if the submitted code matches this player's, constant-time.
+
+    A row with a NULL code matches nothing. The comparison is on bytes using
+    hmac.compare_digest, like every other secret in this codebase.
+    """
+    row = conn.execute("SELECT recovery_code FROM player WHERE id = %s",
+                       (player_id,)).fetchone()
+    if not row or row["recovery_code"] is None:
+        return False
+    return hmac.compare_digest(
+        submitted.encode("utf-8", "surrogatepass"),
+        row["recovery_code"].encode("utf-8", "surrogatepass")
+    )
 
 
 def name_holder(conn, display_name):
@@ -377,7 +412,7 @@ def snapshot(conn, room_id):
     """What a client is told about a room: over HTTP, and on socket connect."""
     room = _room(conn, room_id)
     seated = conn.execute(
-        "SELECT s.team, s.ready, s.philosophy, p.display_name, p.email_masked "
+        "SELECT s.team, s.ready, s.philosophy, p.display_name "
         "FROM seat s JOIN player p ON p.id = s.player_id "
         "WHERE s.room_id = %s ORDER BY s.team",
         (room_id,),
@@ -399,7 +434,6 @@ def snapshot(conn, room_id):
         "seats": {
             row["team"]: {
                 "name": row["display_name"],
-                "email": row["email_masked"],
                 "philosophy": row["philosophy"],
                 "ready": bool(row["ready"]),
             }
@@ -561,7 +595,7 @@ def unrank(conn, room_id):
 def seated(conn, room_id):
     """Who is in this room's dugouts, with the ids scoring needs."""
     return conn.execute(
-        "SELECT s.team, s.player_id, s.philosophy, p.display_name, p.email_masked "
+        "SELECT s.team, s.player_id, s.philosophy, p.display_name "
         "FROM seat s JOIN player p ON p.id = s.player_id "
         "WHERE s.room_id = %s ORDER BY s.team",
         (room_id,),

@@ -36,7 +36,8 @@ def test_a_new_player_keeps_a_masked_email_and_no_address(conn, alex):
 
 
 def test_the_same_email_comes_back_as_the_same_player(conn, alex):
-    again = rooms.upsert_player(conn, "Alex R", "ALEX@example.com", SALT)
+    """Changed under E1: same player re-joining with their cookie still needs no code."""
+    again = rooms.upsert_player(conn, "Alex R", "ALEX@example.com", SALT, player_id=alex)
     assert again == alex
     # They typed a shorter name this time, and the board follows the latest.
     assert rooms.get_player(conn, alex)["display_name"] == "Alex R"
@@ -66,9 +67,11 @@ def test_a_session_may_not_take_a_name_another_player_holds(conn, alex, sam):
 
 
 def test_an_address_outranks_the_session_it_arrived_with(conn, alex, sam):
+    """Changed under E1: now requires the recovery code."""
     # Alex on Sam's phone. The address is the deliberate claim of the two.
+    code = rooms.get_player(conn, alex)["recovery_code"]
     assert rooms.upsert_player(conn, "Alex Rivera", "alex@example.com", SALT,
-                               player_id=sam) == alex
+                               recovery_code=code, player_id=sam) == alex
 
 
 def test_a_name_nobody_holds_has_no_holder(conn, alex):
@@ -374,6 +377,9 @@ def test_a_room_with_nothing_logged_has_an_empty_log(conn, alex):
 
 
 def test_a_lobby_snapshot_names_the_seat_still_open(conn, alex):
+    """Snapshots carry name and philosophy but not email. Under E1, snapshots
+    stopped echoing addresses; before that, this asserted the masked form was
+    present."""
     room = rooms.create_room(conn, "versus")
     rooms.take_seat(conn, room["id"], "blue", alex, "high press")
     snapshot = rooms.snapshot(conn, room["id"])
@@ -383,7 +389,6 @@ def test_a_lobby_snapshot_names_the_seat_still_open(conn, alex):
     assert snapshot["open_seats"] == ["red"]
     assert snapshot["seats"]["blue"] == {
         "name": "Alex Rivera",
-        "email": "a***x@example.com",
         "philosophy": "high press",
         "ready": False,
     }

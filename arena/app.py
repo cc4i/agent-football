@@ -461,6 +461,24 @@ class JoinRequest(BaseModel):
     # a venue that asks for it as a condition of playing is collecting a
     # personal detail it has no use for.
     email: str = Field(default="", max_length=254)
+    # The recovery code: six characters that prove the address is yours, when
+    # claiming a row from another phone. Normalised to upper-case, so people can
+    # type lower-case. Empty when not claiming, or on first registration.
+    recovery_code: str = Field(default="", max_length=identity.RECOVERY_LENGTH)
+
+    @field_validator("recovery_code")
+    @classmethod
+    def normalise_code(cls, value):
+        # Stripped and upper-cased, so people can type lower-case. Then either
+        # empty, or exactly RECOVERY_LENGTH characters all in codes.ALPHABET.
+        value = value.strip().upper()
+        if not value:
+            return ""
+        if len(value) != identity.RECOVERY_LENGTH:
+            raise ValueError(f"a recovery code is exactly {identity.RECOVERY_LENGTH} characters")
+        if not all(c in codes.ALPHABET for c in value):
+            raise ValueError("a recovery code uses only the characters room codes do")
+        return value
 
     @field_validator("display_name", "email")
     @classmethod
@@ -753,13 +771,17 @@ async def join(body: JoinRequest, request: Request, response: Response):
     what the wall calls a dugout and what the other manager reads, so two of
     them would be two people the venue cannot tell apart. A clash comes back as
     a 409 the form shows under the field.
+
+    A recovery code is required whenever the address resolves to a row the
+    caller's cookie does not already name. That is the whole of E1.
     """
     if not request.app.state.players.take(limits.client_ip(request)):
         raise HTTPException(429, "slow down a moment and try that again")
     connection = request.app.state.conn
     with _rules():
         player_id = rooms.upsert_player(connection, body.display_name, body.email,
-                                        EMAIL_SALT, _player_or_none(request, connection))
+                                        EMAIL_SALT, body.recovery_code,
+                                        _player_or_none(request, connection))
     response.set_cookie(
         COOKIE,
         identity.sign_token(player_id, SESSION_SECRET),
@@ -769,7 +791,8 @@ async def join(body: JoinRequest, request: Request, response: Response):
     player = rooms.get_player(connection, player_id)
     return {"id": player_id,
             "display_name": player["display_name"],
-            "email": player["email_masked"]}
+            "email": player["email_masked"],
+            "recovery_code": player["recovery_code"]}
 
 
 @app.get("/api/players/me")
@@ -779,6 +802,9 @@ async def read_me(request: Request, player_id: int = Depends(current_player)):
     The seat comes back with the name because a phone asking who it is has
     almost always just been picked up again, and the first thing its owner
     wants to know is whether the match they walked away from is still on.
+
+    The recovery code is only useful alongside the address, so showing it to
+    its owner leaks nothing.
     """
     connection = request.app.state.conn
     player = rooms.get_player(connection, player_id)
@@ -786,6 +812,7 @@ async def read_me(request: Request, player_id: int = Depends(current_player)):
     return {"id": player_id,
             "display_name": player["display_name"],
             "email": player["email_masked"],
+            "recovery_code": player["recovery_code"],
             "room": dict(seat) if seat else None}
 
 
@@ -1667,9 +1694,21 @@ def _announce(fastapi_app, room, request=None):
 
 @contextmanager
 def _rules():
-    """Turn a rules violation into a 409 whose text a phone can show as-is."""
+    """Turn a rules violation into a 409 whose text a phone can show as-is.
+
+    NeedsRecoveryCode is located on recovery_code, not display_name, so it
+    answers in the shaped detail that api.js's blamed reads.
+    """
     try:
         yield
+    except rooms.NeedsRecoveryCode as claim:
+        raise HTTPException(
+            409,
+            detail={
+                "problems": ["that address is already registered here - enter its recovery code, or pick a different name"],
+                "field": "recovery_code"
+            }
+        ) from claim
     except rooms.RoomError as problem:
         raise HTTPException(409, str(problem)) from problem
 

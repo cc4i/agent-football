@@ -164,12 +164,33 @@ def _serving(fastapi_app):
 
 @pytest.fixture
 def phones(client):
-    """Drive several phones from one TestClient by swapping the cookie jar."""
+    """Drive several phones from one TestClient by swapping the cookie jar.
+
+    Under E1, a re-join without a cookie is a claim and needs the recovery code.
+    This fixture remembers codes automatically: a returning manager on a new phone
+    genuinely has their code, so a fixture that does not carry one is not modelling
+    a returning manager, it is modelling an attacker.
+    """
 
     class Phones:
-        def join(self, name, email):
+        def __init__(self):
+            self._codes = {}  # email -> recovery_code
+
+        def join(self, name, email, code=None):
+            """Join as a manager. Remembers recovery codes from successful joins.
+
+            Pass an explicit code to override (for testing wrong codes), or None
+            to use the remembered code for this address if one exists.
+            """
             client.cookies.clear()
-            client.post("/api/players", json={"display_name": name, "email": email})
+            if code is None and email:
+                code = self._codes.get(email, "")
+            resp = client.post("/api/players", json={"display_name": name, "email": email,
+                                                      "recovery_code": code or ""})
+            if resp.status_code == 200 and email:
+                data = resp.json()
+                if data.get("recovery_code"):
+                    self._codes[email] = data["recovery_code"]
             return dict(client.cookies)
 
         def use(self, jar):
@@ -179,6 +200,10 @@ def phones(client):
         def fresh(self):
             """A phone nobody has joined on. Joining reads the cookie now."""
             client.cookies.clear()
+
+        def forget(self, email):
+            """Forget the recovery code for this address, to test the attacker."""
+            self._codes.pop(email, None)
 
     return Phones()
 
