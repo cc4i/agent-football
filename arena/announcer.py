@@ -316,18 +316,27 @@ class Announcer:
         if state in self._clips:
             return self._clips[state]
         if state not in self._making:
-            self._making[state] = asyncio.ensure_future(self._make(state, podiums))
+            task = asyncio.ensure_future(self._make(state, podiums))
+            # Swallow the result to prevent "Task exception was never retrieved"
+            # if every waiter gives up before the generation completes.
+            task.add_done_callback(lambda _: None)
+            self._making[state] = task
+        # Two deadlines, bounding different things. The outer one here stops a
+        # screen from waiting forever if three different podiums are pressed in
+        # a minute - it bounds queue time plus generation time, which is what
+        # the person at the screen experiences. The inner one inside _make stops
+        # a hung model from holding the semaphore and starving every other press.
         # Shielded, so a screen that navigates away mid-generation cancels its
         # own wait and not everybody else's clip.
-        return await asyncio.shield(self._making[state])
+        try:
+            async with asyncio.timeout(SECONDS):
+                return await asyncio.shield(self._making[state])
+        except TimeoutError as slow:
+            raise Silent("the announcer took too long and was cut off") from slow
 
     async def _make(self, state, podiums):
         try:
             async with self._slot:
-                # Checked again inside the slot: a press that queued behind
-                # another may have been for a podium that has since been made.
-                if state in self._clips:
-                    return self._clips[state]
                 async with asyncio.timeout(SECONDS):
                     make = self._generate or _generate
                     pcm, words = await make(podiums)

@@ -337,3 +337,40 @@ async def test_a_failed_generation_is_not_remembered_as_a_clip():
         await talking.clip(PODIUMS)
     # The second press must be allowed to try again.
     assert (await talking.clip(PODIUMS)).seconds == 1.0
+
+
+async def test_two_waiters_on_a_failing_generation_both_receive_silent():
+    # The shield-plus-exception fan-out: a shared generation that fails must
+    # raise to every waiter, not just the first.
+    started = asyncio.Event()
+    holding = asyncio.Event()
+
+    async def broken(podiums):
+        started.set()
+        await holding.wait()
+        raise announcer.Silent("the model refused")
+
+    talking = announcer.Announcer(generate=broken)
+    first = asyncio.create_task(talking.clip(PODIUMS))
+    second = asyncio.create_task(talking.clip(PODIUMS))
+    await started.wait()
+    holding.set()
+    with pytest.raises(announcer.Silent):
+        await first
+    with pytest.raises(announcer.Silent):
+        await second
+
+
+async def test_the_semaphore_is_released_after_a_timeout(monkeypatch):
+    # A timeout that wedges the slot would starve every subsequent press.
+    monkeypatch.setattr(announcer, "SECONDS", 0.01)
+
+    async def forever(podiums):
+        await asyncio.sleep(5)
+
+    talking = announcer.Announcer(generate=forever)
+    with pytest.raises(announcer.Silent):
+        await talking.clip(PODIUMS)
+    # The second press must not be starved by the first.
+    with pytest.raises(announcer.Silent):
+        await talking.clip({**PODIUMS, "score_attack": [{"name": "Jo"}]})
