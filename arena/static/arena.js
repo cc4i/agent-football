@@ -59,6 +59,17 @@ const ASK_STANDS_MS = 60000;
 // What the two modes are called in a sentence. The arena says the same words.
 const MODE_WORDS = { solo: "score attack", versus: "head to head" };
 
+// What the room hears it at. The model speaks at a natural pace and a
+// shoutcaster does not, so the last quarter of the energy is put on here
+// rather than asked of the model.
+const RATE = 1.25;
+// A forty-four byte WAV with no samples in it. See `unlock`.
+const SILENCE = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEA"
+  + "RKwAAIhYAQACABAAZGF0YQAAAAA=";
+
+const speaker = el("announcement");
+let talking = false;
+
 let code = (params.get("room") || "").toUpperCase();
 let venue = { pitch_url: "" };
 let ours = null;            // this screen's own room, as the arena last told us
@@ -91,6 +102,9 @@ start();
 async function start() {
   try {
     venue = await get("/api/venue");
+    // The button exists only where it can work. A wall screen carrying a
+    // control that answers 503 is worse than one carrying no control.
+    el("announce").hidden = !venue.announcer;
     // Not awaited. Opening a room and drawing the lobby is what the person
     // standing in front of the screen is waiting on, and there is nothing for
     // centre court to show until the director has chosen something anyway.
@@ -1065,6 +1079,58 @@ async function chooseMode(mode) {
 
 for (const mode of ["solo", "versus"]) {
   el(`mode-${mode}`).addEventListener("click", () => chooseMode(mode));
+}
+
+el("announce").addEventListener("click", readTheBoard);
+speaker.addEventListener("ended", () => quiet());
+
+/**
+ * Read the standings to the room.
+ *
+ * `unlock()` runs before the first await on purpose, and the test in
+ * `test_announcing.py` holds it there. Generation takes seconds; by the time
+ * the clip arrives the click that started it is no longer a live gesture, and
+ * Safari will refuse to play audio outside one. Starting the element on
+ * something silent while the gesture is still ours is what buys the right to
+ * play the real thing later.
+ */
+async function readTheBoard() {
+  if (talking) return;
+  talking = true;
+  unlock();
+  live("Warming up");
+  try {
+    const clip = await post("/api/board/announcement");
+    await play(clip);
+  } catch (failure) {
+    quiet();
+    say(failure.message);
+  }
+}
+
+function unlock() {
+  speaker.src = SILENCE;
+  speaker.play().catch(() => {});
+}
+
+async function play(clip) {
+  speaker.src = clip.audio;
+  // Set after the src, because a browser that reloads the element on a source
+  // change takes the default rate with it.
+  speaker.playbackRate = RATE;
+  live("On air");
+  await speaker.play();
+}
+
+function live(what) {
+  el("announce").classList.add("live");
+  el("announce-say").textContent = what;
+}
+
+function quiet() {
+  talking = false;
+  el("announce").classList.remove("live");
+  el("announce-say").textContent = "Read the board";
 }
 
 // A thirteenth match is a real venue, and the twelve on the strip must not be

@@ -58,7 +58,20 @@
     <div class="pitch-stack">
       <div class="lobby-badge"><i></i><span id="badge">Waiting for a manager</span></div>
       <div class="seats" id="seats"></div>
-      <iframe class="board-frame" id="board" title="The standings" loading="lazy"></iframe>
+      <!-- The frame, and the two things that sit on top of it while the
+           announcer is talking. The button is out here rather than inside
+           `/board`, because the page in that frame is also what a phone opens
+           from home and a leaderboard that starts shouting in somebody's
+           pocket is a different product. -->
+      <div class="board-box">
+        <iframe class="board-frame" id="board" title="The standings" loading="lazy"></iframe>
+        <button class="mic-chip" id="announce" type="button" hidden>
+          <i></i><span id="announce-say">Read the board</span>
+          <b class="levels" aria-hidden="true"><s></s><s></s><s></s><s></s></b>
+        </button>
+        <p class="caption" id="caption" hidden></p>
+        <audio id="announcement" hidden></audio>
+      </div>
     </div>
 
     <!-- The heading, the blurb and the code under the QR all describe whichever

@@ -93,3 +93,34 @@ def test_a_button_held_down_is_refused_before_it_reaches_a_model(
         client, phones, finished, switched_on):
     codes = [client.post("/api/board/announcement").status_code for _ in range(app.ANNOUNCE_BURST + 2)]
     assert 429 in codes
+
+
+def test_the_button_is_not_rendered_before_the_venue_has_answered(client):
+    # Same rule the mode switch follows: a control that may not belong on this
+    # screen must not flash up and then vanish.
+    assert '<button class="mic-chip" id="announce" type="button" hidden>' \
+        in client.get("/arena").text
+
+
+def test_a_screen_with_no_announcer_never_shows_the_button(client):
+    js = client.get("/static/arena.js").text
+    assert "venue.announcer" in js
+
+
+def test_the_clip_is_played_faster_than_it_was_spoken(client):
+    js = client.get("/static/arena.js").text
+    assert "playbackRate" in js
+    assert "1.25" in js
+
+
+def test_the_element_is_unlocked_inside_the_gesture(client):
+    """The detail this feature dies on if it is dropped.
+
+    Generation takes seconds, so by the time the clip lands the click's
+    transient activation is gone and Safari refuses to play. The element has
+    to be started on something silent while the gesture is still live. If the
+    unlock ever moves below an await, this test is the thing that notices.
+    """
+    js = client.get("/static/arena.js").text
+    press = js.split("async function readTheBoard")[1].split("\n}")[0]
+    assert press.index("unlock()") < press.index("await")
