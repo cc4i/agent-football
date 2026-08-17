@@ -721,7 +721,11 @@ async def read_venue(request: Request):
     return {"pitch_url": PITCH_URL, "public_url": _origin(request),
             # So the big screen can leave the button out entirely rather than
             # render a control that answers 503.
-            "announcer": announcer.configured()}
+            "announcer": announcer.configured(),
+            # And the other half of that rule: there is nothing to announce
+            # until somebody is on the board, which is the state a venue opens
+            # in and spends its first half hour in.
+            "managers": board.managers(request.app.state.conn)}
 
 
 @app.post("/api/players")

@@ -31,6 +31,18 @@ def test_the_venue_says_it_is_on_when_it_is(client, switched_on):
     assert client.get("/api/venue").json()["announcer"] is True
 
 
+def test_the_venue_says_nobody_is_on_the_board_yet(client, switched_on):
+    # The other half of whether the chip belongs on the screen, and the state
+    # every evening opens in. The endpoint already refuses an empty board; this
+    # is what lets the screen not offer the press in the first place.
+    assert client.get("/api/venue").json()["managers"] == 0
+
+
+def test_the_venue_counts_the_first_manager_on_the_board(client, phones, finished,
+                                                         switched_on):
+    assert client.get("/api/venue").json()["managers"] == 1
+
+
 def test_an_unconfigured_venue_refuses_rather_than_pretends(client, monkeypatch):
     monkeypatch.setattr(announcer, "ENABLED", False)
     answer = client.post("/api/board/announcement")
@@ -171,6 +183,40 @@ def test_a_clip_that_errors_mid_playback_hands_everything_back(client):
     # The listener is an arrow function calling quiet(), like the ended listener.
     error_handler = js.split('addEventListener("error"')[1].split(";")[0]
     assert "quiet()" in error_handler
+
+
+@pytest.mark.e2e
+async def test_an_empty_board_carries_no_button_to_press(early_lobby_and_venue):
+    """The state every evening opens in, and the lobby's longest.
+
+    The endpoint has always refused this with a 409. What the screen did with
+    that refusal was put "nobody is on the board yet" into `#problem`, which
+    nothing clears until an operator pins a match or changes the mode - so one
+    press before the first whistle left a sentence on the wall for the evening.
+    """
+    page, _ = early_lobby_and_venue
+    assert await page.is_hidden("#announce")
+
+
+@pytest.mark.e2e
+async def test_the_button_arrives_with_the_first_manager_on_the_board(
+        early_lobby_and_venue):
+    """A screen up since before the first match still learns about the first one.
+
+    `/api/venue` is read once, on load, so the count it carries is stale the
+    moment somebody wins. The wall socket says so at every whistle, which is
+    the only thing that puts anybody on the board.
+    """
+    page, venue = early_lobby_and_venue
+    await venue.somebody_wins()
+    await page.wait_for_selector("#announce:not([hidden])", timeout=15_000)
+    # And it works: the chip is only worth showing if the press behind it does.
+    await page.click("#announce")
+    await page.wait_for_selector("#caption:not([hidden])", timeout=15_000)
+    # `#problem` carries the missing pitch bundle in this fixture and nothing
+    # ever clears it, which is the whole reason the chip must not be pressable
+    # before there is anything to announce.
+    assert "nothing to announce" not in await page.text_content("#problem")
 
 
 @pytest.mark.e2e

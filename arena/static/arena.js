@@ -69,6 +69,9 @@ const SILENCE = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEA"
 
 const speaker = el("announcement");
 let talking = false;
+// A re-read of the venue is in flight. Whistles arrive in bursts at a busy
+// venue and one answer settles the question for all of them.
+let counting = false;
 
 let code = (params.get("room") || "").toUpperCase();
 let venue = { pitch_url: "" };
@@ -102,9 +105,7 @@ start();
 async function start() {
   try {
     venue = await get("/api/venue");
-    // The button exists only where it can work. A wall screen carrying a
-    // control that answers 503 is worse than one carrying no control.
-    el("announce").hidden = !venue.announcer;
+    offerToRead();
     // Not awaited. Opening a room and drawing the lobby is what the person
     // standing in front of the screen is waiting on, and there is nothing for
     // centre court to show until the director has chosen something anyway.
@@ -464,7 +465,12 @@ function text(tag, className, words) {
  * be six reconnect loops and six copies of this code.
  */
 function wall(message) {
-  if (message.type === "wall") return roster(message.rooms || []);
+  if (message.type === "wall") {
+    // A whistle is both of these: a room leaving the roster, and somebody
+    // possibly arriving on the board for the first time this evening.
+    firstOnTheBoard();
+    return roster(message.rooms || []);
+  }
   if (message.type !== "wall.state") return;
   const room = live.get(message.code);
   if (!room) return;
@@ -1084,6 +1090,44 @@ for (const mode of ["solo", "versus"]) {
 el("announce").addEventListener("click", readTheBoard);
 speaker.addEventListener("ended", () => quiet());
 speaker.addEventListener("error", () => quiet());
+
+/**
+ * Whether the chip belongs on this screen at all.
+ *
+ * Two conditions, and the second is the one an evening starts on the wrong
+ * side of. A wall screen carrying a control that answers 503 is worse than one
+ * carrying no control; a wall screen carrying one that answers "nobody is on
+ * the board yet" is worse still, because that sentence lands in the page's one
+ * problem line and nothing clears it until an operator touches the screen.
+ */
+function offerToRead() {
+  el("announce").hidden = !(venue.announcer && venue.managers > 0);
+}
+
+/**
+ * The evening's first ranked result, which is when the chip earns its place.
+ *
+ * `/api/venue` is read once, on load, so a screen that has been up since
+ * before the first kick-off would otherwise hide the chip all evening. The
+ * wall carries a message at every kick-off and every whistle, and a whistle is
+ * the only thing that puts anybody on the board, so that is the moment to ask
+ * again.
+ *
+ * Asked only while the answer can still change. Nobody ever leaves the board,
+ * so the first yes is the last question this screen has to put.
+ */
+async function firstOnTheBoard() {
+  if (counting || !venue.announcer || venue.managers > 0) return;
+  counting = true;
+  try {
+    venue = await get("/api/venue");
+    offerToRead();
+  } catch (failure) {
+    if (!(failure instanceof Refused)) throw failure;
+  } finally {
+    counting = false;
+  }
+}
 
 /**
  * Read the standings to the room.

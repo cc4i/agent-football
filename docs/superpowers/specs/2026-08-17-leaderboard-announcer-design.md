@@ -319,9 +319,12 @@ Rate limiting reuses the token bucket in `arena/limits.py:25`, keyed by client
 IP, for the same reason the two other unauthenticated creating endpoints use
 it: on a public URL, a POST that costs money is an invitation.
 
-`/api/venue` (`arena/app.py:706`) gains `"announcer": true|false`. The lobby
-already fetches it at `arena/static/arena.js:93`, so the flag costs no round
-trip.
+`/api/venue` (`arena/app.py:706`) gains `"announcer": true|false` and
+`"managers": <count>`, the two halves of whether the chip belongs on the
+screen. The lobby already fetches it at `arena/static/arena.js:93`, so neither
+costs a round trip. The count goes stale the moment somebody wins, so the lobby
+reads it again on a wall message while it is still zero - a whistle is the only
+thing that puts anybody on the board, and nobody ever comes off it.
 
 ## Configuration
 
