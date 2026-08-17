@@ -1099,7 +1099,7 @@ async function readTheBoard() {
   if (talking) return;
   talking = true;
   unlock();
-  live("Warming up");
+  onAir("Warming up");
   try {
     const clip = await post("/api/board/announcement");
     await play(clip);
@@ -1117,7 +1117,7 @@ function unlock() {
 async function play(clip) {
   speaker.src = clip.audio;
   speaker.playbackRate = RATE;
-  live("On air");
+  onAir("On air");
   caption(clip.script.solo);
   steer("solo", true);
   // `switch_at` and `currentTime` are both on the media clock, which is the
@@ -1162,7 +1162,7 @@ function steer(which, hold) {
     { type: "board.show", board: which, pinned: hold }, location.origin);
 }
 
-function live(what) {
+function onAir(what) {
   el("announce").classList.add("live");
   el("announce-say").textContent = what;
 }

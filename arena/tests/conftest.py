@@ -483,3 +483,74 @@ async def wall_page(wall_server, fifty_live_rooms):
     # After the browser is shut, so a test that fails on its own terms fails on
     # its own terms. A wall runs all evening: a console error is a defect.
     assert not complaints, f"the wall logged errors: {complaints}"
+
+
+@pytest.fixture
+async def lobby_page(dsn, monkeypatch):
+    """A browser in front of an arena that has a lobby and a stocked board.
+
+    Not `wall_page`: that one fills the venue with fifty live matches, and a
+    screen showing football has no lobby and so no button.
+    """
+    import importlib
+    import rooms
+    from playwright.async_api import async_playwright
+
+    monkeypatch.setenv("ARENA_DB", dsn)
+    import app as app_module
+    import announcer
+    importlib.reload(app_module)
+
+    # Monkeypatch after the reload, otherwise the reload resets the module state
+    monkeypatch.setattr(announcer, "ENABLED", True)
+    monkeypatch.setattr(announcer, "API_KEY", "a-key")
+
+    async def generate(podiums):
+        # Two seconds of silence, so a real element really plays and really
+        # ends, without a test spending forty seconds listening to it.
+        return b"\x00\x00" * 48_000, {"solo": "one two three four",
+                                      "versus": "five six seven eight"}
+
+    monkeypatch.setattr(announcer, "_generate", generate)
+
+    with _serving(app_module.app) as url:
+        connect_grounds(app_module.app)
+
+        # Create a ranked match via HTTP and WebSocket, reusing `a_win()` for
+        # the event sequence.
+        async with httpx.AsyncClient(base_url=url, timeout=30) as phone:
+            await phone.post("/api/players",
+                            json={"display_name": "Alex Rivera", "email": "alex@example.com"})
+            opened = await phone.post("/api/rooms", json={"mode": "solo"})
+            code = opened.json()["code"]
+            await phone.post(f"/api/rooms/{code}/seats/blue",
+                            json={"philosophy": "high press"})
+            await phone.post(f"/api/rooms/{code}/seats/blue/ready", json={"ready": True})
+            await phone.post(f"/api/rooms/{code}/start")
+
+        physics = rooms.by_code(app_module.app.state.conn, code)["host_client_id"]
+        socket_url = url.replace("http://", "ws://", 1)
+        async with websockets.connect(f"{socket_url}/ws/rooms/{code}?client_id={physics}") as wire:
+            await wire.recv()
+            for kind, match_ms, payload in a_win():
+                await wire.send(json.dumps({"type": "host.event", "kind": kind,
+                                           "match_ms": match_ms, "payload": payload}))
+                await wire.recv()
+
+        async with async_playwright() as driving:
+            browser = await driving.chromium.launch(
+                args=["--autoplay-policy=no-user-gesture-required"])
+            page = await browser.new_page(viewport={"width": 1920, "height": 1080})
+            complaints = []
+            page.on("console", lambda note: _worth_complaining_about(note, complaints))
+            page.on("pageerror", lambda blew_up: complaints.append(str(blew_up)))
+            await page.goto(f"{url}/arena")
+            await page.wait_for_selector("#announce:not([hidden])", timeout=30_000)
+            yield page
+            await browser.close()
+
+    importlib.reload(app_module)
+    # The lobby tries to load centre court, which needs a built pitch. That
+    # error is not what the button tests, so filter it out.
+    real_complaints = [c for c in complaints if "viewer.js" not in c]
+    assert not real_complaints, f"the lobby logged errors: {real_complaints}"

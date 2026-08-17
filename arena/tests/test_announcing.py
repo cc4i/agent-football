@@ -171,3 +171,62 @@ def test_a_clip_that_errors_mid_playback_hands_everything_back(client):
     # The listener is an arrow function calling quiet(), like the ended listener.
     error_handler = js.split('addEventListener("error"')[1].split(";")[0]
     assert "quiet()" in error_handler
+
+
+@pytest.mark.e2e
+async def test_a_screen_reads_the_board_out_loud(lobby_page):
+    await lobby_page.click("#announce")
+    await lobby_page.wait_for_selector("#announce.live", timeout=10_000)
+    await lobby_page.wait_for_selector("#caption:not([hidden])", timeout=10_000)
+    assert "one two three four" in await lobby_page.text_content("#caption")
+
+    # The element is really given the clip, and really plays it.
+    assert await lobby_page.evaluate(
+        "() => document.querySelector('#announcement')?.playbackRate") == 1.25
+    await lobby_page.wait_for_function(
+        "() => { const a = document.querySelector('#announcement');"
+        "        return a && !a.paused && a.currentTime > 0; }", timeout=10_000)
+
+
+@pytest.mark.e2e
+async def test_the_frame_turns_over_and_then_gives_up_the_pin(lobby_page):
+    # Screenshot the lobby before pressing to check if the mic chip obscures anything
+    await lobby_page.screenshot(path="/tmp/lobby-with-button.png")
+
+    await lobby_page.click("#announce")
+    # Halfway through, the second half of the script is on screen and the
+    # frame is holding the head to head board up.
+    await lobby_page.wait_for_function(
+        "() => document.querySelector('#caption').textContent.includes('five six')",
+        timeout=20_000)
+    board = lobby_page.frame_locator("#board")
+    assert await board.locator("#tab-versus").get_attribute("aria-selected") == "true"
+
+    # And at the end everything is handed back.
+    await lobby_page.wait_for_selector("#announce:not(.live)", timeout=20_000)
+    assert await lobby_page.is_hidden("#caption")
+    assert await board.locator("#tick").is_visible()
+
+
+@pytest.mark.e2e
+async def test_a_press_can_land_before_the_frame_is_listening(lobby_page):
+    """A press as soon as the page allows must still pin the frame during the clip.
+
+    The button is unhidden after `start()` fetches `/api/venue`, but the board
+    iframe's message listener is installed when `board.js` loads. If a press
+    lands between those two, the pin message is dropped and the frame slides
+    away mid-sentence. An unattended wall screen is the worst place for that.
+    """
+    # Click immediately when the button appears, racing the frame's load
+    await lobby_page.click("#announce")
+    # The frame is pinned during playback
+    await lobby_page.wait_for_selector("#caption:not([hidden])", timeout=10_000)
+    board = lobby_page.frame_locator("#board")
+    # The solo tab is selected and held
+    assert await board.locator("#tab-solo").get_attribute("aria-selected") == "true"
+    # And the tick is hidden while pinned
+    assert await board.locator("#tick").is_hidden()
+
+    # After the clip, the frame unpins and cycles again
+    await lobby_page.wait_for_selector("#announce:not(.live)", timeout=20_000)
+    assert await board.locator("#tick").is_visible()
