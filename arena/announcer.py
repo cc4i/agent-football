@@ -15,10 +15,15 @@ reaches Vertex, and off unless configured for the same reason. A wall screen
 carrying a button that cannot work is worse than one carrying no button.
 """
 
+import base64
 import hashlib
 import io
 import json
+import logging
+import os
 import wave
+
+import httpx
 
 # Bumped by hand whenever a prompt below changes. It is inside the
 # fingerprint, so moving it retires every clip the old wording produced
@@ -89,3 +94,175 @@ def as_wav(pcm):
 def seconds(pcm):
     """How long these samples take to play at 1x, on the media clock."""
     return len(pcm) / (SAMPLE_RATE * SAMPLE_BYTES)
+
+
+logger = logging.getLogger(__name__)
+
+# On at a deployed venue, and off anywhere it has not been asked for: a
+# laptop, a test run, CI. Reading the board out loud costs money and makes a
+# noise, so it is opted into rather than inherited by starting up.
+ENABLED = os.environ.get("ARENA_ANNOUNCER") == "1"
+
+PROJECT = os.environ.get("GOOGLE_CLOUD_PROJECT", "")
+API_KEY = os.environ.get("GEMINI_API_KEY", "")
+
+# Regional, not global. Speech models are served from a region the way the
+# embedding model is and unlike the image model, and `global` answers 404.
+LOCATION = os.environ.get("ARENA_ANNOUNCER_LOCATION", "us-central1")
+
+# Deliberately not the chain's `gemini-3.5-flash-lite`. A different base model
+# is a different quota bucket, so a room enjoying the announcer cannot take
+# slots away from managers shouting at their squads.
+SCRIPT_MODEL = os.environ.get("ARENA_ANNOUNCER_MODEL", "gemini-3.6-flash")
+TTS_MODEL = os.environ.get("ARENA_TTS_MODEL", "gemini-3.1-flash-tts-preview")
+VOICE = os.environ.get("ARENA_TTS_VOICE", "Puck")
+
+# Speech synthesis of forty seconds of audio, and the script call before it.
+# `intent.py` waits five for an embedding, which is right there and far too
+# short here.
+TIMEOUT = httpx.Timeout(30.0)
+
+
+class Silent(Exception):
+    """No clip could be made. The text is fit for a screen to show."""
+
+
+def configured():
+    """Whether this can run at all: asked for, and with somewhere to call."""
+    return bool(ENABLED and (PROJECT or API_KEY))
+
+
+SHOUTCASTER = """\
+You are an over-the-top, high-octane esports shoutcaster live on stage at a
+futsal tournament, reading the leaderboard to a room full of people.
+
+Take the two boards below and write ONE announcement covering both.
+
+RULES
+1. Length. 120 to 135 words in total, split roughly 60/40 across the two
+   boards. Count them. Words are the only length instruction here.
+2. Dynamic adaptation. Compare the numbers and say what they mean. A gap of
+   one point, a leader who has not lost, somebody knocked off the top, a goal
+   in the first minute, a manager whose shouts actually worked. Never read the
+   table out.
+3. Build. Third place gets a clause, second gets a sentence, first gets the
+   roof coming off. Twice, once per board.
+4. Audio cues. [excitedly], [gasp], [pause], six to eight in total across the
+   whole script, and ALL CAPS on the names and numbers you want hit hard.
+5. Names. Say a gamertag the way a person would: "xX_Hero_Xx" is "Hero".
+   Never speak punctuation or underscores.
+6. Numbers. Spelled out. FORTY-ONE, not 41.
+7. If a board has fewer than three managers, cover who is there and spend the
+   words you save on the other board.
+
+`solo` is the score attack board, against the house side. `versus` is manager
+against manager. Return only the JSON."""
+
+# Google's documented shape for this model: who is talking, where they are,
+# and how to play it.
+DIRECTION = """\
+Audio profile: a male esports shoutcaster, mid-thirties, hand mic, big room.
+Scene: a packed futsal venue, the leaderboard on the screen behind you.
+Director's notes: high energy from the first word, tempo and pitch climbing
+into each number one. Hit the words in capitals. Honour the bracketed cues.
+Say this: """
+
+
+async def script(podiums, call=None):
+    """The two boards as something worth listening to, in two halves.
+
+    Split rather than one string because the halves are what the screen shows
+    as captions and what tells it when to turn the board over.
+    """
+    call = call or _post
+    answer = await call(SCRIPT_MODEL, {
+        "systemInstruction": {"parts": [{"text": SHOUTCASTER}]},
+        "contents": [{"role": "user",
+                      "parts": [{"text": json.dumps(podiums, default=str)}]}],
+        "generationConfig": {
+            "responseMimeType": "application/json",
+            "responseSchema": {
+                "type": "OBJECT",
+                "properties": {"solo": {"type": "STRING"},
+                               "versus": {"type": "STRING"}},
+                "required": ["solo", "versus"],
+            },
+        },
+    })
+    try:
+        words = json.loads(_part(answer)["text"])
+        return {"solo": str(words["solo"]), "versus": str(words["versus"])}
+    except (KeyError, IndexError, TypeError, ValueError) as nonsense:
+        # A schema makes this unlikely rather than impossible, and a screen
+        # that says nothing is a better failure than one that plays a
+        # stack trace.
+        raise Silent("the announcer could not think of anything to say") from nonsense
+
+
+async def speak(words, call=None):
+    """One take of that script, as raw samples. Puck, unless told otherwise."""
+    call = call or _post
+    answer = await call(TTS_MODEL, {
+        # One field, not two: Vertex concatenates the direction and the script
+        # for this model rather than taking them separately.
+        "contents": [{"role": "user", "parts": [{"text": f"{DIRECTION}{words}"}]}],
+        "generationConfig": {
+            "responseModalities": ["AUDIO"],
+            "speechConfig": {
+                "voiceConfig": {"prebuiltVoiceConfig": {"voiceName": VOICE}}},
+        },
+    })
+    try:
+        return base64.b64decode(_part(answer)["inlineData"]["data"])
+    except (KeyError, IndexError, TypeError, ValueError) as nothing:
+        raise Silent("the announcer lost its voice") from nothing
+
+
+def _part(answer):
+    """The one part of the one candidate every answer here has."""
+    return answer["candidates"][0]["content"]["parts"][0]
+
+
+async def _reach(model, token=None):
+    """Where to send this, and what to send with it.
+
+    Two ways in, decided by what is set. A deployed venue has a service
+    account and no metadata-free way of proving it, so it takes a token off
+    the metadata server the way `intent.py` does. A laptop has a key and no
+    metadata server at all, which is the case `intent.py` never had to serve
+    and the reason this one does: a feature judged by ear that can only be
+    heard in production is a feature nobody will ever tune.
+    """
+    if API_KEY:
+        return (f"https://generativelanguage.googleapis.com/v1beta/models/"
+                f"{model}:generateContent",
+                {"x-goog-api-key": API_KEY})
+    fetched = await (token or _token)()
+    return (f"https://{LOCATION}-aiplatform.googleapis.com/v1/projects/{PROJECT}"
+            f"/locations/{LOCATION}/publishers/google/models/{model}"
+            f":generateContent",
+            {"Authorization": f"Bearer {fetched}"})
+
+
+async def _token():
+    """An access token from the instance's metadata server."""
+    async with httpx.AsyncClient(timeout=TIMEOUT) as http:
+        reply = await http.get(
+            "http://metadata.google.internal/computeMetadata/v1/"
+            "instance/service-accounts/default/token",
+            headers={"Metadata-Flavor": "Google"})
+        reply.raise_for_status()
+        return reply.json()["access_token"]
+
+
+async def _post(model, body):
+    """One generateContent, or a silence with a reason attached."""
+    try:
+        url, headers = await _reach(model)
+        async with httpx.AsyncClient(timeout=TIMEOUT) as http:
+            reply = await http.post(url, headers=headers, json=body)
+            reply.raise_for_status()
+            return reply.json()
+    except httpx.HTTPError as problem:
+        logger.warning("the announcer could not reach %s: %s", model, problem)
+        raise Silent("the announcer could not be reached") from problem

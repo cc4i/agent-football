@@ -1,7 +1,11 @@
 """The standings turned into something worth listening to."""
 
+import base64
 import io
+import json
 import wave
+
+import pytest
 
 import announcer
 
@@ -68,3 +72,147 @@ def test_raw_pcm_becomes_a_file_a_browser_will_play():
 def test_a_clips_length_is_read_off_its_samples():
     assert announcer.seconds(b"\x00\x01" * 24_000) == 1.0
     assert announcer.seconds(b"") == 0.0
+
+
+PODIUMS = {"score_attack": [{"name": "Alex Rivera", "points": 41}],
+           "head_to_head": [{"name": "Sam Okafor", "won": 5}]}
+
+
+def a_script(text=None):
+    """What Vertex answers a script call with."""
+    said = text or {"solo": "ALEX with FORTY-ONE!", "versus": "SAM, UNBEATEN!"}
+    return {"candidates": [{"content": {"parts": [{"text": json.dumps(said)}]}}]}
+
+
+def some_audio(pcm=b"\x00\x01" * 100):
+    """What Vertex answers a speech call with: base64 PCM, no header."""
+    return {"candidates": [{"content": {"parts": [
+        {"inlineData": {"mimeType": "audio/L16;rate=24000",
+                        "data": base64.b64encode(pcm).decode()}}]}}]}
+
+
+def recorder(answer):
+    """A stand-in for the model that keeps what it was asked."""
+    seen = {}
+
+    async def call(model, body):
+        seen["model"] = model
+        seen["body"] = body
+        return answer
+
+    return call, seen
+
+
+def test_off_when_nobody_asked_for_it(monkeypatch):
+    monkeypatch.setattr(announcer, "ENABLED", False)
+    monkeypatch.setattr(announcer, "PROJECT", "a-project")
+    assert not announcer.configured()
+
+
+def test_off_when_there_is_nowhere_to_call(monkeypatch):
+    monkeypatch.setattr(announcer, "ENABLED", True)
+    monkeypatch.setattr(announcer, "PROJECT", "")
+    monkeypatch.setattr(announcer, "API_KEY", "")
+    assert not announcer.configured()
+
+
+def test_a_laptop_with_a_key_can_hear_it(monkeypatch):
+    monkeypatch.setattr(announcer, "ENABLED", True)
+    monkeypatch.setattr(announcer, "PROJECT", "")
+    monkeypatch.setattr(announcer, "API_KEY", "a-key")
+    assert announcer.configured()
+
+
+async def test_the_script_call_asks_for_json_it_can_rely_on():
+    call, seen = recorder(a_script())
+    await announcer.script(PODIUMS, call=call)
+    config = seen["body"]["generationConfig"]
+    assert config["responseMimeType"] == "application/json"
+    assert config["responseSchema"]["required"] == ["solo", "versus"]
+    assert seen["model"] == announcer.SCRIPT_MODEL
+
+
+async def test_the_script_call_carries_the_word_budget_and_the_boards():
+    call, seen = recorder(a_script())
+    await announcer.script(PODIUMS, call=call)
+    instruction = seen["body"]["systemInstruction"]["parts"][0]["text"]
+    # A word budget and not a duration: the model can count words and has
+    # never heard itself speak.
+    assert "120 to 135 words" in instruction
+    assert "seconds" not in instruction.split("Length.")[1].split("\n")[0]
+    assert "Alex Rivera" in seen["body"]["contents"][0]["parts"][0]["text"]
+
+
+async def test_a_script_comes_back_in_two_halves():
+    call, _ = recorder(a_script())
+    words = await announcer.script(PODIUMS, call=call)
+    assert words == {"solo": "ALEX with FORTY-ONE!", "versus": "SAM, UNBEATEN!"}
+
+
+async def test_a_script_that_is_not_json_is_a_silence_not_a_crash():
+    async def rambled(model, body):
+        return {"candidates": [{"content": {"parts": [{"text": "Sure! Here you go:"}]}}]}
+
+    with pytest.raises(announcer.Silent):
+        await announcer.script(PODIUMS, call=rambled)
+
+
+async def test_the_speech_call_asks_for_audio_in_the_venues_voice(monkeypatch):
+    monkeypatch.setattr(announcer, "VOICE", "Puck")
+    call, seen = recorder(some_audio())
+    await announcer.speak("ALEX with FORTY-ONE!", call=call)
+    config = seen["body"]["generationConfig"]
+    assert config["responseModalities"] == ["AUDIO"]
+    assert (config["speechConfig"]["voiceConfig"]["prebuiltVoiceConfig"]["voiceName"]
+            == "Puck")
+    # The TTS model ignores these, so sending them is noise on the wire.
+    assert "temperature" not in config
+    assert seen["model"] == announcer.TTS_MODEL
+
+
+async def test_the_direction_is_prefixed_to_the_script():
+    # Vertex concatenates prompt and text into one `contents` field for this
+    # model rather than taking them separately.
+    call, seen = recorder(some_audio())
+    await announcer.speak("ALEX with FORTY-ONE!", call=call)
+    sent = seen["body"]["contents"][0]["parts"][0]["text"]
+    assert sent.startswith("Audio profile:")
+    assert sent.endswith("ALEX with FORTY-ONE!")
+
+
+async def test_speech_comes_back_as_samples():
+    call, _ = recorder(some_audio(b"\x02\x03" * 50))
+    assert await announcer.speak("anything", call=call) == b"\x02\x03" * 50
+
+
+async def test_a_refusal_with_no_audio_in_it_is_a_silence():
+    async def refused(model, body):
+        return {"candidates": [{"content": {"parts": [{"text": "I cannot do that"}]}}]}
+
+    with pytest.raises(announcer.Silent):
+        await announcer.speak("anything", call=refused)
+
+
+async def test_a_deployed_venue_calls_vertex_in_its_region(monkeypatch):
+    monkeypatch.setattr(announcer, "API_KEY", "")
+    monkeypatch.setattr(announcer, "PROJECT", "a-project")
+    monkeypatch.setattr(announcer, "LOCATION", "us-central1")
+
+    async def token():
+        return "a-token"
+
+    url, headers = await announcer._reach("a-model", token=token)
+    assert url.startswith("https://us-central1-aiplatform.googleapis.com/v1/projects/a-project")
+    assert url.endswith("publishers/google/models/a-model:generateContent")
+    assert headers["Authorization"] == "Bearer a-token"
+
+
+async def test_a_laptop_calls_the_api_with_its_key(monkeypatch):
+    monkeypatch.setattr(announcer, "API_KEY", "a-key")
+    monkeypatch.setattr(announcer, "PROJECT", "a-project")
+    url, headers = await announcer._reach("a-model")
+    # The key wins where both are set, because the only reason to have one on
+    # a machine that also has a project is to be testing with it.
+    assert url == ("https://generativelanguage.googleapis.com/v1beta/models/"
+                   "a-model:generateContent")
+    assert headers["x-goog-api-key"] == "a-key"
