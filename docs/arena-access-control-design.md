@@ -165,7 +165,10 @@ current behaviour exactly. The only thing that stops working is
 
 ## Files
 
-`arena/proxy.py`, `arena/tests/test_proxy.py`. Nothing else.
+`arena/proxy.py`, `arena/tests/test_proxy.py`, `arena/tests/test_limits.py`. Pinning
+the create-session path to LAB_USER is mandated by the allowlist, so the two tests
+in `test_limits.py` that asserted the caller's segment reached the coach had to move
+with it.
 
 ---
 

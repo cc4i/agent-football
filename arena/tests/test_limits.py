@@ -232,14 +232,16 @@ def test_user_segment_must_match_pattern(client):
 
 
 def test_valid_user_segments_are_allowed(client, coach_calls):
-    # arena, user, alphanumerics, underscores and hyphens are all fine.
-    # The proxy now pins the userId to LAB_USER instead of forwarding the
-    # caller's segment, so all calls land on the same user path.
+    """The segments pass _USER_PATTERN but all forward to LAB_USER.
+
+    No longer tests that each segment reaches the coach at the path it names,
+    because the proxy pins userId to LAB_USER. This now only proves _USER_PATTERN
+    accepts alphanumerics, underscores and hyphens.
+    """
     for user in ["arena", "user", "test_user", "test-user", "user123"]:
         coach_calls.clear()
         reply = client.post(f"/api-apps/agents/users/{user}/sessions", json={})
         assert reply.status_code == 200, f"user={user} should be allowed"
-        # All sessions now go to LAB_USER, not the caller's segment.
         assert coach_calls == ["/apps/agents/users/lab/sessions"]
 
 

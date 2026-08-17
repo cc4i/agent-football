@@ -63,6 +63,7 @@ LAB_USER = "lab"
 # the cap stops a caller forging an unbounded body.
 MAX_TEXT_PARTS = 8
 MAX_PART_LENGTH = 2000
+MAX_SESSION_ID = 64
 
 
 def _make_client(base_url, timeout):
@@ -109,11 +110,10 @@ def _allowlist_session_body(caller_body):
             caller_team = state.get("team")
             if caller_team == "red":
                 team = "red"
-            # Warn if the caller sent a non-null state-writing field.
-            for key in state:
-                if key not in ("room_code", "team") and state[key] is not None:
-                    logger.warning("dropped non-null state key %s from session create", key)
-        # Warn if events array was sent.
+            dropped = sum(1 for key in state
+                         if key not in ("room_code", "team") and state[key] is not None)
+            if dropped > 0:
+                logger.warning("dropped %d non-null state keys from session create", dropped)
         if "events" in caller_body and caller_body["events"]:
             logger.warning("dropped events array from session create")
     return {"state": {"room_code": codes.WORKSHOP, "team": team}}
@@ -133,22 +133,24 @@ def _allowlist_run_body(caller_body):
     session_id = ""
     parts = []
     streaming = False
+    non_text_parts_dropped = 0
 
     if isinstance(caller_body, dict):
-        session_id = caller_body.get("sessionId", "")
+        raw_session_id = caller_body.get("sessionId")
+        if isinstance(raw_session_id, str):
+            session_id = raw_session_id[:MAX_SESSION_ID]
         streaming = bool(caller_body.get("streaming"))
 
-        # Warn if stateDelta was sent with a non-null value.
-        if "stateDelta" in caller_body and caller_body["stateDelta"] is not None:
+        if (("stateDelta" in caller_body or "state_delta" in caller_body) and
+            (caller_body.get("stateDelta") is not None or
+             caller_body.get("state_delta") is not None)):
             logger.warning("dropped non-null stateDelta from /run_sse")
 
-        # Warn if other state-writing fields sent.
-        if "functionCallEventId" in caller_body:
+        if "functionCallEventId" in caller_body or "function_call_event_id" in caller_body:
             logger.warning("dropped functionCallEventId from /run_sse")
-        if "invocationId" in caller_body:
+        if "invocationId" in caller_body or "invocation_id" in caller_body:
             logger.warning("dropped invocationId from /run_sse")
 
-        # Rebuild newMessage keeping only text parts.
         new_message = caller_body.get("newMessage")
         if isinstance(new_message, dict):
             caller_parts = new_message.get("parts", [])
@@ -158,8 +160,11 @@ def _allowlist_run_body(caller_body):
                         text = part["text"]
                         if isinstance(text, str) and text:
                             parts.append({"text": text[:MAX_PART_LENGTH]})
-                    elif isinstance(part, dict) and any(k in part for k in ["fileData", "functionResponse", "functionCall", "toolCall", "toolResponse", "codeExecutionResult", "executableCode", "inlineData", "mediaResolution", "thought", "thoughtSignature", "videoMetadata"]):
-                        logger.warning("dropped non-text part from newMessage: %s", list(part.keys()))
+                    elif isinstance(part, dict):
+                        non_text_parts_dropped += 1
+
+    if non_text_parts_dropped > 0:
+        logger.warning("dropped %d non-text parts from newMessage", non_text_parts_dropped)
 
     return {
         "appName": coach.COACH_APP,
@@ -188,7 +193,7 @@ async def open_session(user: str, request: Request):
         raise HTTPException(429, "slow down a moment and try that again")
     raw = await _body(request)
     try:
-        caller_body = await request.json()
+        caller_body = raw and len(raw) > 0 and __import__("json").loads(raw) or {}
     except Exception:
         caller_body = {}
     allowlisted = _allowlist_session_body(caller_body)
@@ -224,7 +229,7 @@ async def run(request: Request):
         raise HTTPException(429, "slow down a moment and try that again")
     raw = await _body(request)
     try:
-        caller_body = await request.json()
+        caller_body = raw and len(raw) > 0 and __import__("json").loads(raw) or {}
     except Exception:
         caller_body = {}
     allowlisted = _allowlist_run_body(caller_body)

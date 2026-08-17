@@ -398,7 +398,9 @@ def test_events_array_dropped_on_create_session(client, monkeypatch):
             "state": {"team": "blue"}}
     reply = client.post("/api-apps/agents/users/user/sessions", json=body)
     assert reply.status_code == 200
-    assert "events" not in received[0]
+    forwarded = received[0]
+    assert set(forwarded.keys()) == {"state"}
+    assert "events" not in forwarded
 
 
 def test_state_delta_dropped_on_run_sse(client, monkeypatch):
@@ -427,7 +429,9 @@ def test_state_delta_dropped_on_run_sse(client, monkeypatch):
             "newMessage": {"role": "user", "parts": [{"text": "attack"}]}}
     response = client.post("/run_sse", json=body)
     assert response.status_code == 200
-    assert "stateDelta" not in received[0]
+    forwarded = received[0]
+    assert set(forwarded.keys()) == {"appName", "userId", "sessionId", "newMessage", "streaming"}
+    assert "stateDelta" not in forwarded
 
 
 def test_non_text_parts_dropped(client, monkeypatch):
@@ -603,8 +607,181 @@ def test_lab_current_body_works_end_to_end(client, monkeypatch):
     }
     run_reply = client.post("/run_sse", json=run_body)
     assert run_reply.status_code == 200
-    # stateDelta dropped silently when null.
     forwarded = received[-1]
     assert "stateDelta" not in forwarded
+    assert set(forwarded.keys()) == {"appName", "userId", "sessionId", "newMessage", "streaming"}
     assert forwarded["newMessage"]["parts"][0]["text"] == "make them fast"
     assert forwarded["streaming"] is True
+
+
+def test_malformed_json_answers_without_500(client, monkeypatch):
+    """NaN, invalid JSON, and non-dict bodies send a fully synthetic body."""
+    received = []
+
+    async def fake_transport(request):
+        received.append(json.loads(request.content))
+        if str(request.url.path).endswith("/sessions"):
+            return httpx.Response(status_code=200, content=b'{"id": "session-id"}',
+                                headers={"content-type": "application/json"})
+        else:
+            from httpx._content import AsyncIteratorByteStream
+
+            async def stream_body():
+                yield b'data: {"event": "test"}\n\n'
+
+            return httpx.Response(
+                status_code=200,
+                headers={"content-type": "text/event-stream"},
+                stream=AsyncIteratorByteStream(stream_body()),
+            )
+
+    def fake_client(base_url, timeout):
+        return httpx.AsyncClient(transport=httpx.MockTransport(fake_transport), base_url=base_url)
+
+    monkeypatch.setattr("proxy._make_client", fake_client)
+
+    malformed_bodies = [
+        (b"", "empty"),
+        (b"not json", "not json"),
+        (b"null", "null"),
+        (b"[1,2,3]", "array"),
+        (b'"str"', "string"),
+        (b"42", "number"),
+        (b'{"state": {', "incomplete"),
+        (b'{"sessionId": NaN}', "NaN"),
+        (b'{"sessionId": Infinity}', "Infinity"),
+        (b'{"sessionId": -Infinity}', "-Infinity"),
+        (b'{"sessionId": [NaN]}', "nested NaN"),
+        (b'{"deep": {"deeper": NaN}}', "deeply nested NaN"),
+    ]
+
+    for body, label in malformed_bodies:
+        received.clear()
+        session_reply = client.post("/api-apps/agents/users/user/sessions",
+                                   content=body,
+                                   headers={"Content-Type": "application/json"})
+        assert session_reply.status_code == 200, f"session create with {label} should not 500"
+        assert received[0] == {"state": {"room_code": "WRKS", "team": "blue"}}, \
+            f"session create with {label} should send synthetic body"
+
+        received.clear()
+        run_reply = client.post("/run_sse", content=body,
+                              headers={"Content-Type": "application/json"})
+        assert run_reply.status_code == 200, f"/run_sse with {label} should not 500"
+        forwarded = received[0]
+        assert forwarded["appName"] == "agents", f"/run_sse with {label} should pin appName"
+        assert forwarded["userId"] == "lab", f"/run_sse with {label} should pin userId"
+        assert forwarded["sessionId"] == "", f"/run_sse with {label} should default sessionId"
+        assert forwarded["newMessage"]["parts"] == [], f"/run_sse with {label} should have empty parts"
+        assert forwarded["streaming"] is False, f"/run_sse with {label} should default streaming"
+
+
+def test_non_red_teams_forward_blue(client, monkeypatch):
+    """Only the exact string "red" forwards red; everything else is blue."""
+    received = []
+
+    async def fake_transport(request):
+        received.append(json.loads(request.content))
+        return httpx.Response(status_code=200, content=b'{"id": "session-id"}',
+                            headers={"content-type": "application/json"})
+
+    def fake_client(base_url, timeout):
+        return httpx.AsyncClient(transport=httpx.MockTransport(fake_transport), base_url=base_url)
+
+    monkeypatch.setattr("proxy._make_client", fake_client)
+
+    non_red_teams = ["RED", "Blue", ["red"], 1, None, {"team": "red"}]
+    for team_value in non_red_teams:
+        received.clear()
+        body = {"state": {"team": team_value}}
+        reply = client.post("/api-apps/agents/users/user/sessions", json=body)
+        assert reply.status_code == 200
+        assert received[0]["state"]["team"] == "blue", \
+            f"team={team_value!r} should forward blue"
+
+
+def test_non_string_text_parts_dropped(client, monkeypatch):
+    """text must be a non-empty string, or the part is dropped."""
+    received = []
+
+    async def fake_transport(request):
+        received.append(json.loads(request.content))
+        from httpx._content import AsyncIteratorByteStream
+
+        async def stream_body():
+            yield b'data: {"event": "test"}\n\n'
+
+        return httpx.Response(
+            status_code=200,
+            headers={"content-type": "text/event-stream"},
+            stream=AsyncIteratorByteStream(stream_body()),
+        )
+
+    def fake_client(base_url, timeout):
+        return httpx.AsyncClient(transport=httpx.MockTransport(fake_transport), base_url=base_url)
+
+    monkeypatch.setattr("proxy._make_client", fake_client)
+
+    body = {
+        "sessionId": "abc",
+        "newMessage": {
+            "role": "user",
+            "parts": [
+                {"text": "kept"},
+                {"text": 123},
+                {"text": ["not a string"]},
+                {"text": {"dict": "not a string"}},
+                {"text": None},
+                {"text": ""},
+                {"text": "also kept"}
+            ]
+        }
+    }
+    response = client.post("/run_sse", json=body)
+    assert response.status_code == 200
+    forwarded = received[0]["newMessage"]["parts"]
+    assert len(forwarded) == 2
+    assert forwarded[0] == {"text": "kept"}
+    assert forwarded[1] == {"text": "also kept"}
+
+
+def test_mixed_text_and_non_text_part_forwards_only_text(client, monkeypatch):
+    """A part with both text and fileData forwards only the text."""
+    received = []
+
+    async def fake_transport(request):
+        received.append(json.loads(request.content))
+        from httpx._content import AsyncIteratorByteStream
+
+        async def stream_body():
+            yield b'data: {"event": "test"}\n\n'
+
+        return httpx.Response(
+            status_code=200,
+            headers={"content-type": "text/event-stream"},
+            stream=AsyncIteratorByteStream(stream_body()),
+        )
+
+    def fake_client(base_url, timeout):
+        return httpx.AsyncClient(transport=httpx.MockTransport(fake_transport), base_url=base_url)
+
+    monkeypatch.setattr("proxy._make_client", fake_client)
+
+    body = {
+        "sessionId": "abc",
+        "newMessage": {
+            "role": "user",
+            "parts": [
+                {"text": "honest text"},
+                {"text": "mixed", "fileData": {"fileUri": "gs://bucket/object"}},
+                {"text": "also mixed", "functionResponse": {"name": "tool", "response": {}}}
+            ]
+        }
+    }
+    response = client.post("/run_sse", json=body)
+    assert response.status_code == 200
+    forwarded = received[0]["newMessage"]["parts"]
+    assert len(forwarded) == 3
+    assert forwarded[0] == {"text": "honest text"}
+    assert forwarded[1] == {"text": "mixed"}
+    assert forwarded[2] == {"text": "also mixed"}
