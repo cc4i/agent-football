@@ -19,6 +19,8 @@ import psycopg
 from psycopg import conninfo, sql
 from psycopg.rows import dict_row
 
+import identity
+
 logger = logging.getLogger(__name__)
 
 # Local development over the Unix socket: no password, no port, no host. On
@@ -289,15 +291,17 @@ def _backfill_recovery_codes(connection):
     The code is stored in the clear deliberately. It has to be displayed to its
     owner on /home, so it cannot be hashed. It is not a password and must never
     grow into one.
-    """
-    import identity
 
+    This deploys onto a fresh database so managers who registered before this
+    change do not arise. An operator applying it to a populated database must
+    reissue codes with an UPDATE and tell people.
+    """
     needing = connection.execute(
         "SELECT id FROM player WHERE recovery_code IS NULL AND email_hash IS NOT NULL"
     ).fetchall()
     for row in needing:
         connection.execute(
-            "UPDATE player SET recovery_code = %s WHERE id = %s",
+            "UPDATE player SET recovery_code = %s WHERE id = %s AND recovery_code IS NULL",
             (identity.new_recovery_code(), row["id"])
         )
 

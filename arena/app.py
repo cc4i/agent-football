@@ -85,9 +85,10 @@ MAX_LIVE_ROOMS = int(os.environ.get("ARENA_MAX_LIVE_ROOMS", "120"))
 # is 180 rooms per three minutes against a hundred concurrent, and still a
 # script held to one room a second.
 #
-# Raising it costs abuse resistance and nothing else, which is why it is here
-# rather than removed: this endpoint takes no session, and keying it on one
-# would not help, since `POST /api/players` hands sessions to anybody who asks.
+# Raising the player rate costs abuse resistance: it is now the only fence in
+# front of recovery-code guessing (32^6 possibilities), and it is keyed on the
+# client IP. A venue behind one NAT is a single bucket shared by the whole
+# building, so a brute-forcer spends the budget legitimate joins need.
 PLAYER_RATE, PLAYER_BURST = 1.0, 120
 ROOM_RATE, ROOM_BURST = 1.0, 120
 
@@ -780,8 +781,8 @@ async def join(body: JoinRequest, request: Request, response: Response):
     connection = request.app.state.conn
     with _rules():
         player_id = rooms.upsert_player(connection, body.display_name, body.email,
-                                        EMAIL_SALT, body.recovery_code,
-                                        _player_or_none(request, connection))
+                                        EMAIL_SALT, recovery_code=body.recovery_code,
+                                        player_id=_player_or_none(request, connection))
     response.set_cookie(
         COOKIE,
         identity.sign_token(player_id, SESSION_SECRET),

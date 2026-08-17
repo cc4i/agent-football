@@ -38,7 +38,7 @@ def required_teams(mode):
     return ("blue",) if mode == "solo" else TEAMS
 
 
-def upsert_player(conn, display_name, email, salt, recovery_code="", player_id=None):
+def upsert_player(conn, display_name, email, salt, *, recovery_code="", player_id=None):
     """Insert or find a player, and give them the name they just typed.
 
     Which player this is, in order: the address if it names one, then the
@@ -143,6 +143,8 @@ def _code_matches(conn, player_id, submitted):
     A row with a NULL code matches nothing. The comparison is on bytes using
     hmac.compare_digest, like every other secret in this codebase.
     """
+    if not isinstance(submitted, str):
+        return False
     row = conn.execute("SELECT recovery_code FROM player WHERE id = %s",
                        (player_id,)).fetchone()
     if not row or row["recovery_code"] is None:
