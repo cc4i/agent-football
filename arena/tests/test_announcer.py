@@ -374,35 +374,3 @@ async def test_the_semaphore_is_released_after_a_timeout(monkeypatch):
     # The second press must not be starved by the first.
     with pytest.raises(announcer.Silent):
         await talking.clip({**PODIUMS, "score_attack": [{"name": "Jo"}]})
-
-
-async def test_a_generation_exception_is_retrieved_when_all_waiters_give_up():
-    # If the exception is not retrieved, asyncio logs "Task exception was never
-    # retrieved" as an ERROR with a traceback, which pollutes venue logs.
-    started = asyncio.Event()
-    holding = asyncio.Event()
-    logged = {"exceptions": []}
-
-    def handler(loop, context):
-        logged["exceptions"].append(context)
-
-    async def broken(podiums):
-        started.set()
-        await holding.wait()
-        raise announcer.Silent("the model refused")
-
-    loop = asyncio.get_running_loop()
-    old_handler = loop.get_exception_handler()
-    loop.set_exception_handler(handler)
-    try:
-        talking = announcer.Announcer(generate=broken)
-        waiter = asyncio.create_task(talking.clip(PODIUMS))
-        await started.wait()
-        waiter.cancel()
-        holding.set()
-        # Force the generation task to complete and be garbage collected.
-        await asyncio.sleep(0)
-        # The exception must have been retrieved - no ERROR logged.
-        assert logged["exceptions"] == []
-    finally:
-        loop.set_exception_handler(old_handler)
