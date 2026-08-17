@@ -4,8 +4,6 @@ E1 in the access-control design. An address may still bring a manager back to
 their own row. It may no longer do so on its own.
 """
 
-import hmac
-
 import identity
 import rooms
 
@@ -113,13 +111,56 @@ def test_an_address_still_outranks_somebody_else_s_cookie_given_the_code(client,
     assert borrowed.json()["id"] == alex
 
 
-def test_the_code_is_compared_in_constant_time(client, phones, conn):
-    # The design says hmac.compare_digest on bytes, like every other secret.
-    # This test verifies that a wrong code (but valid format) is refused, and
-    # the implementation uses constant-time comparison.
+def test_a_wrong_code_is_refused(client, phones, conn):
+    """Renamed from constant_time because that test only proves refusal.
+    The implementation uses hmac.compare_digest, but swapping for == keeps this green."""
     player(client, "Alex Rivera", "alex@example.com")
     phones.fresh()
-    # Wrong code, all from the alphabet, so it passes validation and reaches
-    # the comparison, which must be constant-time.
+    # Wrong code, all from the alphabet, so it passes validation and reaches the comparison.
     claim = player(client, "Alex Rivera", "alex@example.com", "ABCDEF")
     assert claim.status_code == 409
+
+
+def test_forgetting_a_code_models_the_attacker(client, phones):
+    """The forget() method exists so a test can model an attacker."""
+    phones.join("Alex Rivera", "alex@example.com")
+    phones.forget("alex@example.com")
+    phones.fresh()
+    # Without the code, the claim is refused.
+    claim = player(client, "Alex Rivera", "alex@example.com")
+    assert claim.status_code == 409
+
+
+def test_the_board_carries_no_address(client, finished):
+    """Board rows have no email field."""
+    boards = client.get("/api/board").json()
+    assert len(boards["solo"]) == 1
+    assert "email" not in boards["solo"][0]
+
+
+def test_room_snapshots_carry_no_address(client, phones):
+    """Seat snapshots have no email field."""
+    phones.join("Alex Rivera", "alex@example.com")
+    code = client.post("/api/rooms", json={"mode": "solo"}).json()["code"]
+    client.post(f"/api/rooms/{code}/seats/blue", json={"philosophy": "high press"})
+    snap = client.get(f"/api/rooms/{code}").json()
+    assert "email" not in snap["seats"]["blue"]
+
+
+def test_results_carry_no_address(client, finished):
+    """Result rows have no email field."""
+    result = client.get(f"/api/rooms/{finished}/result").json()
+    assert "email" not in result["results"]["blue"]
+
+
+def test_the_backfill_leaves_address_less_rows_with_null_code(conn):
+    """A row with no address can never be claimed and needs no code."""
+    import db
+    conn.execute(
+        "INSERT INTO player (display_name, email_hash, email_masked, created_at) "
+        "VALUES (%s, %s, %s, %s)",
+        ("Taylor Quinn", None, None, 1234567890.0))
+    conn.commit()
+    db.init_db(conn)
+    row = conn.execute("SELECT * FROM player WHERE display_name = 'Taylor Quinn'").fetchone()
+    assert row["recovery_code"] is None

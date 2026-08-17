@@ -174,7 +174,7 @@ def phones(client):
 
     class Phones:
         def __init__(self):
-            self._codes = {}  # email -> recovery_code
+            self._codes = {}  # normalized email -> recovery_code
 
         def join(self, name, email, code=None):
             """Join as a manager. Remembers recovery codes from successful joins.
@@ -183,14 +183,16 @@ def phones(client):
             to use the remembered code for this address if one exists.
             """
             client.cookies.clear()
-            if code is None and email:
-                code = self._codes.get(email, "")
+            normalized = email.strip().lower() if email else ""
+            if code is None and normalized:
+                code = self._codes.get(normalized, "")
             resp = client.post("/api/players", json={"display_name": name, "email": email,
                                                       "recovery_code": code or ""})
-            if resp.status_code == 200 and email:
+            assert resp.status_code == 200, f"join failed: {resp.status_code} {resp.text}"
+            if normalized:
                 data = resp.json()
                 if data.get("recovery_code"):
-                    self._codes[email] = data["recovery_code"]
+                    self._codes[normalized] = data["recovery_code"]
             return dict(client.cookies)
 
         def use(self, jar):
@@ -203,7 +205,7 @@ def phones(client):
 
         def forget(self, email):
             """Forget the recovery code for this address, to test the attacker."""
-            self._codes.pop(email, None)
+            self._codes.pop(email.strip().lower(), None)
 
     return Phones()
 

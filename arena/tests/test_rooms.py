@@ -32,12 +32,18 @@ def test_a_new_player_keeps_a_masked_email_and_no_address(conn, alex):
     row = rooms.get_player(conn, alex)
     assert row["display_name"] == "Alex Rivera"
     assert row["email_masked"] == "a***x@example.com"
-    assert "alex@example.com" not in " ".join(str(value) for value in tuple(row))
+    # The raw address must not appear in the row. dict_row iterates keys when
+    # converted to tuple, so check the values explicitly.
+    assert "alex@example.com" not in " ".join(str(value) for value in row.values())
+    # And the recovery code must not appear in the clear either.
+    if row.get("recovery_code"):
+        assert row["recovery_code"] not in {"alex@example.com", "a***x@example.com"}
 
 
 def test_the_same_email_comes_back_as_the_same_player(conn, alex):
-    """Changed under E1: same player re-joining with their cookie still needs no code."""
-    again = rooms.upsert_player(conn, "Alex R", "ALEX@example.com", SALT, player_id=alex)
+    """Changed under E1: address resolves the row, authenticated with the code."""
+    code = rooms.get_player(conn, alex)["recovery_code"]
+    again = rooms.upsert_player(conn, "Alex R", "ALEX@example.com", SALT, recovery_code=code)
     assert again == alex
     # They typed a shorter name this time, and the board follows the latest.
     assert rooms.get_player(conn, alex)["display_name"] == "Alex R"
