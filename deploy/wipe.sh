@@ -30,6 +30,10 @@
 
 set -euo pipefail
 
+# Newest last. `tac` is GNU and absent from the Mac this is run from; `tail -r`
+# is BSD and absent from the container images. awk is on both.
+reversed() { awk '{ held[NR] = $0 } END { for (i = NR; i > 0; i--) print held[i] }'; }
+
 : "${PROJECT:?set PROJECT}"
 : "${REGION:?set REGION}"
 NETWORK="${NETWORK:-default}"
@@ -78,23 +82,33 @@ gcloud run jobs describe wipe-venue --region="${REGION}" --project="${PROJECT}" 
 gcloud run jobs "${VERB}" wipe-venue --region="${REGION}" --project="${PROJECT}" \
     --image="${IMAGE}" \
     --network="${NETWORK}" --subnet="${SUBNET}" --vpc-egress=private-ranges-only \
-    --set-env-vars="^@^ARENA_DB=${ARENA_DB}@WIPE_APPLY=${APPLY}@WIPE_LIVE=${LIVE}@WIPE_B64=$(base64 < "${ROOT}/deploy/wipe_the_venue.py" | tr -d '\n')" \
+    `# A pipe as the separator, not the comma the tidy job uses and not the @` \
+    `# gcloud's own docs reach for: the DSN is postgresql://arena@host, so @` \
+    `# splits it in the middle of the credentials, and base64's alphabet is` \
+    `# A-Za-z0-9+/= so a pipe cannot turn up inside the script either.` \
+    --set-env-vars="^|^ARENA_DB=${ARENA_DB}|WIPE_APPLY=${APPLY}|WIPE_LIVE=${LIVE}|WIPE_B64=$(base64 < "${ROOT}/deploy/wipe_the_venue.py" | tr -d '\n')" \
     --set-secrets="PGPASSWORD=arena-db-password:latest" \
     --max-retries=0 --task-timeout=5m \
     --command=/app/.venv/bin/python \
     --args='^@^-c@import base64,os;exec(base64.b64decode(os.environ["WIPE_B64"]))' \
     >/dev/null
 
-gcloud run jobs execute wipe-venue --region="${REGION}" --project="${PROJECT}" --wait
+# The name is captured because the log below is filtered on it. Read back by
+# freshness instead, the counts printed are whichever run happened to be inside
+# the window - and on a tool that empties a venue, showing the previous run's
+# numbers as though they were this one's is the worst thing it could do.
+EXECUTION="$(gcloud run jobs execute wipe-venue --region="${REGION}" \
+    --project="${PROJECT}" --wait --format='value(metadata.name)')"
 
 # The job's stdout goes to Cloud Logging rather than to the execute above, so
 # the counts it printed are read back here rather than left for somebody to go
 # looking for.
-echo "--> What it did:"
+echo "--> What ${EXECUTION} did:"
 gcloud logging read \
-    'resource.type="cloud_run_job" AND resource.labels.job_name="wipe-venue"' \
-    --project="${PROJECT}" --limit=30 --format='value(textPayload)' --freshness=5m \
-    | tac
+    "resource.type=\"cloud_run_job\"
+     AND labels.\"run.googleapis.com/execution_name\"=\"${EXECUTION}\"" \
+    --project="${PROJECT}" --limit=40 --format='value(textPayload)' --freshness=1h \
+    | reversed
 
 if [ "$APPLY" = "1" ]; then
     echo

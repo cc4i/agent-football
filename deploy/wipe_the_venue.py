@@ -64,8 +64,16 @@ def _reach_the_arena():
     laptop running the file directly gets the *script's* directory instead,
     which is `deploy/`, so the imports below would fail on a machine where the
     modules are one directory over.
+
+    Which is also why `__file__` is asked for rather than used. The job does not
+    run this file, it `exec`s its text, and a string being exec'd has no
+    `__file__` at all -- reaching for one raised a NameError before the job had
+    counted a single row.
     """
-    arena = Path(__file__).resolve().parent.parent / "arena"
+    here = globals().get("__file__")
+    if not here:
+        return
+    arena = Path(here).resolve().parent.parent / "arena"
     if arena.is_dir() and str(arena) not in sys.path:
         sys.path.insert(0, str(arena))
 
