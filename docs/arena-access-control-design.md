@@ -467,3 +467,48 @@ leaving it out is a decision rather than an oversight.
 - **Review findings 4-7.** The physics token in the WebSocket query string, the
   session cookie's missing `Secure`, no CSP or `frame-ancestors`, and sessions
   that never expire. None lets a stranger manufacture points.
+
+---
+
+# Reviewed 2026-08-18, and cleared to build
+
+Checked claim by claim against the code and the installed ADK rather than read
+for plausibility. Everything checkable was accurate, including the line numbers
+and the field surface:
+
+| Claim | Verified against |
+|---|---|
+| Both proxied routes forward the caller's body verbatim | `arena/proxy.py:95`, `:120` - `content=raw` in both |
+| `state` and `events` on create-session, `state_delta` and `new_message` on `/run_sse` | the installed ADK's request models at `api_server.py:397`, `:400`, `:382`, `:380` - all four exactly where this document says |
+| A `Part` carries fourteen non-text kinds including `file_data` | `google.genai.types.Part.model_fields`, read from the venv; `FileData` is `display_name`/`file_uri`/`mime_type` as quoted |
+| The lab sends `stateDelta: null` and a room from its URL | `game/frontend/src/main.js:433-467` |
+| Pinning to `WRKS` puts the proxy out of reach of both boards | `arena/rooms.py:167` - `0 if code == codes.WORKSHOP else 1`, against `board.RANKED` |
+| An address outranks a cookie | `arena/rooms.py:52-54` |
+| A column and a boot-time backfill are the house pattern | `arena/db.py:148-153` and `_pull_apart_shared_names` at `:252` |
+| 32^6 for a six-character code | `codes.ALPHABET` is 32 characters |
+
+Two things to add, neither of which changes the plan.
+
+**The free-inference path survives C1, and that is now a deployment decision
+rather than a note.** Pinning the room stops the board being cheated; it does
+not stop a stranger spending the venue's Vertex quota through `/run_sse` and
+reading the stream back. The document defers this to the lab perimeter and says
+why. What it does not say is that a bound already exists: `COACH_RATE,
+COACH_BURST = 5.0, 60` (`arena/app.py:114`) meters both proxied routes at the
+instance, which is the honest unit for a venue behind one address. Five calls a
+second sustained is a real ceiling but not a small one, so anybody putting this
+on a public URL should know that is the number they are accepting.
+
+**The backfill mints codes that existing managers have no way to read.** A row
+with an address gets a code at boot, but a manager learns their code from
+`/home`, which needs their session. Somebody who registered before this change,
+lost their cookie, and comes back on a second phone is now locked out of the row
+they used to reach - the feature E1 exists to protect, removed for exactly the
+people who already used it. This is moot for a venue starting on a fresh
+database, which is the case this is first being deployed into, and that is why
+it is an amendment and not a blocker. It must be answered before this is applied
+to a database that already holds managers: either a reissue route, or an
+operator-run `UPDATE` and a way to tell people, or accepting that pre-change
+addresses stop working and saying so in the copy.
+
+Sequencing stands: C1 first, then E1.
