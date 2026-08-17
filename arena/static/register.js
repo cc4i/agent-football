@@ -28,6 +28,8 @@ const who = signup({
   nameHint: document.getElementById("name-hint"),
   email: document.getElementById("email"),
   emailHint: document.getElementById("email-hint"),
+  recoveryCode: document.getElementById("recovery-code"),
+  recoveryHint: document.getElementById("recovery-hint"),
   changed: ready,
 });
 
@@ -79,9 +81,40 @@ form.addEventListener("submit", async (event) => {
     sending = false;
     return ready();
   }
-  // Show the recovery code if they got one, before sending them on.
+  // Show the recovery code in the page if they got one.
   if (player.recovery_code) {
-    alert(`Your recovery code is ${player.recovery_code}. You'll need it to come back on another phone. You can see it any time on /home.`);
+    form.hidden = true;
+    const show = document.createElement("div");
+    show.className = "pscreen";
+
+    const title = Object.assign(document.createElement("h1"), {
+      className: "ptitle",
+      textContent: "You're on the board"
+    });
+    const intro = Object.assign(document.createElement("p"), {
+      className: "psub",
+      textContent: "Your recovery code is how you come back on another phone."
+    });
+    const codeBox = document.createElement("div");
+    codeBox.className = "recovery-code-display";
+    const code = Object.assign(document.createElement("span"), {
+      className: "mono code-large",
+      textContent: player.recovery_code
+    });
+    codeBox.appendChild(code);
+    const note = Object.assign(document.createElement("p"), {
+      className: "psub",
+      textContent: "You can see it any time on your home page."
+    });
+    const next = Object.assign(document.createElement("a"), {
+      className: "btn primary push",
+      href: "/home",
+      textContent: "See the rooms"
+    });
+
+    show.append(title, intro, codeBox, note, next);
+    document.body.appendChild(show);
+  } else {
+    location.assign("/home");
   }
-  location.assign("/home");
 });

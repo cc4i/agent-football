@@ -50,7 +50,11 @@ export function signup({ name, nameHint, email, emailHint, recoveryCode, recover
   email.addEventListener("input", () => aboutTheAddress(null));
 
   if (recoveryCode) {
-    recoveryCode.addEventListener("input", () => aboutTheCode(null));
+    recoveryCode.addEventListener("input", () => {
+      aboutTheCode(null);
+      // Recovery code can unblock a refused name: typing in it rechecks.
+      changed();
+    });
   }
 
   async function askAboutTheName() {
@@ -75,6 +79,11 @@ export function signup({ name, nameHint, email, emailHint, recoveryCode, recover
   function aboutTheName(trouble) {
     refused = Boolean(trouble);
     mark(name, nameHint, trouble);
+    // Add hint if name is taken: recovery code unblocks the button.
+    if (trouble && recoveryCode) {
+      const codeHint = "If this is you, enter your recovery code below.";
+      nameHint.textContent = `${trouble} ${codeHint}`;
+    }
     changed();
   }
 
@@ -114,7 +123,12 @@ export function signup({ name, nameHint, email, emailHint, recoveryCode, recover
     // A 409 with a located field goes to that box; one without is the name.
     if (failure.status === 409) {
       const boxes = failure.fields.map((field) => BOXES[field]).filter(Boolean);
-      if (boxes.length === 1) return boxes[0](failure.message);
+      if (boxes.length === 1 && boxes.length === failure.fields.length) {
+        return boxes[0](failure.message);
+      }
+      // The field was located but this page has no such box. Throw so the
+      // missing box cannot be silent.
+      if (failure.fields.length === 1 && !boxes.length) throw failure;
       return aboutTheName(failure.message);
     }
     const boxes = failure.fields.map((field) => BOXES[field]).filter(Boolean);
@@ -127,7 +141,9 @@ export function signup({ name, nameHint, email, emailHint, recoveryCode, recover
   return {
     /** True while the arena is holding a name against this form. */
     get refused() {
-      return refused;
+      // A taken name blocks the button unless the recovery code box has content.
+      // The arena judges whether it is the right code; this just unblocks submission.
+      return refused && !(recoveryCode && recoveryCode.value.trim());
     },
 
     /**
