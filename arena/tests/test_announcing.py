@@ -302,6 +302,33 @@ async def test_the_chip_stays_on_air_while_the_clip_is_being_made(lobby_and_venu
 
 
 @pytest.mark.e2e
+async def test_the_standings_hold_still_while_the_caption_talks_over_them(lobby_page):
+    """A caption in the flow was a sibling of a `flex:1` iframe, so the board
+    shrank when it appeared, shifted when the halves swapped and grew back when
+    it went: three jumps a clip, on a metre of wall screen.
+    """
+    frame = lobby_page.locator("#board")
+    still = await frame.bounding_box()
+
+    await lobby_page.click("#announce")
+    await lobby_page.wait_for_selector("#caption:not([hidden])", timeout=10_000)
+    assert await frame.bounding_box() == still
+    solo = await lobby_page.locator("#caption").bounding_box()
+
+    await lobby_page.wait_for_function(
+        "() => document.querySelector('#caption').textContent.includes('five six')",
+        timeout=20_000)
+    versus = await lobby_page.locator("#caption").bounding_box()
+    # Otherwise this proves nothing: two captions of the same height cannot
+    # move anything, however they are positioned.
+    assert solo["height"] != versus["height"], "the two halves must differ in height"
+    assert await frame.bounding_box() == still
+
+    await lobby_page.wait_for_selector("#announce:not(.live)", timeout=20_000)
+    assert await frame.bounding_box() == still
+
+
+@pytest.mark.e2e
 async def test_a_screen_reads_the_board_out_loud(lobby_page):
     await lobby_page.click("#announce")
     await lobby_page.wait_for_selector("#announce.live", timeout=10_000)
