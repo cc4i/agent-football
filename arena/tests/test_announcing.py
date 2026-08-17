@@ -1,5 +1,6 @@
 """The button on the big screen, and what answers it."""
 
+import asyncio
 import io
 import wave
 
@@ -217,6 +218,87 @@ async def test_the_button_arrives_with_the_first_manager_on_the_board(
     # ever clears it, which is the whole reason the chip must not be pressable
     # before there is anything to announce.
     assert "nothing to announce" not in await page.text_content("#problem")
+
+
+@pytest.mark.e2e
+async def test_a_clip_stops_when_the_screen_cuts_to_football(lobby_and_venue):
+    """Forty to ninety seconds of shoutcaster, and a kickoff anywhere in the
+    building takes the board off the screen in the middle of it.
+
+    The caption, the chip and the pin all live in the lobby and die with it.
+    The audio does not: left running it reads the standings over somebody's
+    match, with the captions in a hidden div and the frame pinned behind them
+    until the clip ends.
+    """
+    page, venue = lobby_and_venue
+    await page.click("#announce")
+    await page.wait_for_function(
+        "() => { const a = document.querySelector('#announcement');"
+        "        return a && !a.paused && a.currentTime > 0; }", timeout=15_000)
+
+    # Somebody kicks off, and the operator puts it on the big screen.
+    code = await venue.a_match_kicks_off()
+    await page.click(f'.tile[data-code="{code}"]', timeout=15_000)
+    await page.wait_for_selector("#lobby[hidden]", state="attached", timeout=15_000)
+
+    assert await page.evaluate(
+        "() => document.querySelector('#announcement').paused") is True
+    # And everything the clip was holding is handed back, so the lobby it
+    # comes back to is not still wearing the last announcement. Read off the
+    # attributes rather than off visibility: the whole lobby is hidden now, so
+    # nothing in it is visible whether it was handed back or not.
+    assert await page.get_attribute("#caption", "hidden") is not None
+    assert "live" not in (await page.get_attribute("#announce", "class"))
+    board = page.frame_locator("#board")
+    assert await board.locator("#tick").get_attribute("hidden") is None
+
+
+@pytest.mark.e2e
+async def test_a_clip_still_being_made_is_never_played_into_a_match(lobby_and_venue):
+    """The other half of the window, and the wider one: generation is most of a
+    minute, and a clip that arrives after the cut must be dropped rather than
+    started over the football.
+    """
+    page, venue = lobby_and_venue
+
+    async def unhurried(route):
+        await asyncio.sleep(2)
+        await route.continue_()
+
+    await page.route("**/api/board/announcement", unhurried)
+    await page.click("#announce")
+    code = await venue.a_match_kicks_off()
+    await page.click(f'.tile[data-code="{code}"]', timeout=15_000)
+    await page.wait_for_selector("#lobby[hidden]", state="attached", timeout=15_000)
+
+    # Long enough for the clip to have arrived and, unchecked, started.
+    await page.wait_for_timeout(3_000)
+    assert await page.evaluate(
+        "() => document.querySelector('#announcement').paused") is True
+    assert await page.evaluate(
+        "() => document.querySelector('#announcement').currentTime") == 0
+
+
+@pytest.mark.e2e
+async def test_the_chip_stays_on_air_while_the_clip_is_being_made(lobby_and_venue):
+    """Warming up is most of the minute this feature costs, and the whole of
+    what an unattended screen has to show for the press.
+
+    The unlock plays a WAV with no samples in it, which ends the instant it
+    starts. Answered as though that were the announcement ending, the chip fell
+    straight back to idle and a second press started a second generation.
+    """
+    page, _ = lobby_and_venue
+
+    async def unhurried(route):
+        await asyncio.sleep(2)
+        await route.continue_()
+
+    await page.route("**/api/board/announcement", unhurried)
+    await page.click("#announce")
+    await page.wait_for_timeout(1_000)
+    assert await page.text_content("#announce-say") == "Warming up"
+    assert "live" in (await page.get_attribute("#announce", "class"))
 
 
 @pytest.mark.e2e

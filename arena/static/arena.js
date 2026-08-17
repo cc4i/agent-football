@@ -69,6 +69,10 @@ const SILENCE = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEA"
 
 const speaker = el("announcement");
 let talking = false;
+// Which press this is. A clip takes most of a minute to make, and the screen
+// can cut to football in the middle of that: the number moves on, and the clip
+// that eventually arrives finds it has been left behind. See `hush`.
+let press = 0;
 // A re-read of the venue is in flight. Whistles arrive in bursts at a busy
 // venue and one answer settles the question for all of them.
 let counting = false;
@@ -884,6 +888,12 @@ function cutTo(wanted) {
   showing = wanted;
   lobby.hidden = Boolean(wanted);
   court.hidden = !wanted;
+  // Football has the screen, so the board has gone and with it the chip, the
+  // caption and everything the announcement was drawn in. The audio is the one
+  // part that does not die with the div: left running, a shoutcaster reads the
+  // standings over a match with the captions in a hidden element and the frame
+  // pinned behind it for the rest of the clip.
+  if (wanted) hush();
   // What is framed, said out loud in the DOM, for the test that drives fifty
   // matches past this screen.
   court.dataset.showing = wanted || "";
@@ -1088,8 +1098,14 @@ for (const mode of ["solo", "versus"]) {
 }
 
 el("announce").addEventListener("click", readTheBoard);
-speaker.addEventListener("ended", () => quiet());
-speaker.addEventListener("error", () => quiet());
+// The unlock plays a WAV with no samples in it, which ends the instant it
+// starts. That is not the announcement ending: answered as though it were, the
+// chip fell back to "Read the board" for the whole of a generation -- a minute
+// of a wall screen saying nothing is happening while it is -- and a second
+// press during it started a second one.
+const announcing = () => speaker.src !== SILENCE;
+speaker.addEventListener("ended", () => announcing() && quiet());
+speaker.addEventListener("error", () => announcing() && quiet());
 
 /**
  * Whether the chip belongs on this screen at all.
@@ -1142,15 +1158,35 @@ async function firstOnTheBoard() {
 async function readTheBoard() {
   if (talking) return;
   talking = true;
+  const mine = ++press;
   unlock();
   onAir("Warming up");
   try {
     const clip = await post("/api/board/announcement");
+    // The lobby went while this was being made. `hush` has already handed
+    // everything back; all that is left is not to start playing.
+    if (mine !== press) return;
     await play(clip);
   } catch (failure) {
     quiet();
     say(failure.message);
   }
+}
+
+/**
+ * Stop talking, at whatever stage the announcement had got to.
+ *
+ * Two states and both leave something behind if they are ignored. A clip that
+ * is playing goes on playing over the football; a clip still being generated
+ * arrives seconds later and starts playing into it. Pausing answers the first;
+ * moving `press` answers the second, because a generation cannot be stopped
+ * from here - only disowned.
+ */
+function hush() {
+  if (!talking) return;
+  press += 1;
+  speaker.pause();
+  quiet();
 }
 
 function unlock() {
