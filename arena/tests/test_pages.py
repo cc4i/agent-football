@@ -47,6 +47,42 @@ def test_a_room_that_closed_is_not_described_as_one_that_kicked_off(client):
     assert "That room is closed." in js
 
 
+def test_the_stylesheet_is_not_quietly_broken(client):
+    """An orphaned `*/` takes the rules after it down and says nothing.
+
+    CSS has no parse error a browser will show you. An unbalanced comment marker
+    swallows whatever follows until the parser finds something it can
+    resynchronise on, and the page renders with rules silently missing. This
+    file is heavily commented - the comments are most of its lines - so an edit
+    landing a stray marker mid-paragraph is the likeliest way to break it, and
+    it happened: two rules under one went unapplied, and the only reason it was
+    caught was somebody looking at a screenshot at that moment.
+
+    Cheap to check and cheap to run, which is the whole argument for it.
+    """
+    css = client.get("/static/app.css").text
+
+    inside, opened_at = False, 0
+    for marker in re.finditer(r"/\*|\*/", css):
+        if marker.group() == "/*":
+            # Comments do not nest in CSS, so a second one inside an open
+            # comment is text rather than a mistake.
+            if not inside:
+                inside, opened_at = True, marker.start()
+        else:
+            assert inside, (
+                f"an orphaned */ at character {marker.start()}, after: "
+                f"{css[max(0, marker.start() - 90):marker.start()]!r}")
+            inside = False
+    assert not inside, f"the comment opened at character {opened_at} never closes"
+
+    # And the rules themselves. A block left open runs the next selector into
+    # the one before it, which is the other way this file breaks quietly.
+    rules = re.sub(r"/\*.*?\*/", "", css, flags=re.DOTALL)
+    assert rules.count("{") == rules.count("}"), (
+        f"{rules.count('{')} open braces against {rules.count('}')} closing")
+
+
 def test_a_stale_code_says_so_rather_than_showing_a_form(client):
     # A QR photographed at last week's event should not open a form that
     # fails on submit. There is no room, so there is no page.

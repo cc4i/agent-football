@@ -206,19 +206,24 @@ function dress(snapshot) {
   // in the join card, and on the mini card when this screen is showing
   // somebody else's match. Not in the bar as well: a code a manager has no use
   // for is the largest thing in the corner of the room, and it was there twice.
-  el("code-2").textContent = snapshot.code;
   el("code-3").textContent = snapshot.code;
-  el("join-url").textContent = snapshot.join_url;
   el("board").src = "/board";
-
-  const qr = document.createElement("img");
-  qr.src = `/api/rooms/${snapshot.code}/qr.svg`;
-  qr.alt = `QR code for room ${snapshot.code}`;
-  el("qr").replaceChildren(qr);
-  // The rail's code is not this one's twin any more, so `wayIn` draws it.
+  // The QR and the code under it are `lobbyWayIn`'s, because which code belongs
+  // there changes with the room and this runs once. The rail's is `wayIn`'s.
 
   describe(snapshot);
 }
+
+/**
+ * Whether a phone pointed at this room's code would get a dugout out of it.
+ *
+ * The one rule both QR codes on this page are drawn from, because they were
+ * drawn from two and disagreed. `join.js` refuses on exactly these three
+ * counts -- kicked off, closed, both dugouts taken -- so a code offered on any
+ * other terms is a code that answers a scan with a refusal.
+ */
+const walkable = (room) =>
+  Boolean(room) && room.status === "lobby" && (room.open_seats || []).length > 0;
 
 /**
  * What this room plays, and whether that is still ours to change.
@@ -240,6 +245,56 @@ function describe(snapshot) {
   for (const mode of ["solo", "versus"]) {
     el(`mode-${mode}`).setAttribute("aria-pressed", String(snapshot.mode === mode));
   }
+  lobbyWayIn(snapshot);
+}
+
+/**
+ * The way in on the lobby card, which is not always a way into *this* room.
+ *
+ * Reported from a venue: every match had finished, and the screen was still a
+ * metre of "Scan to play" over this room's code. The phone that scanned it got
+ * "That room is closed. Scan the code for the next one" -- from the code it had
+ * just scanned. The largest instruction in the hall was the wrong one, and the
+ * only one anybody was following.
+ *
+ * It was drawn once, in `dress`, from the room the page opened with. Nothing
+ * redrew it when that room filled up or ended, because until the screen started
+ * opening its own next lobby there was nothing much after full time to redraw
+ * it for.
+ *
+ * So it follows the room now, on the same rule as the rail: this room's code
+ * while this room can still be walked into, and the venue's the moment it
+ * cannot. The venue's code is `/scan`, which is a door rather than a page --
+ * it sends a manager the arena knows to their own home, where the rooms that
+ * are open are listed and either mode can be opened on the spot, and a stranger
+ * to the form first. That is the correct answer at every moment, which is
+ * exactly what the room's own code stops being at the whistle.
+ */
+function lobbyWayIn(snapshot) {
+  const open = walkable(snapshot);
+  el("join-head").textContent = open ? "Scan to play" : "Scan for the next one";
+  el("join-blurb").textContent = open
+    ? "Your phone becomes the dugout. Talk to the squad; they decide how to play it."
+    : "This room is done. The code opens the venue: whatever is free right now, "
+      + "and a room of your own if nothing is.";
+  // There is no venue code to read out and type -- `/scan` is a QR and nothing
+  // else -- so the line under it goes rather than stands there empty.
+  el("or-code").hidden = !open;
+  if (open) {
+    el("code-2").textContent = snapshot.code;
+    el("join-url").textContent = snapshot.join_url;
+  }
+
+  // Only when it actually changes, for the reason `wayIn` gives: re-setting src
+  // re-fetches the image, and a QR that blinks is one nobody gets their phone
+  // up to in time. This runs on every room message.
+  const want = open ? `room:${snapshot.code}` : "venue";
+  if (el("qr").dataset.showing === want) return;
+  el("qr").dataset.showing = want;
+  const image = document.createElement("img");
+  image.src = open ? `/api/rooms/${snapshot.code}/qr.svg` : "/qr.svg";
+  image.alt = open ? `QR code for room ${snapshot.code}` : "QR code to play here";
+  el("qr").replaceChildren(image);
 }
 
 /**
@@ -782,7 +837,11 @@ function wayIn() {
   el("join-mini").hidden = !showing;
   if (!showing) return;
 
-  const joinable = ours && ours.status === "lobby" && showing !== code;
+  // The same rule the lobby card is drawn from. It used to be its own sentence
+  // here, and it left out the seats: a solo lobby whose one dugout was taken
+  // went on offering its code from the rail, and answered the scan with "both
+  // dugouts are taken".
+  const joinable = walkable(ours) && showing !== code;
   const want = joinable ? `room:${code}` : "venue";
   el("way-in").textContent = joinable ? "Start a match here" : "Scan to play";
   // There is no venue code to read out and type - the sheet on the wall is a

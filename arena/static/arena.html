@@ -61,11 +61,15 @@
       <iframe class="board-frame" id="board" title="The standings" loading="lazy"></iframe>
     </div>
 
+    <!-- The heading, the blurb and the code under the QR all describe whichever
+         code is in it, and that is not always this room's: a room that has
+         finished cannot be walked into, and its own code answers "that room is
+         closed" to anybody who scans it. `lobbyWayIn` swaps all four together. -->
     <aside class="join-card">
-      <h2>Scan to play</h2>
-      <p>Your phone becomes the dugout. Talk to the squad; they decide how to play it.</p>
+      <h2 id="join-head">Scan to play</h2>
+      <p id="join-blurb">Your phone becomes the dugout. Talk to the squad; they decide how to play it.</p>
       <div class="qr" id="qr"></div>
-      <div class="or-code">
+      <div class="or-code" id="or-code">
         <span class="eyebrow">Or open</span>
         <b id="code-2">····</b>
         <em id="join-url">/join</em>

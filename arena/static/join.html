@@ -18,8 +18,8 @@
     <span class="eyebrow" id="mode">Loading</span>
   </div>
 
-  <h1 class="ptitle">Take the dugout</h1>
-  <p class="psub">You manage the squad by talking to them. They decide how to play it.</p>
+  <h1 class="ptitle" id="title">Take the dugout</h1>
+  <p class="psub" id="sub">You manage the squad by talking to them. They decide how to play it.</p>
 
   <p class="problem" id="problem" hidden></p>
 
@@ -56,13 +56,46 @@
     </div>
   </div>
 
-  <div class="field">
+  <div class="field" id="stance">
     <span class="label">Where do you start</span>
     <div class="pills" id="pills"></div>
     <p class="hint" id="blurb">Sets the squad's opening attributes. Change anything you like once the whistle goes.</p>
   </div>
 
   <button class="btn primary push" id="take" type="submit" disabled>Take the dugout</button>
+
+  <!-- Where a refused room leads.
+
+       A phone reaches one for reasons no amount of tidying away removes: a code
+       scanned while the screen still had the last match on it, a photo of that
+       screen, a back button, a tab reopened after lunch. What it used to get was
+       a disabled button and one sentence telling it to scan the code for the
+       next one -- which is the code it had just scanned, and there is no next
+       one to scan until somebody opens it.
+
+       So the page answers the question instead of restating it. Shown in place
+       of the form, because a stance and a Take button over a room nobody can
+       take are two controls that do nothing. -->
+  <div id="onward" hidden>
+    <div id="onward-own" hidden>
+      <span class="eyebrow">Or start your own</span>
+      <div class="modes">
+        <button class="btn ghost" type="button" data-mode="solo">
+          <b>Score attack</b><span>You against the house side</span>
+        </button>
+        <button class="btn ghost" type="button" data-mode="versus">
+          <b>Head to head</b><span>Bring somebody with the code</span>
+        </button>
+      </div>
+    </div>
+    <!-- A manager already in a match gets this instead of the pair above: two
+         rooms held by one person is one lobby abandoned under somebody else. -->
+    <a class="btn primary" id="onward-match" hidden>Back to your match</a>
+    <div class="onward-rest">
+      <a class="btn ghost" href="/board">See the standings</a>
+      <a class="btn ghost" href="/home">Back to home</a>
+    </div>
+  </div>
 </form>
 <script type="module" src="/static/join.js"></script>
 </body>

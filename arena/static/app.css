@@ -607,6 +607,21 @@ a.btn{display:block;text-align:center;text-decoration:none;line-height:1.2}
 }
 .modes .btn:disabled{opacity:.5}
 
+/* The way on from a room that cannot be taken, on the join page.
+
+   `.modes` above is shared rather than copied: it is the same choice the home
+   page offers, and two managers comparing phones should not be reading two
+   different sets of words for it.
+
+   This fills what is left of the page rather than being pushed to the foot in
+   one piece. A refused room leaves almost nothing above it - a title and one
+   line saying what happened - so the whole block sat at the bottom under half a
+   handset of empty background, which reads as a page that failed to load rather
+   than one offering a choice. The offer goes directly under the reason, and
+   only the two ways out keep the foot, where a thumb is. */
+#onward{display:flex;flex-direction:column;gap:12px;flex:1}
+.onward-rest{display:grid;gap:8px;margin-top:auto;padding-top:14px}
+
 /* The card and the one thing you can do to it that is not joining it. Stacked
    rather than beside, because the ask is the secondary move and a thumb going
    for the room must not find it by accident. */
